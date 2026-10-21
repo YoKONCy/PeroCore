@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import type { DocumentNode, DocumentSnapshot } from '@infos/document-engine'
@@ -38,10 +40,30 @@ const settleReview = useReviewMotion(workbenchElement)
 const toolbarTarget = ref<HTMLElement>()
 const fileMenu = ref<HTMLDetailsElement>()
 const ribbonTabs = [
-  { id: 'home', label: '开始' },
-  { id: 'insert', label: '插入' },
-  { id: 'layout', label: '页面' },
-  { id: 'review', label: '审阅' },
+  {
+    id: 'home',
+    get label() {
+      return __t('apps.arca.ui', '开始')
+    },
+  },
+  {
+    id: 'insert',
+    get label() {
+      return __t('apps.arca.ui', '插入')
+    },
+  },
+  {
+    id: 'layout',
+    get label() {
+      return __t('apps.arca.ui', '页面')
+    },
+  },
+  {
+    id: 'review',
+    get label() {
+      return __t('apps.arca.ui', '审阅')
+    },
+  },
 ] as const
 const mode = ref<'create' | 'read' | 'review'>('create')
 const selectedRibbon = computed(() =>
@@ -58,12 +80,24 @@ usePaperMotion(
 )
 useApplicationBusy(computed(() => busy.value || store.collaborationBusy))
 const panelTitles: Record<Panel, string> = {
-  properties: '属性',
-  activity: '协作',
-  review: '待审变更',
-  comments: '评论',
-  revisions: '历史版本',
-  compose: '发起协作',
+  get properties() {
+    return __t('apps.arca.ui', '属性')
+  },
+  get activity() {
+    return __t('apps.arca.ui', '协作')
+  },
+  get review() {
+    return __t('apps.arca.ui', '待审变更')
+  },
+  get comments() {
+    return __t('apps.arca.ui', '评论')
+  },
+  get revisions() {
+    return __t('apps.arca.ui', '历史版本')
+  },
+  get compose() {
+    return __t('apps.arca.ui', '发起协作')
+  },
 }
 const composerTask = ref(''),
   composerScope = ref<'selection' | 'section' | 'document'>('document')
@@ -264,24 +298,40 @@ function taskLabel(status: string) {
   return (
     (
       {
-        queued: '排队中',
-        working: '协作中',
-        completed: '已完成',
-        awaiting_review: '待审阅',
-        committed: '已接受',
-        rejected: '已拒绝',
-        failed: '失败',
-        cancelled: '已取消',
+        get queued() {
+          return __t('apps.arca.ui', '排队中')
+        },
+        get working() {
+          return __t('apps.arca.ui', '协作中')
+        },
+        get completed() {
+          return __t('apps.arca.ui', '已完成')
+        },
+        get awaiting_review() {
+          return __t('apps.arca.ui', '待审阅')
+        },
+        get committed() {
+          return __t('apps.arca.ui', '已接受')
+        },
+        get rejected() {
+          return __t('apps.arca.ui', '已拒绝')
+        },
+        get failed() {
+          return __t('apps.arca.ui', '失败')
+        },
+        get cancelled() {
+          return __t('apps.arca.ui', '已取消')
+        },
       } as Record<string, string>
     )[status] ?? status
   )
 }
 function actorLabel(id: string) {
-  if (id.startsWith('human:')) return '我'
+  if (id.startsWith('human:')) return __t('apps.arca.ui', '我')
   const key = id.replace(/^agent:/, '')
   return (
     store.collaborationAgents.find((agent) => agent.id === key)?.name ??
-    (key === 'arca-local' ? '本地模型' : key)
+    (key === 'arca-local' ? __t('apps.arca.ui', '本地模型') : key)
   )
 }
 const composerActor = computed(() => actorLabel(composerAgentId.value))
@@ -558,27 +608,44 @@ onBeforeRouteLeave(async () => {
 
 <template>
   <main ref="workbenchElement" class="workbench" :class="{ 'focus-mode': store.focusMode }">
-    <nav ref="menuBar" class="workbench-menubar" aria-label="文稿工具" :inert="busy">
+    <nav
+      ref="menuBar"
+      class="workbench-menubar"
+      :aria-label="__t('apps.arca.ui', '文稿工具')"
+      :inert="busy"
+    >
       <details ref="fileMenu" class="editor-file-menu workbench-file-menu">
-        <summary>文件</summary>
+        <summary>{{ __t('apps.arca.ui', '文件') }}</summary>
         <div class="context-menu" @click="closeFileMenu">
-          <button type="button" @click="router.push('/')">文稿库</button>
-          <button type="button" @click="router.push({ name: 'home', query: { new: '1' } })">
-            新建文稿
+          <button type="button" @click="router.push('/')">
+            {{ __t('apps.arca.ui', '文稿库') }}
           </button>
-          <button type="button" @click="openRename">重命名</button>
+          <button type="button" @click="router.push({ name: 'home', query: { new: '1' } })">
+            {{ __t('apps.arca.ui', '新建文稿') }}
+          </button>
+          <button type="button" @click="openRename">{{ __t('apps.arca.ui', '重命名') }}</button>
           <hr />
-          <button type="button" @click="officeEditor?.preview()">预览与打印</button>
-          <button type="button" @click="officeEditor?.preview(true)">导出 HTML</button>
-          <button type="button" @click="exportProject">导出工程</button>
-          <button type="button" @click="packageInput?.click()">打开工程</button>
-          <button type="button" @click="officeEditor?.backup()">备份</button>
+          <button type="button" @click="officeEditor?.preview()">
+            {{ __t('apps.arca.ui', '预览与打印') }}
+          </button>
+          <button type="button" @click="officeEditor?.preview(true)">
+            {{ __t('apps.arca.ui', '导出 HTML') }}
+          </button>
+          <button type="button" @click="exportProject">
+            {{ __t('apps.arca.ui', '导出工程') }}
+          </button>
+          <button type="button" @click="packageInput?.click()">
+            {{ __t('apps.arca.ui', '打开工程') }}
+          </button>
+          <button type="button" @click="officeEditor?.backup()">
+            {{ __t('apps.arca.ui', '备份') }}
+          </button>
           <button
             v-if="officeEditor?.session?.hasChanges"
             type="button"
             @click="officeEditor?.saveCopy()"
           >
-            另存副本
+            {{ __t('apps.arca.ui', '另存副本') }}
           </button>
         </div>
       </details>
@@ -607,13 +674,13 @@ onBeforeRouteLeave(async () => {
         @click="openComposer()"
       >
         <ArcaIcon name="sparkle" :size="16" />
-        协作
+        {{ __t('apps.arca.ui', '协作') }}
       </button>
       <button
         class="icon-button"
         type="button"
-        title="评论"
-        aria-label="评论"
+        :title="__t('apps.arca.ui', '评论')"
+        :aria-label="__t('apps.arca.ui', '评论')"
         :aria-pressed="panel === 'comments'"
         @click="togglePanel('comments')"
       >
@@ -621,22 +688,40 @@ onBeforeRouteLeave(async () => {
       </button>
       <details class="editor-file-menu workbench-view-menu">
         <summary>
-          {{ mode === 'create' ? '编辑' : mode === 'read' ? '阅读' : '审阅' }}
+          {{
+            mode === 'create'
+              ? __t('apps.arca.ui', '编辑')
+              : mode === 'read'
+                ? __t('apps.arca.ui', '阅读')
+                : __t('apps.arca.ui', '审阅')
+          }}
           <ArcaIcon name="chevron" :size="11" />
         </summary>
         <div class="context-menu">
-          <button type="button" @click="switchMode('create')">编辑</button>
-          <button type="button" @click="switchMode('read')">阅读</button>
+          <button type="button" @click="switchMode('create')">
+            {{ __t('apps.arca.ui', '编辑') }}
+          </button>
+          <button type="button" @click="switchMode('read')">
+            {{ __t('apps.arca.ui', '阅读') }}
+          </button>
           <button type="button" @click="switchMode('review')">
-            待审修改 {{ reviewCount || '' }}
+            {{ __t('apps.arca.ui', '待审修改') }} {{ reviewCount || '' }}
           </button>
           <hr />
-          <button type="button" @click="togglePanel('properties')">属性</button>
-          <button type="button" @click="togglePanel('activity')">协作活动</button>
-          <button type="button" @click="togglePanel('revisions')">历史版本</button>
-          <button type="button" @click="store.toggleNavigator('documents')">切换文稿</button>
+          <button type="button" @click="togglePanel('properties')">
+            {{ __t('apps.arca.ui', '属性') }}
+          </button>
+          <button type="button" @click="togglePanel('activity')">
+            {{ __t('apps.arca.ui', '协作活动') }}
+          </button>
+          <button type="button" @click="togglePanel('revisions')">
+            {{ __t('apps.arca.ui', '历史版本') }}
+          </button>
+          <button type="button" @click="store.toggleNavigator('documents')">
+            {{ __t('apps.arca.ui', '切换文稿') }}
+          </button>
           <button type="button" @click="store.toggleFocusMode()">
-            {{ store.focusMode ? '退出专注' : '专注' }}
+            {{ store.focusMode ? __t('apps.arca.ui', '退出专注') : __t('apps.arca.ui', '专注') }}
           </button>
         </div>
       </details>
@@ -645,23 +730,35 @@ onBeforeRouteLeave(async () => {
     <div v-if="mode === 'review'" class="review-commandbar">
       <button type="button" @click="togglePanel('review')">
         <ArcaIcon name="compare" :size="16" />
-        待审修改
+        {{ __t('apps.arca.ui', '待审修改') }}
         <span v-if="reviewCount">{{ reviewCount }}</span>
       </button>
       <button type="button" @click="togglePanel('revisions')">
         <ArcaIcon name="clock" :size="16" />
-        历史版本
+        {{ __t('apps.arca.ui', '历史版本') }}
       </button>
       <span class="toolbar-spacer" />
-      <button type="button" @click="switchMode('create')">返回编辑</button>
+      <button type="button" @click="switchMode('create')">
+        {{ __t('apps.arca.ui', '返回编辑') }}
+      </button>
     </div>
 
     <div class="workbench-body">
       <Transition name="navigator" @before-enter="activateSurface" @before-leave="retireSurface">
         <aside v-if="store.activeNavigator && !store.focusMode && !panel" class="navigation-panel">
           <header class="panel-heading">
-            <h2>{{ store.activeNavigator === 'documents' ? '文稿' : '大纲' }}</h2>
-            <button class="icon-button" aria-label="收起导航" @click="store.activeNavigator = null">
+            <h2>
+              {{
+                store.activeNavigator === 'documents'
+                  ? __t('apps.arca.ui', '文稿')
+                  : __t('apps.arca.ui', '大纲')
+              }}
+            </h2>
+            <button
+              class="icon-button"
+              :aria-label="__t('apps.arca.ui', '收起导航')"
+              @click="store.activeNavigator = null"
+            >
               <ArcaIcon name="close" :size="16" />
             </button>
           </header>
@@ -686,7 +783,7 @@ onBeforeRouteLeave(async () => {
                 @select="scrollToNode"
               />
               <p v-if="!store.activeDocument?.outline.content.length" class="panel-empty">
-                暂无标题
+                {{ __t('apps.arca.ui', '暂无标题') }}
               </p>
             </template>
           </div>
@@ -716,8 +813,9 @@ onBeforeRouteLeave(async () => {
               <span>
                 {{
                   store.selectedChangeSet
-                    ? actorLabel(store.selectedChangeSet.actorPrincipalId) + ' 的修改'
-                    : '审阅'
+                    ? actorLabel(store.selectedChangeSet.actorPrincipalId) +
+                      __t('apps.arca.ui', ' 的修改')
+                    : __t('apps.arca.ui', '审阅')
                 }}
               </span>
               <span class="toolbar-spacer" />
@@ -727,27 +825,43 @@ onBeforeRouteLeave(async () => {
                   :class="{ active: showReviewChanges }"
                   @click="showReviewChanges = true"
                 >
-                  显示改动
+                  {{ __t('apps.arca.ui', '显示改动') }}
                 </button>
                 <button
                   :aria-pressed="!showReviewChanges"
                   :class="{ active: !showReviewChanges }"
                   @click="showReviewChanges = false"
                 >
-                  修改后
+                  {{ __t('apps.arca.ui', '修改后') }}
                 </button>
               </div>
               <details class="editor-file-menu">
-                <summary>{{ reviewView === 'text' ? '正文' : '排版' }}</summary>
+                <summary>
+                  {{
+                    reviewView === 'text'
+                      ? __t('apps.arca.ui', '正文')
+                      : __t('apps.arca.ui', '排版')
+                  }}
+                </summary>
                 <div class="context-menu">
-                  <button @click="reviewView = 'text'">正文改动</button>
-                  <button @click="reviewView = 'layout'">排版对照</button>
+                  <button @click="reviewView = 'text'">
+                    {{ __t('apps.arca.ui', '正文改动') }}
+                  </button>
+                  <button @click="reviewView = 'layout'">
+                    {{ __t('apps.arca.ui', '排版对照') }}
+                  </button>
                 </div>
               </details>
             </header>
             <div v-if="!store.selectedChangeSet" class="surface-empty">
               <ArcaIcon name="check" :size="32" />
-              <strong>{{ reviewCount ? '选择一项变更' : '暂无待审变更' }}</strong>
+              <strong>
+                {{
+                  reviewCount
+                    ? __t('apps.arca.ui', '选择一项变更')
+                    : __t('apps.arca.ui', '暂无待审变更')
+                }}
+              </strong>
             </div>
             <template v-else-if="reviewView === 'text'">
               <DocumentReview
@@ -756,7 +870,9 @@ onBeforeRouteLeave(async () => {
                 :diff="store.semanticDiff"
                 :show-changes="showReviewChanges"
               />
-              <p v-else class="panel-empty">{{ reviewPreviewError || '正在读取原文…' }}</p>
+              <p v-else class="panel-empty">
+                {{ reviewPreviewError || __t('apps.arca.ui', '正在读取原文…') }}
+              </p>
               <button
                 v-if="
                   store.semanticDiff &&
@@ -768,33 +884,49 @@ onBeforeRouteLeave(async () => {
                 class="review-layout-hint"
                 @click="reviewView = 'layout'"
               >
-                查看结构与排版变化
+                {{ __t('apps.arca.ui', '查看结构与排版变化') }}
                 <ArcaIcon name="arrow" :size="14" />
               </button>
             </template>
             <div v-else-if="reviewPreview" class="layout-diff">
               <section>
-                <h3>修改前</h3>
-                <iframe title="修改前" sandbox="" :srcdoc="reviewPreview.before" />
+                <h3>{{ __t('apps.arca.ui', '修改前') }}</h3>
+                <iframe
+                  :title="__t('apps.arca.ui', '修改前')"
+                  sandbox=""
+                  :srcdoc="reviewPreview.before"
+                />
               </section>
               <section>
-                <h3>修改后</h3>
-                <iframe title="修改后" sandbox="" :srcdoc="reviewPreview.after" />
+                <h3>{{ __t('apps.arca.ui', '修改后') }}</h3>
+                <iframe
+                  :title="__t('apps.arca.ui', '修改后')"
+                  sandbox=""
+                  :srcdoc="reviewPreview.after"
+                />
               </section>
             </div>
-            <p v-else class="panel-empty">{{ reviewPreviewError || '正在读取预览…' }}</p>
+            <p v-else class="panel-empty">
+              {{ reviewPreviewError || __t('apps.arca.ui', '正在读取预览…') }}
+            </p>
           </section>
         </template>
         <div v-else class="surface-empty">
-          <strong>未打开文稿</strong>
-          <button class="primary-button" @click="router.push('/')">返回文稿列表</button>
+          <strong>{{ __t('apps.arca.ui', '未打开文稿') }}</strong>
+          <button class="primary-button" @click="router.push('/')">
+            {{ __t('apps.arca.ui', '返回文稿列表') }}
+          </button>
         </div>
       </section>
       <Transition name="inspector" @before-enter="activateSurface" @before-leave="retireSurface">
         <aside v-if="panel && !store.focusMode" class="inspector-panel">
           <header class="panel-heading">
             <h2>{{ panelTitles[panel] }}</h2>
-            <button class="icon-button" aria-label="收起面板" @click="panel = null">
+            <button
+              class="icon-button"
+              :aria-label="__t('apps.arca.ui', '收起面板')"
+              @click="panel = null"
+            >
               <ArcaIcon name="close" :size="16" />
             </button>
           </header>
@@ -803,22 +935,22 @@ onBeforeRouteLeave(async () => {
               <template v-if="panel === 'properties'">
                 <div v-if="propertyNode && canEdit" class="form-stack">
                   <label>
-                    对齐
+                    {{ __t('apps.arca.ui', '对齐') }}
                     <ArcaSelect
-                      aria-label="对齐"
+                      :aria-label="__t('apps.arca.ui', '对齐')"
                       :model-value="String(propertyNode.attributes.align ?? 'left')"
                       :options="[
-                        { value: 'left', label: '左对齐' },
-                        { value: 'center', label: '居中' },
-                        { value: 'right', label: '右对齐' },
-                        { value: 'justify', label: '两端对齐' },
+                        { value: 'left', label: __t('apps.arca.ui', '左对齐') },
+                        { value: 'center', label: __t('apps.arca.ui', '居中') },
+                        { value: 'right', label: __t('apps.arca.ui', '右对齐') },
+                        { value: 'justify', label: __t('apps.arca.ui', '两端对齐') },
                       ]"
                       @change="(value) => officeEditor?.attributes({ align: String(value) })"
                     />
                   </label>
                   <template v-if="propertyNode.type === 'asset'">
                     <label>
-                      替代文本
+                      {{ __t('apps.arca.ui', '替代文本') }}
                       <input
                         :value="propertyNode.attributes.alt"
                         @change="
@@ -829,7 +961,7 @@ onBeforeRouteLeave(async () => {
                       />
                     </label>
                     <label>
-                      图注
+                      {{ __t('apps.arca.ui', '图注') }}
                       <input
                         :value="propertyNode.attributes.caption"
                         @change="
@@ -840,7 +972,7 @@ onBeforeRouteLeave(async () => {
                       />
                     </label>
                     <label>
-                      宽度（px）
+                      {{ __t('apps.arca.ui', '宽度（px）') }}
                       <input
                         type="number"
                         min="24"
@@ -859,11 +991,13 @@ onBeforeRouteLeave(async () => {
                         "
                       />
                     </label>
-                    <button @click="officeEditor?.chooseImage()">替换图片</button>
+                    <button @click="officeEditor?.chooseImage()">
+                      {{ __t('apps.arca.ui', '替换图片') }}
+                    </button>
                   </template>
                   <template v-else>
                     <label>
-                      行距
+                      {{ __t('apps.arca.ui', '行距') }}
                       <input
                         type="number"
                         min="1"
@@ -881,7 +1015,7 @@ onBeforeRouteLeave(async () => {
                       />
                     </label>
                     <label>
-                      缩进
+                      {{ __t('apps.arca.ui', '缩进') }}
                       <input
                         type="number"
                         min="0"
@@ -900,7 +1034,7 @@ onBeforeRouteLeave(async () => {
                   </template>
                   <template v-if="officeEditor?.cell">
                     <label>
-                      列宽（px）
+                      {{ __t('apps.arca.ui', '列宽（px）') }}
                       <input
                         type="number"
                         min="24"
@@ -920,10 +1054,10 @@ onBeforeRouteLeave(async () => {
                         })
                       "
                     >
-                      切换表头
+                      {{ __t('apps.arca.ui', '切换表头') }}
                     </button>
                     <label>
-                      边框颜色
+                      {{ __t('apps.arca.ui', '边框颜色') }}
                       <input
                         type="color"
                         :value="propertyNode.attributes.borderColor ?? '#b4b4b4'"
@@ -943,12 +1077,16 @@ onBeforeRouteLeave(async () => {
                         })
                       "
                     >
-                      切换边框
+                      {{ __t('apps.arca.ui', '切换边框') }}
                     </button>
                   </template>
                 </div>
                 <p v-else class="panel-empty">
-                  {{ canEdit ? '选择正文中的内容' : '切换到编辑模式以设置属性' }}
+                  {{
+                    canEdit
+                      ? __t('apps.arca.ui', '选择正文中的内容')
+                      : __t('apps.arca.ui', '切换到编辑模式以设置属性')
+                  }}
                 </p>
               </template>
               <form
@@ -958,17 +1096,21 @@ onBeforeRouteLeave(async () => {
               >
                 <div class="collaborator-heading">
                   <label>
-                    <span>协作者</span>
+                    <span>{{ __t('apps.arca.ui', '协作者') }}</span>
                     <ArcaSelect
                       v-model="composerAgentId"
-                      aria-label="协作者"
+                      :aria-label="__t('apps.arca.ui', '协作者')"
                       :options="collaboratorOptions"
                     />
                   </label>
                 </div>
                 <div>
-                  <span class="field-caption">范围</span>
-                  <div class="scope-switch" role="group" aria-label="协作范围">
+                  <span class="field-caption">{{ __t('apps.arca.ui', '范围') }}</span>
+                  <div
+                    class="scope-switch"
+                    role="group"
+                    :aria-label="__t('apps.arca.ui', '协作范围')"
+                  >
                     <button
                       type="button"
                       :aria-pressed="composerScope === 'selection'"
@@ -979,7 +1121,7 @@ onBeforeRouteLeave(async () => {
                       "
                       @click="composerScope = 'selection'"
                     >
-                      选区
+                      {{ __t('apps.arca.ui', '选区') }}
                     </button>
                     <button
                       type="button"
@@ -987,46 +1129,59 @@ onBeforeRouteLeave(async () => {
                       :disabled="!composerNodeId"
                       @click="composerScope = 'section'"
                     >
-                      章节
+                      {{ __t('apps.arca.ui', '章节') }}
                     </button>
                     <button
                       type="button"
                       :aria-pressed="composerScope === 'document'"
                       @click="composerScope = 'document'"
                     >
-                      全文
+                      {{ __t('apps.arca.ui', '全文') }}
                     </button>
                   </div>
                 </div>
                 <label>
-                  修改要求
-                  <textarea v-model="composerTask" rows="5" placeholder="希望如何修改？" required />
+                  {{ __t('apps.arca.ui', '修改要求') }}
+                  <textarea
+                    v-model="composerTask"
+                    rows="5"
+                    :placeholder="__t('apps.arca.ui', '希望如何修改？')"
+                    required
+                  />
                 </label>
                 <div class="collaboration-shortcuts">
                   <button
                     type="button"
-                    @click="composerTask = '润色文字，保留原有语气与关键信息。'"
+                    @click="
+                      composerTask = __t('apps.arca.ui', '润色文字，保留原有语气与关键信息。')
+                    "
                   >
-                    润色
+                    {{ __t('apps.arca.ui', '润色') }}
                   </button>
-                  <button type="button" @click="composerTask = '精简表述，保留原意与关键信息。'">
-                    精简
+                  <button
+                    type="button"
+                    @click="composerTask = __t('apps.arca.ui', '精简表述，保留原意与关键信息。')"
+                  >
+                    {{ __t('apps.arca.ui', '精简') }}
                   </button>
-                  <button type="button" @click="composerTask = '整理结构，让重点更清楚。'">
-                    整理结构
+                  <button
+                    type="button"
+                    @click="composerTask = __t('apps.arca.ui', '整理结构，让重点更清楚。')"
+                  >
+                    {{ __t('apps.arca.ui', '整理结构') }}
                   </button>
                 </div>
                 <details class="composer-extra">
-                  <summary>附加要求</summary>
+                  <summary>{{ __t('apps.arca.ui', '附加要求') }}</summary>
                   <textarea
                     v-model="composerRequirements"
                     rows="3"
-                    aria-label="附加要求"
-                    placeholder="可选"
+                    :aria-label="__t('apps.arca.ui', '附加要求')"
+                    :placeholder="__t('apps.arca.ui', '可选')"
                   />
                 </details>
                 <p v-if="!store.collaborationAvailable" class="form-error">
-                  协作暂不可用，请检查连接与模型设置。
+                  {{ __t('apps.arca.ui', '协作暂不可用，请检查连接与模型设置。') }}
                 </p>
                 <p v-if="composerError" class="form-error" role="alert">{{ composerError }}</p>
                 <button
@@ -1041,10 +1196,10 @@ onBeforeRouteLeave(async () => {
                 >
                   {{
                     store.collaborationBusy
-                      ? '提交中…'
+                      ? __t('apps.arca.ui', '提交中…')
                       : composerActor
-                        ? '交给 ' + composerActor
-                        : '开始协作'
+                        ? __t('apps.arca.ui', '交给 ') + composerActor
+                        : __t('apps.arca.ui', '开始协作')
                   }}
                   <ArcaIcon name="arrow" :size="15" />
                 </button>
@@ -1059,7 +1214,7 @@ onBeforeRouteLeave(async () => {
                   type="button"
                   @click="panel = 'activity'"
                 >
-                  协作活动
+                  {{ __t('apps.arca.ui', '协作活动') }}
                   <ArcaIcon name="chevron" :size="13" />
                 </button>
               </form>
@@ -1070,7 +1225,7 @@ onBeforeRouteLeave(async () => {
                   @click="openComposer()"
                 >
                   <ArcaIcon name="plus" :size="16" />
-                  发起协作
+                  {{ __t('apps.arca.ui', '发起协作') }}
                 </button>
                 <article
                   v-for="task in store.collaborationTasks"
@@ -1094,14 +1249,14 @@ onBeforeRouteLeave(async () => {
                       :disabled="busy"
                       @click="selectChangeSet(task.changeSetId)"
                     >
-                      审阅
+                      {{ __t('apps.arca.ui', '审阅') }}
                     </button>
                     <button
                       v-if="['queued', 'working'].includes(task.status)"
                       :disabled="busy"
                       @click="perform(() => store.cancelCollaborationTask(task.taskId))"
                     >
-                      取消
+                      {{ __t('apps.arca.ui', '取消') }}
                     </button>
                     <button
                       v-if="
@@ -1110,11 +1265,13 @@ onBeforeRouteLeave(async () => {
                       :disabled="busy"
                       @click="perform(() => store.retryCollaborationTask(task.taskId))"
                     >
-                      重试
+                      {{ __t('apps.arca.ui', '重试') }}
                     </button>
                   </div>
                 </article>
-                <p v-if="!store.collaborationTasks.length" class="panel-empty">暂无协作任务</p>
+                <p v-if="!store.collaborationTasks.length" class="panel-empty">
+                  {{ __t('apps.arca.ui', '暂无协作任务') }}
+                </p>
               </template>
               <template v-else-if="panel === 'review'">
                 <section v-if="store.selectedChangeSet" class="review-decision form-stack">
@@ -1126,24 +1283,29 @@ onBeforeRouteLeave(async () => {
                     <div>
                       <strong>{{ actorLabel(store.selectedChangeSet.actorPrincipalId) }}</strong>
                       <small>
-                        {{ store.semanticDiff?.summary.changedTextNodes ?? 0 }} 处文本修改
+                        {{ store.semanticDiff?.summary.changedTextNodes ?? 0 }}
+                        {{ __t('apps.arca.ui', '处文本修改') }}
                       </small>
                     </div>
                   </div>
                   <div class="review-intent">
                     <h3>{{ store.selectedChangeSet.intent }}</h3>
-                    <span>待审阅</span>
+                    <span>{{ __t('apps.arca.ui', '待审阅') }}</span>
                   </div>
                   <p>{{ store.selectedChangeSet.explanation }}</p>
                   <p
                     v-if="store.selectedChangeSet.baseRevisionId !== activeSnapshot?.revisionId"
                     class="form-error"
                   >
-                    文稿已更新，请重新发起协作。
+                    {{ __t('apps.arca.ui', '文稿已更新，请重新发起协作。') }}
                   </p>
                   <label>
-                    审阅意见
-                    <textarea v-model="reviewMessage" rows="4" placeholder="添加意见" />
+                    {{ __t('apps.arca.ui', '审阅意见') }}
+                    <textarea
+                      v-model="reviewMessage"
+                      rows="4"
+                      :placeholder="__t('apps.arca.ui', '添加意见')"
+                    />
                   </label>
                   <button
                     class="primary-button"
@@ -1155,23 +1317,31 @@ onBeforeRouteLeave(async () => {
                     @click="review('approve')"
                   >
                     <ArcaIcon name="check" :size="16" />
-                    接受修改
+                    {{ __t('apps.arca.ui', '接受修改') }}
                   </button>
                   <div class="review-other-actions">
                     <button
                       :disabled="busy || !reviewMessage.trim()"
                       @click="review('request_changes')"
                     >
-                      要求调整
+                      {{ __t('apps.arca.ui', '要求调整') }}
                     </button>
-                    <button :disabled="busy" @click="review('reject')">拒绝</button>
+                    <button :disabled="busy" @click="review('reject')">
+                      {{ __t('apps.arca.ui', '拒绝') }}
+                    </button>
                   </div>
                 </section>
                 <div
                   v-if="store.pendingChangeSets.length > (store.selectedChangeSet ? 1 : 0)"
                   class="proposal-list"
                 >
-                  <h3>{{ store.selectedChangeSet ? '其他修改' : '待审修改' }}</h3>
+                  <h3>
+                    {{
+                      store.selectedChangeSet
+                        ? __t('apps.arca.ui', '其他修改')
+                        : __t('apps.arca.ui', '待审修改')
+                    }}
+                  </h3>
                   <button
                     v-for="changeSet in store.pendingChangeSets.filter(
                       (item) => item.changeSetId !== store.selectedChangeSet?.changeSetId,
@@ -1185,7 +1355,9 @@ onBeforeRouteLeave(async () => {
                     <small>{{ actorLabel(changeSet.actorPrincipalId) }}</small>
                   </button>
                 </div>
-                <p v-else-if="!reviewCount" class="panel-empty">暂无待审变更</p>
+                <p v-else-if="!reviewCount" class="panel-empty">
+                  {{ __t('apps.arca.ui', '暂无待审变更') }}
+                </p>
               </template>
               <template v-else-if="panel === 'comments'">
                 <form
@@ -1196,15 +1368,17 @@ onBeforeRouteLeave(async () => {
                   <blockquote>{{ commentNode.text?.slice(0, 100) }}</blockquote>
                   <textarea
                     v-model="commentBody"
-                    aria-label="评论内容"
+                    :aria-label="__t('apps.arca.ui', '评论内容')"
                     rows="3"
-                    placeholder="添加评论"
+                    :placeholder="__t('apps.arca.ui', '添加评论')"
                     required
                   />
                   <div class="card-actions">
-                    <button type="button" @click="commentNode = undefined">取消</button>
+                    <button type="button" @click="commentNode = undefined">
+                      {{ __t('apps.arca.ui', '取消') }}
+                    </button>
                     <button class="primary-button" :disabled="busy || !commentBody.trim()">
-                      发送
+                      {{ __t('apps.arca.ui', '发送') }}
                     </button>
                   </div>
                 </form>
@@ -1215,12 +1389,18 @@ onBeforeRouteLeave(async () => {
                 >
                   <div class="card-meta">
                     <strong>{{ actorLabel(comment.authorPrincipalId) }}</strong>
-                    <small>{{ comment.status === 'open' ? '待解决' : '已解决' }}</small>
+                    <small>
+                      {{
+                        comment.status === 'open'
+                          ? __t('apps.arca.ui', '待解决')
+                          : __t('apps.arca.ui', '已解决')
+                      }}
+                    </small>
                   </div>
                   <blockquote v-if="comment.anchor">{{ comment.anchor.quote }}</blockquote>
                   <p>{{ comment.body }}</p>
                   <small v-if="comment.anchorState && comment.anchorState !== 'attached'">
-                    原文位置已变化
+                    {{ __t('apps.arca.ui', '原文位置已变化') }}
                   </small>
                   <div class="card-actions">
                     <button
@@ -1228,11 +1408,13 @@ onBeforeRouteLeave(async () => {
                       :disabled="busy"
                       @click="perform(() => store.resolveComment(comment.commentId))"
                     >
-                      标记解决
+                      {{ __t('apps.arca.ui', '标记解决') }}
                     </button>
                   </div>
                 </article>
-                <p v-if="!store.comments.length && !commentNode" class="panel-empty">暂无评论</p>
+                <p v-if="!store.comments.length && !commentNode" class="panel-empty">
+                  {{ __t('apps.arca.ui', '暂无评论') }}
+                </p>
               </template>
               <template v-else-if="panel === 'revisions'">
                 <article
@@ -1241,16 +1423,16 @@ onBeforeRouteLeave(async () => {
                   class="panel-card"
                 >
                   <div class="card-meta">
-                    <strong>版本 {{ entry.revision.sequence }}</strong>
+                    <strong>{{ __t('apps.arca.ui', '版本') }} {{ entry.revision.sequence }}</strong>
                     <span v-if="entry.revision.revisionId === activeSnapshot?.revisionId">
-                      当前版本
+                      {{ __t('apps.arca.ui', '当前版本') }}
                     </span>
                   </div>
                   <p>{{ entry.revision.intent }}</p>
                   <small>{{ displayTime(entry.revision.committedAt) }}</small>
                   <div v-if="entry.restorable !== false" class="card-actions">
                     <button :disabled="busy" @click="previewRevision(entry.revision.revisionId)">
-                      查看
+                      {{ __t('apps.arca.ui', '查看') }}
                     </button>
                     <button
                       v-if="entry.revision.revisionId !== activeSnapshot?.revisionId"
@@ -1261,12 +1443,14 @@ onBeforeRouteLeave(async () => {
                       "
                       @click="restoreId = entry.revision.revisionId"
                     >
-                      恢复此版本
+                      {{ __t('apps.arca.ui', '恢复此版本') }}
                     </button>
                   </div>
-                  <small v-else>无预览快照</small>
+                  <small v-else>{{ __t('apps.arca.ui', '无预览快照') }}</small>
                 </article>
-                <p v-if="!store.revisions.length" class="panel-empty">暂无历史版本</p>
+                <p v-if="!store.revisions.length" class="panel-empty">
+                  {{ __t('apps.arca.ui', '暂无历史版本') }}
+                </p>
               </template>
             </div>
           </div>
@@ -1274,13 +1458,19 @@ onBeforeRouteLeave(async () => {
       </Transition>
     </div>
     <footer class="workbench-status">
-      <span>{{ store.wordCount }} 字符</span>
-      <button v-if="reviewCount" @click="switchMode('review')">{{ reviewCount }} 项待审</button>
+      <span>{{ store.wordCount }} {{ __t('apps.arca.ui', '字符') }}</span>
+      <button v-if="reviewCount" @click="switchMode('review')">
+        {{ reviewCount }} {{ __t('apps.arca.ui', '项待审') }}
+      </button>
       <span class="operation-receipt" role="status" aria-live="polite">{{ reviewFeedback }}</span>
       <span class="toolbar-spacer" />
       <template v-if="mode !== 'review'">
         <button @click="officeEditor?.toggleView()">
-          {{ officeEditor?.viewMode === 'continuous' ? '连续视图' : '页面视图' }}
+          {{
+            officeEditor?.viewMode === 'continuous'
+              ? __t('apps.arca.ui', '连续视图')
+              : __t('apps.arca.ui', '页面视图')
+          }}
         </button>
         <label class="zoom-control">
           <input
@@ -1288,7 +1478,7 @@ onBeforeRouteLeave(async () => {
             min="50"
             max="150"
             step="10"
-            aria-label="缩放"
+            :aria-label="__t('apps.arca.ui', '缩放')"
             :value="officeEditor?.zoom ?? 100"
             @input="officeEditor?.setZoom(Number(($event.target as HTMLInputElement).value))"
           />
@@ -1297,45 +1487,61 @@ onBeforeRouteLeave(async () => {
       </template>
       <ConnectionBadge />
     </footer>
-    <ArcaDialog :open="renameOpen" title="重命名" :busy="busy" @close="renameOpen = false">
+    <ArcaDialog
+      :open="renameOpen"
+      :title="__t('apps.arca.ui', '重命名')"
+      :busy="busy"
+      @close="renameOpen = false"
+    >
       <form id="arca-rename" class="form-stack" @submit.prevent="rename">
         <label>
-          名称
+          {{ __t('apps.arca.ui', '名称') }}
           <input v-model="renameTitle" maxlength="120" required />
         </label>
         <p v-if="renameError" class="form-error">{{ renameError }}</p>
       </form>
       <template #footer>
-        <button :disabled="busy" @click="renameOpen = false">取消</button>
+        <button :disabled="busy" @click="renameOpen = false">
+          {{ __t('apps.arca.ui', '取消') }}
+        </button>
         <button
           class="primary-button"
           type="submit"
           form="arca-rename"
           :disabled="busy || !renameTitle.trim()"
         >
-          保存
+          {{ __t('apps.arca.ui', '保存') }}
         </button>
       </template>
     </ArcaDialog>
     <ArcaDialog
       :open="Boolean(restoreId)"
-      title="恢复此版本？"
+      :title="__t('apps.arca.ui', '恢复此版本？')"
       :busy="busy"
       @close="restoreId = undefined"
     >
-      <p>当前内容仍保留在历史版本中。</p>
+      <p>{{ __t('apps.arca.ui', '当前内容仍保留在历史版本中。') }}</p>
       <template #footer>
-        <button :disabled="busy" @click="restoreId = undefined">取消</button>
-        <button class="primary-button" :disabled="busy" @click="restoreRevision">恢复</button>
+        <button :disabled="busy" @click="restoreId = undefined">
+          {{ __t('apps.arca.ui', '取消') }}
+        </button>
+        <button class="primary-button" :disabled="busy" @click="restoreRevision">
+          {{ __t('apps.arca.ui', '恢复') }}
+        </button>
       </template>
     </ArcaDialog>
     <ArcaDialog
       :open="Boolean(historicalPreview)"
-      title="历史版本"
+      :title="__t('apps.arca.ui', '历史版本')"
       wide
       @close="historicalPreview = ''"
     >
-      <iframe class="history-preview" title="历史版本预览" sandbox="" :srcdoc="historicalPreview" />
+      <iframe
+        class="history-preview"
+        :title="__t('apps.arca.ui', '历史版本预览')"
+        sandbox=""
+        :srcdoc="historicalPreview"
+      />
     </ArcaDialog>
     <input ref="packageInput" type="file" accept=".arca" hidden @change="importSelected" />
   </main>

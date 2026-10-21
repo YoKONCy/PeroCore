@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import PetHudIcon from './PetHudIcon.vue'
 
 defineProps<{
@@ -30,7 +32,7 @@ const emit = defineEmits<{ (event: 'select'): void }>()
         <PetHudIcon :name="loading ? 'thought' : 'check'" size="xs" />
       </span>
     </span>
-    <span class="model-name">{{ loading ? '换装中…' : name }}</span>
+    <span class="model-name">{{ loading ? __t('ui.pet', '换装中…') : name }}</span>
   </button>
 </template>
 

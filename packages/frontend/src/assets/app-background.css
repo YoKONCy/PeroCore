@@ -1,3 +1,42 @@
+/* 无底图时，主页面共用粉紫渐变与淡斜纹；只装饰页面承托面，不改变阅读卡片和代码主题。 */
+.main-view-root:not([data-app-background='active']) {
+  --app-default-surface:
+    repeating-linear-gradient(
+      45deg,
+      transparent 0,
+      transparent 14px,
+      var(--convo-texture-line) 14px,
+      var(--convo-texture-line) 15px
+    ),
+    radial-gradient(ellipse at 82% 8%, var(--convo-air-top) 0%, transparent 58%),
+    radial-gradient(ellipse at 4% 92%, var(--convo-air-bottom) 0%, transparent 58%),
+    var(--convo-paper-tint);
+}
+.main-view-root:not([data-app-background='active']) .main-home-surface .main-content,
+.main-view-root:not([data-app-background='active']) .main-content .main-tab-content,
+.main-view-root:not([data-app-background='active'])
+  .main-tab-content
+  :is(.chat-main, .sh-main, .workspace-center, .workspace-copilot, .atlas-workspace) {
+  background: var(--app-default-surface);
+}
+
+/* 实色内层与旧装饰让位于统一底板，避免叠加纹理或遮住渐变。 */
+.main-view-root:not([data-app-background='active']) .main-home-surface .main-content::before,
+.main-view-root:not([data-app-background='active']) .main-home-surface .main-content::after,
+.main-view-root:not([data-app-background='active']) .main-tab-content .chat-main::before,
+.main-view-root:not([data-app-background='active']) .main-tab-content .chat-main::after {
+  display: none;
+}
+.main-view-root:not([data-app-background='active'])
+  .workspace-tab
+  :is(.editor-area, .copilot-chat) {
+  background: transparent;
+}
+/* 社交页的旧暗色兜底带有强制填色，此处仅替换页面底板。 */
+.main-view-root:not([data-app-background='active']) .main-content .social-panel {
+  background: var(--app-default-surface) !important;
+}
+
 /**
  * 仅主应用启用背景时改变材质，不改主题基色、像素轮廓和品牌强调色。
  * 底图只绘制一次；导航透景、卡片承托、正文保读。独立网页视图不在此作用域。
@@ -67,6 +106,7 @@
   .main-tab-content
   :is(
     .chat-panel,
+    .chat-main,
     .stronghold-panel,
     .workspace-panel,
     .workspace-center,

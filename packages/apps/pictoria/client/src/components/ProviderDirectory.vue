@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import type { ModelProvider, ProviderDirectory } from '../types'
 import { pictoria } from '../services/transport'
@@ -175,7 +177,7 @@ onBeforeUnmount(() => {
 </script>
 <template>
   <div class="provider-directory">
-    <nav class="provider-directory-list" aria-label="模型供应商">
+    <nav class="provider-directory-list" :aria-label="__t('apps.pictoria.ui', '模型供应商')">
       <button
         v-for="item in directory.adapters"
         :key="item.id"
@@ -198,7 +200,7 @@ onBeforeUnmount(() => {
       </button>
       <button :class="{ active: selected === 'new' }" :disabled="busy" @click="choose('new')">
         <Icon name="plus" :size="17" />
-        添加供应商
+        {{ __t('apps.pictoria.ui', '添加供应商') }}
       </button>
     </nav>
     <component
@@ -214,16 +216,16 @@ onBeforeUnmount(() => {
     />
     <form v-else class="settings-section provider-settings" @submit.prevent="save()">
       <label class="panel-field">
-        名称
+        {{ __t('apps.pictoria.ui', '名称') }}
         <input v-model="form.name" required maxlength="100" />
       </label>
       <label class="panel-field">
-        协议
+        {{ __t('apps.pictoria.ui', '协议') }}
         <PictoriaSelect
           v-model="form.protocol"
           :options="[
-            { value: 'http', label: '通用 HTTP' },
-            { value: 'openai', label: 'OpenAI 兼容' },
+            { value: 'http', label: __t('apps.pictoria.ui', '通用 HTTP') },
+            { value: 'openai', label: __t('apps.pictoria.ui', 'OpenAI 兼容') },
           ]"
         />
       </label>
@@ -233,7 +235,7 @@ onBeforeUnmount(() => {
       </label>
       <div class="panel-field">
         <div class="provider-model-heading">
-          <span>默认模型</span>
+          <span>{{ __t('apps.pictoria.ui', '默认模型') }}</span>
           <button
             type="button"
             class="quiet-button"
@@ -241,10 +243,14 @@ onBeforeUnmount(() => {
             @click="fetchModels"
           >
             <Icon name="refresh" :size="14" :class="{ 'provider-model-loading': fetching }" />
-            {{ fetching ? '获取中' : '获取模型' }}
+            {{ fetching ? __t('apps.pictoria.ui', '获取中') : __t('apps.pictoria.ui', '获取模型') }}
           </button>
         </div>
-        <input v-model="form.defaultModel" maxlength="200" placeholder="模型 ID · 可选" />
+        <input
+          v-model="form.defaultModel"
+          maxlength="200"
+          :placeholder="__t('apps.pictoria.ui', '模型 ID · 可选')"
+        />
         <Transition name="float">
           <PictoriaSelect
             v-if="models.length"
@@ -255,8 +261,8 @@ onBeforeUnmount(() => {
                 label: model.name === model.id ? model.id : `${model.name} · ${model.id}`,
               }))
             "
-            placeholder="选择模型"
-            label="模型列表"
+            :placeholder="__t('apps.pictoria.ui', '选择模型')"
+            :label="__t('apps.pictoria.ui', '模型列表')"
           />
         </Transition>
       </div>
@@ -266,29 +272,37 @@ onBeforeUnmount(() => {
           v-model="form.credential"
           type="password"
           autocomplete="new-password"
-          :placeholder="form.hasCredential ? '已保存 · 留空不改' : '输入 API Key'"
+          :placeholder="
+            form.hasCredential
+              ? __t('apps.pictoria.ui', '已保存 · 留空不改')
+              : __t('apps.pictoria.ui', '输入 API Key')
+          "
         />
       </label>
       <label class="workflow-checkbox">
         <input v-model="form.enabled" type="checkbox" />
-        启用
+        {{ __t('apps.pictoria.ui', '启用') }}
       </label>
       <label class="workflow-checkbox">
         <input v-model="form.requiresCredential" type="checkbox" />
-        需要认证
+        {{ __t('apps.pictoria.ui', '需要认证') }}
       </label>
       <details class="workflow-advanced">
-        <summary>接口与认证</summary>
+        <summary>{{ __t('apps.pictoria.ui', '接口与认证') }}</summary>
         <label class="panel-field">
-          模型列表路径
-          <input v-model="form.modelsPath" placeholder="models 或 /v1/models" maxlength="500" />
+          {{ __t('apps.pictoria.ui', '模型列表路径') }}
+          <input
+            v-model="form.modelsPath"
+            :placeholder="__t('apps.pictoria.ui', 'models 或 /v1/models')"
+            maxlength="500"
+          />
         </label>
         <label class="panel-field">
           Header
           <input v-model="form.authHeader" />
         </label>
         <label class="panel-field">
-          前缀
+          {{ __t('apps.pictoria.ui', '前缀') }}
           <input v-model="form.authPrefix" />
         </label>
       </details>
@@ -298,7 +312,7 @@ onBeforeUnmount(() => {
           class="create-button"
           :disabled="busy || !online || !form.name.trim() || !form.baseUrl.trim()"
         >
-          {{ busy ? '保存中' : '保存' }}
+          {{ busy ? __t('apps.pictoria.ui', '保存中') : __t('apps.pictoria.ui', '保存') }}
         </button>
         <button
           v-if="form.hasCredential"
@@ -307,7 +321,7 @@ onBeforeUnmount(() => {
           :disabled="busy"
           @click="save(true)"
         >
-          移除凭据
+          {{ __t('apps.pictoria.ui', '移除凭据') }}
         </button>
       </div>
       <small v-if="message" class="provider-message">{{ message }}</small>

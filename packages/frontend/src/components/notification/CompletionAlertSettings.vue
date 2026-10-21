@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import { onMounted, onActivated, onBeforeUnmount, ref } from 'vue'
 import { DEFAULT_COMPLETION_ALERT_SETTINGS, type CompletionAlertSettings } from '@infos/shared'
 import { invoke, isElectron, listen } from '../../utils/ipcAdapter'
@@ -99,12 +101,12 @@ onBeforeUnmount(() => {
   <PCard v-if="supported" pixel padding="lg">
     <h3 class="completion-settings__title">
       <PixelIcon name="volume" size="sm" />
-      完成提醒
+      {{ __t('ui.notification', '完成提醒') }}
     </h3>
     <div class="completion-settings__row">
       <div>
-        <strong>完成提示音</strong>
-        <p>整轮对话或后台任务完成时，轻轻响一声。</p>
+        <strong>{{ __t('ui.notification', '完成提示音') }}</strong>
+        <p>{{ __t('ui.notification', '整轮对话或后台任务完成时，轻轻响一声。') }}</p>
       </div>
       <div class="completion-settings__actions">
         <PButton
@@ -113,33 +115,33 @@ onBeforeUnmount(() => {
           :disabled="!loaded || saving || previewing || !settings.soundEnabled"
           @click="preview"
         >
-          试听
+          {{ __t('ui.notification', '试听') }}
         </PButton>
         <PSwitch
           :model-value="settings.soundEnabled"
           :disabled="!loaded || saving"
-          aria-label="完成提示音"
+          :aria-label="__t('ui.notification', '完成提示音')"
           @update:model-value="update({ soundEnabled: $event })"
         />
       </div>
     </div>
     <div class="completion-settings__row">
       <div>
-        <strong>Windows 完成通知</strong>
-        <p>应用不在前台且桌宠隐藏时通知。</p>
+        <strong>{{ __t('ui.notification', 'Windows 完成通知') }}</strong>
+        <p>{{ __t('ui.notification', '应用不在前台且桌宠隐藏时通知。') }}</p>
       </div>
       <PSwitch
         :model-value="settings.windowsNotificationsEnabled"
         :disabled="!loaded || saving || !settings.windowsNotificationsSupported"
-        aria-label="Windows 完成通知"
+        :aria-label="__t('ui.notification', 'Windows 完成通知')"
         @update:model-value="update({ windowsNotificationsEnabled: $event })"
       />
     </div>
     <p class="completion-settings__hint">
-      两个开关独立生效，设置保存在这台设备。Windows 通知自身静音。
+      {{ __t('ui.notification', '仅对此设备生效；系统通知无提示音。') }}
     </p>
     <p v-if="loaded && !settings.windowsNotificationsSupported" class="completion-settings__hint">
-      当前系统不支持 Windows 通知。
+      {{ __t('ui.notification', '当前系统不支持 Windows 通知。') }}
     </p>
     <p v-if="error" class="completion-settings__error" role="alert">{{ error }}</p>
   </PCard>

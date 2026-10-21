@@ -10,6 +10,7 @@ import { setSocialDiaryReaderProvider, socialReadDiaryTool } from '@infos/social
 import { NapcatStickers } from '@infos/social/adapters/napcat/napcatStickers'
 import { executeSocialSticker } from '@infos/social/tools/sticker'
 import type { SocialStoragePort } from '@infos/shared'
+import { SocialTurnEndedError, socialFailure } from '@infos/social/runtime/socialRecovery'
 
 function createMessage(partial: Partial<InboundMessage> = {}): InboundMessage {
   return {
@@ -88,6 +89,28 @@ describe('社交日记读取工具', () => {
 describe('SocialSessionManager', () => {
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it('已结束的网络失败不再外层重试，新私聊可以立即进入下一批', async () => {
+    vi.useFakeTimers()
+    const failure = new SocialTurnEndedError('OpenAI 网络错误: fetch failed；自动恢复已结束')
+    expect(socialFailure(failure).retryable).toBe(false)
+    const callback = vi.fn().mockRejectedValueOnce(failure).mockResolvedValue({ type: 'pass' })
+    const manager = new SocialSessionManager(callback, { privateCollectTimeout: 1 })
+    await manager.handleInbound(
+      createMessage({ channelType: 'private', channelId: 'dm-ended', rawEvent: { message_id: 1 } }),
+    )
+    await vi.advanceTimersByTimeAsync(1000)
+    const session = manager.getActiveSessions('private')[0]!
+    expect(session.phase).toBe('failed')
+    expect(session.retryMessages).toBeUndefined()
+    await manager.handleInbound(
+      createMessage({ channelType: 'private', channelId: 'dm-ended', rawEvent: { message_id: 2 } }),
+    )
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(callback).toHaveBeenCalledTimes(2)
+    expect(session.phase).toBe('ready')
+    manager.stop()
   })
 
   it('应当创建会话并按最近消息时间排序返回活跃会话', async () => {
@@ -175,6 +198,27 @@ describe('SocialSessionManager', () => {
     manager.checkActiveExpiry(session)
 
     expect(session).toMatchObject({ participation: 'idle', phase: 'ready' })
+  })
+
+  it('普通群聊续聊在入站前自动过期，旧排队标记不能再次直接唤醒', async () => {
+    vi.useFakeTimers()
+    const callback = vi.fn().mockResolvedValue({ type: 'pass' })
+    const manager = new SocialSessionManager(callback, { engagedDuration: 1 })
+    manager.markReplied(manager.getOrCreate(createMessage()))
+    vi.advanceTimersByTime(1001)
+    await manager.handleInbound(
+      createMessage({
+        rawEvent: { message_id: 'old', _infosQueuedForReply: true, _infosContinuation: true },
+      }),
+    )
+    await vi.advanceTimersByTimeAsync(25000)
+    expect(callback).not.toHaveBeenCalled()
+    expect(manager.getActiveSessions('group')[0]?.participation).toBe('idle')
+    await manager.handleInbound(
+      createMessage({ rawEvent: { message_id: 'at', _isMentioned: true } }),
+    )
+    await vi.advanceTimersByTimeAsync(6001)
+    expect(callback).toHaveBeenCalledTimes(1)
   })
 
   it('flush 回调失败时保留批次并进入 retrying', async () => {
@@ -354,15 +398,15 @@ describe('StickerService', () => {
     )
   })
 
-  it('外部表情接口失败使用已注册业务码并保留具体原因', async () => {
+  it('外部表情接口明确拒绝时保留可重试判定与具体原因', async () => {
     const callApi = vi.fn(async () => ({
       status: 'failed',
       retcode: 1404,
       message: '接口暂不可用',
     }))
     await expect(new NapcatStickers(callApi).list('1001')).rejects.toMatchObject({
-      code: 'EXTERNAL_ERROR',
-      httpStatus: 502,
+      code: 'STICKER_PLATFORM_REJECTED',
+      rejected: true,
       message: '接口暂不可用',
     })
   })

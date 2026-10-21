@@ -4,18 +4,38 @@ import type { ModelConfig } from '../llm/llmService'
 import type { BackgroundEventExtractor } from './eventMemoryFallbackService'
 import { formatEventTime } from './eventMemoryTime'
 import { TASK_PROMPTS } from '../prompt/taskPrompts'
+import { tokenCounter } from '../tokenizer/tokenCounter'
+import type { MemoryPersonaResolver } from './memoryPersona'
 
 export class LlmBackgroundEventExtractor implements BackgroundEventExtractor {
   constructor(
     private llm: LlmService,
     private getModelConfig: () => Promise<ModelConfig | null>,
+    private getPersona: MemoryPersonaResolver = async (agentId) => ({
+      agent_id: agentId,
+      agent_name: agentId,
+    }),
   ) {}
+
+  async promptTokens(agentId: string, channel: string): Promise<number> {
+    const variables = await this.getPersona(agentId, channel)
+    const messages = this.llm.preparePromptMessages([], {
+      promptTask: 'memory.extract',
+      promptChannel: channel,
+      promptVariables: variables,
+      promptSources: ['persona_definition', 'channel_patch'],
+      usageContext: { agentId, purpose: 'memory' },
+    })
+    // 额外预留来源标识和每批时间戳的包裹开销。
+    return tokenCounter.countMessages(messages) + 256
+  }
 
   async extract(
     input: Parameters<BackgroundEventExtractor['extract']>[0],
   ): Promise<EventNoteDraftInput[]> {
     const config = await this.getModelConfig()
     if (!config) throw new Error('后台事件补记模型未配置')
+    const persona = await this.getPersona(input.agentId, input.channel)
     input.signal?.throwIfAborted()
     const transcript = input.messages
       .map(
@@ -38,6 +58,9 @@ export class LlmBackgroundEventExtractor implements BackgroundEventExtractor {
         temperature: 0.2,
         signal: input.signal,
         promptTask: 'memory.extract',
+        promptChannel: input.channel,
+        promptVariables: persona,
+        promptSources: ['persona_definition', 'channel_patch'],
         maxTokens: 2000,
         usageContext: { agentId: input.agentId, purpose: 'memory' },
       },

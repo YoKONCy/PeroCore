@@ -1,0 +1,656 @@
+/* 仅浏览器主应用启用；原生窗口与独立子应用不受此布局影响。 */
+html[data-mobile],
+html[data-mobile] body,
+html[data-mobile] #app {
+  width: 100%;
+  height: var(--client-height, 100dvh);
+  min-width: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+html[data-mobile] {
+  -webkit-text-size-adjust: 100%;
+}
+html[data-mobile] body {
+  margin: 0;
+  position: fixed;
+  inset: 0;
+}
+html[data-mobile] .main-view-root {
+  height: 100%;
+  min-height: 0;
+}
+html[data-mobile] .main-content,
+html[data-mobile] .main-tab-content {
+  min-width: 0;
+  max-width: 100%;
+}
+html[data-mobile] .main-nav-layer {
+  display: none;
+}
+html[data-mobile] .main-nav-layer--open {
+  display: block;
+  position: absolute;
+  z-index: 90;
+  inset: 0 auto 0 0;
+  width: min(300px, 85vw);
+  box-shadow: 12px 0 40px #0005;
+}
+html[data-mobile] .main-nav {
+  width: 100%;
+  height: 100%;
+  padding-left: env(safe-area-inset-left);
+  background: var(--ui-bg-surface);
+}
+html[data-mobile] .main-nav-item {
+  min-height: 44px;
+}
+html[data-mobile] .main-nav-pin,
+html[data-mobile] .main-nav-pin-row {
+  display: none;
+}
+html[data-mobile] .main-statusbar {
+  min-height: 28px;
+  padding: 0 10px env(safe-area-inset-bottom);
+}
+html[data-mobile] .main-statusbar-right {
+  gap: 6px;
+}
+html[data-mobile][data-keyboard] :is(.main-mobile-header, .main-statusbar, .deck-status) {
+  display: none;
+}
+html[data-mobile] .dashboard-tab-content {
+  padding: 12px 10px 24px;
+}
+html[data-mobile] .main-tab-content.p-8 {
+  padding: 12px 8px;
+}
+html[data-mobile] .p-card-pad-lg {
+  padding: 14px;
+}
+html[data-mobile] .logs-tab > .p-6 {
+  padding: 10px 8px 0;
+}
+html[data-mobile] .logs-tab > .logs-scrollbar {
+  padding: 10px 8px;
+}
+html[data-mobile] .client-pairing {
+  height: 100%;
+  min-height: 0;
+  display: block;
+  overflow-y: auto;
+}
+html[data-mobile] .client-pairing-card {
+  margin: 0 auto;
+}
+
+/* 会话列表改成抽屉，正文和输入台使用整屏宽度。 */
+html[data-mobile] .chat-tab-root {
+  padding: 0;
+  min-width: 0;
+}
+html[data-mobile] .chat-panel {
+  position: relative;
+  border: 0;
+  border-radius: 0;
+}
+html[data-mobile] .chat-sidebar {
+  position: absolute;
+  z-index: 45;
+  inset: 0 auto 0 0;
+  width: min(310px, 86%);
+  background: var(--ui-bg-surface);
+  box-shadow: 12px 0 35px #0005;
+}
+html[data-mobile] .chat-sidebar--collapsed {
+  display: none;
+}
+html[data-mobile] .chat-sidebar-toggle {
+  right: 8px;
+  top: 4px;
+  width: 40px;
+  height: 40px;
+  z-index: 2;
+}
+html[data-mobile] .chat-partner-header {
+  padding-top: 44px;
+}
+html[data-mobile] .chat-main {
+  width: 100%;
+  min-width: 0;
+}
+html[data-mobile] .chat-main-header {
+  gap: 8px;
+  padding: 8px;
+  min-height: 58px;
+}
+html[data-mobile] .chat-main-agent,
+html[data-mobile] .chat-main-info,
+html[data-mobile] .chat-identity-slot {
+  min-width: 0;
+}
+html[data-mobile] .chat-main-name {
+  font-size: 15px;
+}
+html[data-mobile] .chat-main-channel {
+  max-width: 42vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+html[data-mobile] .chat-main-avatar {
+  width: 34px;
+  height: 34px;
+}
+html[data-mobile] .chat-main-status-text,
+html[data-mobile] .chat-main-status-dot {
+  display: none;
+}
+html[data-mobile] .chat-main-export {
+  padding: 6px;
+  min-width: 44px;
+}
+html[data-mobile] .chat-mobile-conversations {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 40px;
+  height: 44px;
+  background: transparent;
+  color: var(--ui-text-primary);
+  border: 1px solid var(--ui-border-default);
+}
+html[data-mobile] .chat-mobile-backdrop,
+html[data-mobile] .workspace-mobile-backdrop,
+html[data-mobile] .sh-mobile-backdrop {
+  position: absolute;
+  z-index: 40;
+  inset: 0;
+  background: #0008;
+  border: 0;
+}
+html[data-mobile] .chat-messages {
+  padding: 14px 8px;
+  scroll-padding-bottom: 12px;
+}
+html[data-mobile] .chat-input-area {
+  padding: 6px 6px 8px;
+}
+html[data-mobile] .msg-row {
+  gap: 6px;
+  margin-bottom: 20px;
+}
+html[data-mobile] .msg-avatar {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+}
+html[data-mobile] .msg-assistant-container {
+  width: calc(100% - 32px);
+  min-width: 0;
+  max-width: 100%;
+}
+html[data-mobile] .msg-user-container {
+  max-width: 92%;
+}
+html[data-mobile] .msg-bubble-assistant {
+  padding: 12px 9px;
+}
+html[data-mobile] .chat-rich-text {
+  font-size: 15px;
+  line-height: 1.85;
+  overflow-wrap: anywhere;
+}
+html[data-mobile] .chat-rich-text :is(pre, .chat-code-block) {
+  max-width: 100%;
+  overflow: auto;
+  font-size: 12px;
+}
+html[data-mobile] .chat-rich-text table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+html[data-mobile] .msg-actions {
+  opacity: 1;
+}
+html[data-mobile] .chat-approvals {
+  max-height: min(52dvh, 460px);
+  overflow-y: auto;
+}
+
+/* 触控输入：保持发送按钮可见，工具自然换行，输入字号避免 iOS 自动放大。 */
+html[data-mobile] :is(input, select, textarea) {
+  font-size: 16px;
+}
+html[data-mobile] .deck textarea {
+  min-height: 54px;
+  max-height: min(140px, 26dvh);
+  padding: 10px 12px;
+  font-size: 16px;
+}
+html[data-mobile] .deck-status {
+  gap: 4px;
+  padding: 6px;
+}
+html[data-mobile] .deck-status .deck-chip:nth-of-type(3),
+html[data-mobile] .deck-status .deck-chip:nth-of-type(4),
+html[data-mobile] .deck-status .deck-chip:nth-of-type(5) {
+  display: none;
+}
+html[data-mobile] .deck-brand {
+  display: none;
+}
+html[data-mobile] .deck-footer {
+  padding: 6px;
+  gap: 6px;
+  align-items: flex-end;
+}
+html[data-mobile] .deck-tools {
+  min-width: 0;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 4px;
+  overflow: visible;
+}
+html[data-mobile] .deck .deck-tools > button,
+html[data-mobile] .deck .deck-tools :is(.image-mode-selector, .audio-input-selector) {
+  min-width: 38px;
+  min-height: 40px;
+  height: auto;
+  padding: 6px;
+}
+html[data-mobile] .deck-tools .pixel-label {
+  display: none;
+}
+html[data-mobile] .deck-tool-icon {
+  display: inline-flex;
+}
+html[data-mobile] .deck-mode button {
+  min-height: 40px;
+  padding: 6px 8px;
+}
+html[data-mobile] :is(.send-btn, .stop-btn) {
+  min-height: 44px;
+  min-width: 48px;
+  padding: 8px;
+}
+html[data-mobile] :is(.tool-popover, .flow-popover, .command-popover) {
+  width: calc(100vw - 16px);
+  max-width: calc(100vw - 16px);
+  max-height: min(calc(var(--client-height, 100dvh) * 0.58), 480px);
+  left: 0;
+  right: auto;
+  overflow: auto;
+}
+html[data-mobile] .tool-manager__item {
+  min-width: 0;
+  gap: 8px;
+}
+html[data-mobile] .execution-policy__options {
+  flex-wrap: wrap;
+}
+
+/* 工作区：文件与协作使用覆盖面板，终端占满编辑区域。 */
+html[data-mobile] .workspace-tab {
+  padding: 0;
+}
+html[data-mobile] .workspace-panel {
+  border-radius: 0;
+  border: 0;
+  position: relative;
+}
+html[data-mobile] .workspace-commandbar {
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 6px;
+  min-height: 54px;
+}
+html[data-mobile] .workspace-actions {
+  gap: 4px;
+}
+html[data-mobile] .workspace-action {
+  width: 40px;
+  height: 40px;
+}
+html[data-mobile] .workspace-body {
+  position: relative;
+  min-width: 0;
+}
+html[data-mobile] .workspace-explorer--collapsed,
+html[data-mobile] .workspace-copilot--collapsed {
+  display: none;
+}
+html[data-mobile] .workspace-explorer:not(.workspace-explorer--collapsed) {
+  top: 0;
+  bottom: 0;
+  z-index: 45;
+  width: min(320px, 88%) !important;
+  background: var(--ui-bg-surface);
+}
+html[data-mobile] .workspace-copilot:not(.workspace-copilot--collapsed) {
+  top: 0;
+  bottom: 0;
+  right: 0;
+  z-index: 46;
+  width: 100% !important;
+  background: var(--ui-bg-surface);
+}
+html[data-mobile] .workspace-resizer {
+  display: none;
+}
+html[data-mobile] .workspace-center {
+  min-width: 0;
+  width: 100%;
+}
+html[data-mobile] .workspace-panel--mobile-terminal :is(.editor-tabs, .editor-area) {
+  display: none;
+}
+html[data-mobile] .workspace-panel--mobile-terminal .terminal-area {
+  height: auto !important;
+  min-height: 0;
+  flex: 1;
+}
+html[data-mobile] .terminal-area--collapsed {
+  display: none;
+}
+html[data-mobile] .editor-surface textarea {
+  font-size: 14px;
+  white-space: pre;
+}
+html[data-mobile] .approval-queue {
+  max-height: 55%;
+  flex-shrink: 1;
+  min-height: 60px;
+}
+html[data-mobile] :is(.approval-card, .approval-queue__body) {
+  min-width: 0;
+}
+html[data-mobile] :is(.approval-card__actions, .approval-actions) {
+  flex-wrap: wrap;
+}
+html[data-mobile] :is(.approval-card__actions, .approval-actions) button {
+  min-height: 44px;
+}
+
+/* 据点：房间与成员独立打开，不挤占群聊正文。 */
+html[data-mobile] .stronghold-tab-root {
+  padding: 0;
+}
+html[data-mobile] .stronghold-panel {
+  flex-direction: column;
+  position: relative;
+  border: 0;
+  border-radius: 0;
+}
+html[data-mobile] .sh-mobile-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--ui-border-default);
+}
+html[data-mobile] .sh-mobile-toolbar button {
+  min-height: 40px;
+  padding: 6px 14px;
+  border: 1px solid var(--ui-border-default);
+  color: var(--ui-text-primary);
+  background: var(--ui-bg-surface);
+}
+html[data-mobile] .sh-mobile-toolbar span {
+  font-size: 13px;
+}
+html[data-mobile] .sh-left--collapsed,
+html[data-mobile] .sh-right--collapsed {
+  display: none;
+}
+html[data-mobile] :is(.sh-left, .sh-right):not(.sh-left--collapsed, .sh-right--collapsed) {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 45;
+  width: min(310px, 86%);
+  background: var(--ui-bg-surface);
+  box-shadow: 0 0 35px #0005;
+}
+html[data-mobile] .sh-left {
+  left: 0;
+}
+html[data-mobile] .sh-right {
+  right: 0;
+}
+html[data-mobile] .sh-toggle {
+  width: 40px;
+  height: 40px;
+  top: 8px;
+}
+html[data-mobile] .sh-toggle-left {
+  right: 8px;
+}
+html[data-mobile] .sh-toggle-right {
+  left: 8px;
+}
+html[data-mobile] .sh-main {
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  flex: 1;
+}
+html[data-mobile] .sh-main-header {
+  padding: 8px;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+html[data-mobile] .sh-main-room-desc {
+  display: none;
+}
+html[data-mobile] .sh-main-aside {
+  gap: 4px;
+}
+html[data-mobile] .sh-env-chips,
+html[data-mobile] .sh-member-stack {
+  display: none;
+}
+html[data-mobile] .stronghold-message-list {
+  padding: 12px 8px;
+}
+html[data-mobile] .stronghold-input-area {
+  padding: 6px;
+}
+
+/* 设置、记忆、知识和任务页面保留内容，用单列和局部滚动承接宽表格。 */
+html[data-mobile] :is(.archive-head, .archive-stats, .archive-toolbar) {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+html[data-mobile] .archive-main {
+  grid-template-columns: minmax(0, 1fr);
+}
+html[data-mobile] .archive-inspector {
+  position: static;
+  max-height: none;
+}
+html[data-mobile] :is(.sp-config-row, .sp-adapter-cards, .model-config-grid, .overview-grid) {
+  display: flex;
+  flex-wrap: wrap;
+}
+html[data-mobile] :is(.sp-config-block, .sp-owner-input) {
+  min-width: 0;
+  flex: 1 1 220px;
+}
+html[data-mobile] :is(.sp-owner-row, .sp-controls, .archive-pagination) {
+  flex-wrap: wrap;
+}
+html[data-mobile] .sp-sections {
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+html[data-mobile] .sp-section {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+html[data-mobile] .social-panel {
+  overflow-y: auto;
+  min-height: 0;
+  padding: 12px 8px;
+}
+html[data-mobile] :is(.memory-filter-grid, .memory-filter-row) {
+  flex-wrap: wrap;
+  grid-template-columns: minmax(0, 1fr);
+}
+html[data-mobile] .grid-cols-2,
+html[data-mobile] .grid-cols-3 {
+  grid-template-columns: minmax(0, 1fr);
+}
+html[data-mobile] :is(.overflow-x-auto, .table-container) {
+  max-width: 100%;
+  overflow-x: auto;
+}
+html[data-mobile] .atlas {
+  display: flex;
+  flex-direction: column;
+  height: auto;
+  min-height: 100%;
+  overflow: visible;
+}
+html[data-mobile] .atlas-index {
+  position: static;
+  width: 100%;
+  max-height: 240px;
+  flex-shrink: 0;
+}
+html[data-mobile] .atlas-workspace {
+  min-width: 0;
+  width: 100%;
+}
+html[data-mobile] .index-list {
+  display: flex;
+  overflow-x: auto;
+  padding: 8px;
+  gap: 8px;
+}
+html[data-mobile] .index-agent {
+  min-width: 160px;
+  flex-shrink: 0;
+}
+html[data-mobile] :is(.protocol-nav, .section-tabs) {
+  overflow-x: auto;
+  flex-wrap: nowrap;
+}
+html[data-mobile] :is(.protocol-nav, .section-tabs) button {
+  flex-shrink: 0;
+  min-height: 44px;
+}
+html[data-mobile]
+  :is(
+    .identity-layout,
+    .data-fields,
+    .capability-columns,
+    .model-detail-grid,
+    .model-capability-list,
+    .scheduled-agent-form
+  ) {
+  grid-template-columns: minmax(0, 1fr);
+}
+html[data-mobile] .profile-band {
+  grid-template-columns: 72px minmax(0, 1fr);
+}
+html[data-mobile] .profile-seal {
+  display: none;
+}
+html[data-mobile] .prompt-body {
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+}
+html[data-mobile] .prompt-page {
+  padding: 12px 8px;
+}
+html[data-mobile] .prompt-page :is(.actions, .editor-heading, .editor-tools, .preview-controls) {
+  flex-wrap: wrap;
+}
+html[data-mobile] .prompt-page :is(.code-editor, .editor) {
+  min-width: 0;
+  max-width: 100%;
+}
+html[data-mobile] .memory-filter .filter-field {
+  min-width: 0;
+  flex: 1 1 130px;
+}
+html[data-mobile] .memory-filter .filter-search {
+  min-width: 100%;
+  max-width: none;
+}
+html[data-mobile] .filter-actions {
+  flex-wrap: wrap;
+}
+html[data-mobile] .p-select-trigger,
+html[data-mobile] .p-select-option {
+  min-height: 44px;
+}
+html[data-mobile] .terminal-input {
+  min-height: 44px;
+}
+html[data-mobile] .terminal-input input {
+  font-size: 16px;
+}
+html[data-mobile] .workspace-image .file-view-controls {
+  flex-wrap: wrap;
+}
+html[data-mobile] .workspace-image .file-view-controls button {
+  min-height: 40px;
+}
+html[data-mobile] .workspace-image__hint {
+  font-size: 10px;
+}
+
+/* 弹窗保持在可见视口内，底部操作与安全区之间留出空间。 */
+html[data-mobile] :is(.p-dialog-overlay, .modal-overlay) {
+  padding: max(8px, env(safe-area-inset-top)) 8px max(8px, env(safe-area-inset-bottom));
+}
+html[data-mobile] :is(.p-dialog, .modal-dialog) {
+  min-width: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  max-height: calc(var(--client-height, 100dvh) - 20px);
+  overflow: auto;
+}
+html[data-mobile] :is(.p-dialog-body, .modal-body) {
+  padding: 14px;
+  min-width: 0;
+}
+html[data-mobile] :is(.p-dialog-footer, .modal-footer) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+html[data-mobile] :is(.p-dialog-footer, .modal-footer) button {
+  min-height: 44px;
+}
+html[data-mobile] :is(.piv-overlay, .workspace-image-viewer, .image-viewer-overlay) {
+  max-height: var(--client-height, 100dvh);
+}
+html[data-mobile] .piv-image-wrap {
+  max-width: calc(100vw - 16px);
+  max-height: calc(var(--client-height, 100dvh) - 100px);
+}
+html[data-mobile] .piv-image-wrap--mobile {
+  width: calc(100vw - 16px);
+  height: calc(var(--client-height, 100dvh) - 120px);
+  background: var(--ui-bg-surface);
+}
+html[data-mobile] .piv-close {
+  top: max(8px, env(safe-area-inset-top));
+  right: 8px;
+  min-width: 44px;
+  min-height: 44px;
+}
+html[data-mobile] .piv-nav {
+  padding: 10px;
+  min-height: 44px;
+}
+html[data-mobile] .piv-nav-left {
+  left: 6px;
+}
+html[data-mobile] .piv-nav-right {
+  right: 6px;
+}

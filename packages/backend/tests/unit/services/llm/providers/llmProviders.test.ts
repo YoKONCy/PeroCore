@@ -719,7 +719,7 @@ describe('GeminiProvider', () => {
     ])
   })
 
-  it('应当筛选支持生成的模型并在失败时返回回退模型', async () => {
+  it('应当筛选支持生成的模型，列表失败时保留真实错误', async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(
         jsonResponse({
@@ -733,11 +733,11 @@ describe('GeminiProvider', () => {
     const provider = new GeminiProvider(baseConfig)
 
     const models = await provider.listModels()
-    const fallback = await provider.listModels()
-
     expect(models).toEqual(['gemini-a'])
-    expect(fallback.length).toBeGreaterThan(0)
-    expect(fallback.every((model) => model.trim().length > 0)).toBe(true)
+    await expect(provider.listModels()).rejects.toMatchObject({
+      code: 'LLM_ERROR',
+      data: { status: 500 },
+    })
   })
 })
 
@@ -936,7 +936,7 @@ describe('AnthropicProvider', () => {
     ).rejects.toMatchObject({ code: 'LLM_ERROR' })
   })
 
-  it('应当处理 HTTP 错误和模型列表回退', async () => {
+  it('应当处理 HTTP 错误，模型列表网络失败不能伪造可用列表', async () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(errorResponse(429, '太多请求', new Headers({ 'retry-after': '3' })))
       .mockResolvedValueOnce(jsonResponse({ data: [{ id: 'claude-b' }, { id: 'claude-a' }] }))
@@ -948,6 +948,6 @@ describe('AnthropicProvider', () => {
       data: { retryAfter: 3000, status: 429 },
     })
     await expect(provider.listModels()).resolves.toEqual(['claude-a', 'claude-b'])
-    expect((await provider.listModels()).every((model) => model.trim().length > 0)).toBe(true)
+    await expect(provider.listModels()).rejects.toThrow('失败')
   })
 })

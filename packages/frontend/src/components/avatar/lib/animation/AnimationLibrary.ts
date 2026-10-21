@@ -1,3 +1,4 @@
+import { t as __t } from '../../../../i18n/index'
 /**
  * 动画库
  *
@@ -102,7 +103,7 @@ export class AnimationLibrary {
     try {
       const response = await fetch(url)
       if (!response.ok) {
-        logger.warn('AnimationLibrary', `加载动画失败: ${url}`)
+        logger.warn('AnimationLibrary', __t('logs.frontend.avatar', '加载动画失败: {0}', [url]))
         return
       }
       const json = await response.json()
@@ -113,7 +114,7 @@ export class AnimationLibrary {
         }
       }
     } catch (e) {
-      logger.error('AnimationLibrary', `加载动画出错: ${url}`, e)
+      logger.error('AnimationLibrary', __t('logs.frontend.avatar', '加载动画出错: {0}', [url]), e)
     }
   }
 

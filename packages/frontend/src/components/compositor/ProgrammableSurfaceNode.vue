@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /**
  * ProgrammableSurfaceNode.vue — 界面组件
  *
@@ -78,11 +80,13 @@ onBeforeUnmount(() => {
       :srcdoc="srcdoc"
       sandbox="allow-scripts"
       referrerpolicy="no-referrer"
-      title="隔离的可编程Surface"
+      :title="__t('ui.compositor', '隔离的可编程Surface')"
     />
-    <p v-if="state === 'loading'">正在验证可编程Surface…</p>
-    <p v-else-if="state === 'blocked' || state === 'failed'">已阻止：{{ errorMessage }}</p>
-    <p v-else-if="!active">可编程Surface已暂停</p>
+    <p v-if="state === 'loading'">{{ __t('ui.compositor', '正在验证可编程Surface…') }}</p>
+    <p v-else-if="state === 'blocked' || state === 'failed'">
+      {{ __t('ui.compositor', '已阻止：') }}{{ errorMessage }}
+    </p>
+    <p v-else-if="!active">{{ __t('ui.compositor', '可编程Surface已暂停') }}</p>
   </section>
 </template>
 

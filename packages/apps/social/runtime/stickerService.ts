@@ -27,18 +27,24 @@ export interface StickerSegment {
   type: 'sticker'
   stickerId: string
 }
-export type MessageSegment = TextSegment | StickerSegment
+export interface NativeEmojiSegment {
+  type: 'native_emoji'
+  reference: string
+}
+export type MessageSegment = TextSegment | StickerSegment | NativeEmojiSegment
 
 /** 空收藏或无效标识也不向用户泄露内部标记。 */
 export function splitStickerSegments(content: string): MessageSegment[] {
   const segments: MessageSegment[] = []
-  const pattern = /\[\s*sticker\s*[:：]\s*([^\]\r\n]*)\]/gi
+  const pattern = /\[\s*(sticker|native_emoji)\s*[:：]\s*([^\]\r\n]*)\]/gi
   let cursor = 0
   for (const match of content.matchAll(pattern)) {
     const text = content.slice(cursor, match.index).trim()
     if (text) segments.push({ type: 'text', content: text })
-    const id = match[1]!.trim()
-    if (/^s_[a-f0-9]{24}$/.test(id)) segments.push({ type: 'sticker', stickerId: id })
+    const id = match[2]!.trim()
+    if (match[1]!.toLowerCase() === 'native_emoji') {
+      if (/^-?\d{1,30}:\d{1,2}$/.test(id)) segments.push({ type: 'native_emoji', reference: id })
+    } else if (/^s_[a-f0-9]{24}$/.test(id)) segments.push({ type: 'sticker', stickerId: id })
     cursor = match.index! + match[0].length
   }
   const tail = content.slice(cursor).trim()
@@ -175,18 +181,35 @@ export class StickerService {
 
   async collect(accountId: string, url: string, description?: string) {
     if (description !== undefined && description.length > 200)
-      throw new AppError('INVALID_PARAMETER', { message: '表情描述最多 200 字' })
+      throw Object.assign(new Error('表情描述最多 200 字'), { rejected: true, stage: 'preflight' })
     return this.mutate(accountId, async () => {
-      const collected = await this.provider.collect(accountId, url)
+      let collected: { md5: string }
+      try {
+        collected = await this.provider.collect(accountId, url)
+      } catch (error) {
+        this.invalidate(accountId)
+        throw error
+      }
       this.invalidate(accountId)
-      const snapshot = await this.snapshot(accountId, true)
+      let snapshot: { stickers: AccountSticker[] }
+      try {
+        snapshot = await this.snapshot(accountId, true)
+      } catch (error) {
+        throw Object.assign(
+          new Error(
+            `收藏已提交，但刷新核验失败：${error instanceof Error ? error.message : String(error)}`,
+          ),
+          { uncertain: true, stage: 'verify', code: 'STICKER_VERIFY_UNAVAILABLE' },
+        )
+      }
       const sticker = snapshot.stickers.find(
         (item) => item.md5.toLowerCase() === collected.md5.toLowerCase(),
       )
       if (!sticker)
-        throw new AppError('CONFLICT', {
-          message: '收藏请求已发送，但尚未在 QQ 收藏中确认；请同步后确认，勿重复收藏',
-        })
+        throw Object.assign(
+          new Error('收藏请求已发送，但尚未在 QQ 收藏中确认；请强制刷新后确认，勿重复收藏'),
+          { uncertain: true, stage: 'verify', code: 'STICKER_NOT_CONFIRMED' },
+        )
       if (description !== undefined) {
         try {
           return { sticker: await this.describeUnlocked(accountId, sticker, description) }
@@ -204,27 +227,60 @@ export class StickerService {
   private async describeUnlocked(accountId: string, sticker: AccountSticker, description: string) {
     await this.provider.describe(accountId, sticker, description)
     this.invalidate(accountId)
-    const updated = await this.find(accountId, sticker.id)
+    let updated: AccountSticker
+    try {
+      updated = await this.find(accountId, sticker.id)
+    } catch (error) {
+      throw Object.assign(
+        new Error(
+          `描述已提交但未能核验：${error instanceof Error ? error.message : String(error)}`,
+        ),
+        { uncertain: true, rejected: false, stage: 'verify' },
+      )
+    }
     if (updated.description !== description)
-      throw new AppError('CONFLICT', { message: 'QQ 尚未确认描述更新，请同步后确认' })
+      throw Object.assign(new Error('QQ 尚未确认描述更新，请强制刷新后确认'), {
+        uncertain: true,
+        stage: 'verify',
+      })
     return updated
   }
 
   async describe(accountId: string, id: string, description: string) {
     if (description.length > 200)
-      throw new AppError('INVALID_PARAMETER', { message: '表情描述最多 200 字' })
-    return this.mutate(accountId, async () =>
-      this.describeUnlocked(accountId, await this.find(accountId, id), description),
-    )
+      throw Object.assign(new Error('表情描述最多 200 字'), { rejected: true, stage: 'preflight' })
+    return this.mutate(accountId, async () => {
+      const sticker = await this.preflight(accountId, id)
+      return this.describeUnlocked(accountId, sticker, description)
+    })
+  }
+
+  private async preflight(accountId: string, id: string) {
+    try {
+      return await this.find(accountId, id)
+    } catch (error) {
+      throw Object.assign(new Error(error instanceof Error ? error.message : String(error)), {
+        rejected: true,
+        stage: 'lookup',
+        code: 'STICKER_LOOKUP_FAILED',
+      })
+    }
   }
 
   async remove(accountId: string, id: string) {
     return this.mutate(accountId, async () => {
-      const sticker = await this.find(accountId, id)
+      const sticker = await this.preflight(accountId, id)
       await this.provider.remove(accountId, sticker)
       this.invalidate(accountId)
-      if ((await this.snapshot(accountId, true)).stickers.some((item) => item.id === id))
-        throw new AppError('CONFLICT', { message: 'QQ 尚未确认删除，请同步后确认' })
+      try {
+        if ((await this.snapshot(accountId, true)).stickers.some((item) => item.id === id))
+          throw new Error('QQ 尚未确认删除，请强制刷新后确认')
+      } catch (error) {
+        throw Object.assign(new Error(error instanceof Error ? error.message : String(error)), {
+          uncertain: true,
+          stage: 'verify',
+        })
+      }
       return { removed: id }
     })
   }

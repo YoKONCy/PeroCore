@@ -1,3 +1,4 @@
+import { t as __t } from '../../i18n/index'
 import { onUnmounted, watch, type Ref } from 'vue'
 import { useNotificationStore, type NotificationType } from '../../stores/useNotificationStore'
 import { logger } from '../../lib/logger'
@@ -44,8 +45,13 @@ export function useRemoteNotifications(gateway: Gateway) {
       const batch = [...history.entries()]
       history.clear()
       const failures = batch.filter(([, payload]) => payload.level === 'error').length
-      store.toast('详情见任务中心或画布', {
-        title: `历史通知 · ${batch.length} 条${failures ? `，${failures} 条失败` : ''}`,
+      store.toast(__t('ui.navigation', '详情见任务中心或画布'), {
+        get title() {
+          return __t('ui.navigation', '历史通知 · {0} 条{1}', [
+            batch.length,
+            failures ? `，${failures} 条失败` : '',
+          ])
+        },
         type: 'info',
         onPresented: () => {
           for (const [id, payload] of batch) {
@@ -72,7 +78,7 @@ export function useRemoteNotifications(gateway: Gateway) {
       }
     } catch (error) {
       // 回执失败只留待重连或稍后重试，不制造新的错误弹窗。
-      logger.debug('NotificationInbox', '通知回执暂未确认', error)
+      logger.debug('NotificationInbox', __t('logs.frontend.navigation', '通知回执暂未确认'), error)
     } finally {
       sending = false
       if (receipts.size && gateway.isConnected.value) schedule(5000)

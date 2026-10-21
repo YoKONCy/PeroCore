@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /**
  * ConversationSurface.vue — 界面组件
  *
@@ -43,6 +45,7 @@ import ChatRichText from '../chat/ChatRichText.vue'
 import RunPulse from '../chat/RunPulse.vue'
 import ModelRetryRecord from '../chat/ModelRetryRecord.vue'
 import ToolCallCard from '../tools/ToolCallCard.vue'
+import { toolCallView, type ToolCallView } from '../tools/toolCallView'
 import MermaidSurfaceNode from './MermaidSurfaceNode.vue'
 import ProgrammableSurfaceNode from './ProgrammableSurfaceNode.vue'
 import ResourceCard from '../resources/ResourceCard.vue'
@@ -113,7 +116,13 @@ watch(
 )
 
 type RenderItem =
-  | { type: 'node'; id: string; node: SurfaceNode; toolResult?: ToolResultSurfaceProps }
+  | {
+      type: 'node'
+      id: string
+      node: SurfaceNode
+      toolResult?: ToolResultSurfaceProps
+      children?: ToolCallView[]
+    }
   | { type: 'markdown-block'; id: string; block: MarkdownRenderBlock }
 
 function formatDuration(value?: number): string {
@@ -131,13 +140,36 @@ const renderItems = computed<RenderItem[]>(() => {
       toolResults.set(result.callId, result)
     }
   }
+  const parentCalls = new Map(
+    props.surface.nodes
+      .filter((node) => node.kind === 'tool-call' && toolProps(node).name === 'run_script')
+      .map((node) => [toolProps(node).callId, node]),
+  )
+  const nestedNodes = new Set<string>()
+  const children = new Map<string, ToolCallView[]>()
   for (const node of props.surface.nodes) {
+    if (node.kind !== 'tool-call') continue
+    const call = toolProps(node)
+    if (
+      !call.parentCallId ||
+      call.parentCallId === call.callId ||
+      !parentCalls.has(call.parentCallId)
+    )
+      continue
+    nestedNodes.add(node.nodeId)
+    const list = children.get(call.parentCallId) ?? []
+    list.push(toolCallView(call, toolResults.get(call.callId), props.surface.state !== 'open'))
+    children.set(call.parentCallId, list)
+  }
+  for (const node of props.surface.nodes) {
+    if (nestedNodes.has(node.nodeId)) continue
     if (node.kind !== 'markdown') {
       items.push({
         type: 'node',
         id: node.nodeId,
         node,
         toolResult: node.kind === 'tool-call' ? toolResults.get(toolProps(node).callId) : undefined,
+        children: node.kind === 'tool-call' ? children.get(toolProps(node).callId) : undefined,
       })
       continue
     }
@@ -253,7 +285,9 @@ function runState(status: StatusSurfaceProps): StatusSurfaceProps['state'] {
 
 function runLabel(status: StatusSurfaceProps): string | undefined {
   if (runState(status) === 'waiting_input' && pendingInteraction.value)
-    return pendingInteraction.value === 'approval' ? '正在等待你的确认……' : '正在等待你的回答……'
+    return pendingInteraction.value === 'approval'
+      ? __t('ui.compositor', '正在等待你的确认……')
+      : __t('ui.compositor', '正在等待你的回答……')
   if (status.state === 'calling' && /自动审批/.test(status.message ?? '')) return status.message
   // 活动阶段使用统一状态文案，避免旧服务端的阶段描述覆盖真实状态。
   return ['thinking', 'assembling', 'calling', 'generating'].includes(status.state)
@@ -477,9 +511,13 @@ function errorMessage(node: SurfaceNode): string {
         <details v-else-if="item.node.kind === 'thinking'" class="surface-thinking" open>
           <summary>
             <span class="surface-thinking__spark" aria-hidden="true" />
-            <strong>碎碎念</strong>
+            <strong>{{ __t('ui.compositor', '碎碎念') }}</strong>
             <span class="surface-thinking__meta">
-              {{ thinkingProps(item.node).phase === 'preview' ? '正在冒泡' : '暂告一段' }}
+              {{
+                thinkingProps(item.node).phase === 'preview'
+                  ? __t('ui.compositor', '正在冒泡')
+                  : __t('ui.compositor', '暂告一段')
+              }}
             </span>
             <time v-if="thinkingProps(item.node).durationMs !== undefined">
               {{ formatDuration(thinkingProps(item.node).durationMs) }}
@@ -509,11 +547,16 @@ function errorMessage(node: SurfaceNode): string {
         >
           <summary>
             <span class="surface-native-reasoning__cube" aria-hidden="true" />
-            <strong>思考过程</strong>
+            <strong>{{ __t('ui.compositor', '思考过程') }}</strong>
             <span class="surface-native-reasoning__meta">
-              {{ reasoningProps(item.node).mode === 'stream' ? '流式' : '非流式' }}
+              {{
+                reasoningProps(item.node).mode === 'stream'
+                  ? __t('ui.compositor', '流式')
+                  : __t('ui.compositor', '非流式')
+              }}
               <template v-if="reasoningProps(item.node).turn">
-                · 第 {{ reasoningProps(item.node).turn }} 轮
+                {{ __t('ui.compositor', '· 第') }} {{ reasoningProps(item.node).turn }}
+                {{ __t('ui.compositor', '轮') }}
               </template>
             </span>
             <time v-if="reasoningProps(item.node).durationMs !== undefined">
@@ -536,25 +579,15 @@ function errorMessage(node: SurfaceNode): string {
         <ResourceCard
           v-else-if="item.node.kind === 'tool-call' && toolResource(item.node, item.toolResult)"
           :resource="toolResource(item.node, item.toolResult)!"
+          :active="!surface.suspended && mainVisible"
         />
         <ToolCallCard
           v-else-if="item.node.kind === 'tool-call'"
           :active="!surface.suspended && mainVisible"
           :chain-start="!toolChainEdge(itemIndex, -1)"
           :chain-end="!toolChainEdge(itemIndex, 1)"
-          :tool="{
-            name: toolProps(item.node).name || 'assembling_tool',
-            args: toolProps(item.node).args || toolProps(item.node).argsPreview || '',
-            result: item.toolResult?.result,
-            isError: item.toolResult?.isError,
-            durationMs: item.toolResult?.durationMs,
-            automaticApproval: item.toolResult?.automaticApproval,
-            receivedChars: toolProps(item.node).receivedChars,
-            assembling: toolProps(item.node).state === 'assembling',
-            interrupted: toolProps(item.node).state === 'failed' && !item.toolResult,
-            fileBaseline: toolProps(item.node).fileBaseline,
-            previewTruncated: toolProps(item.node).previewTruncated,
-          }"
+          :children="item.children"
+          :tool="toolCallView(toolProps(item.node), item.toolResult, surface.state !== 'open')"
         />
         <div v-else-if="item.node.kind === 'tool-result'" class="surface-tool-result">
           {{ resultProps(item.node).result }}
@@ -568,7 +601,7 @@ function errorMessage(node: SurfaceNode): string {
           class="surface-run-pulse"
         />
         <div v-else-if="item.node.kind === 'progress'" class="surface-progress">
-          <span>{{ progressProps(item.node).stage || '任务进度' }}</span>
+          <span>{{ progressProps(item.node).stage || __t('ui.compositor', '任务进度') }}</span>
           <div class="surface-progress__track">
             <i :style="{ width: `${progressProps(item.node).value ?? 0}%` }" />
           </div>
@@ -589,7 +622,12 @@ function errorMessage(node: SurfaceNode): string {
         <div v-else-if="item.node.kind === 'input'" class="surface-input">
           <strong>{{ inputProps(item.node).title }}</strong>
           <p>{{ inputProps(item.node).question }}</p>
-          <textarea v-model="inputMessage" rows="2" maxlength="2000" placeholder="附言（可选）" />
+          <textarea
+            v-model="inputMessage"
+            rows="2"
+            maxlength="2000"
+            :placeholder="__t('ui.compositor', '附言（可选）')"
+          />
           <p v-if="inputErrors[item.node.nodeId]" role="alert">
             {{ inputErrors[item.node.nodeId] }}
           </p>
@@ -609,6 +647,7 @@ function errorMessage(node: SurfaceNode): string {
         <ResourceCard
           v-else-if="item.node.kind === 'attachment'"
           :resource="attachmentProps(item.node)"
+          :active="!surface.suspended && mainVisible"
         />
         <ApprovalCard
           v-else-if="item.node.kind === 'approval'"
@@ -694,8 +733,12 @@ function errorMessage(node: SurfaceNode): string {
   filter: drop-shadow(2px 3px 0 color-mix(in srgb, var(--ui-accent-purple) 18%, transparent));
 }
 .surface-thinking[open] {
-  width: auto;
+  width: min(100%, 60rem);
+  max-width: 100%;
   filter: none;
+}
+.surface-thinking:not([open]) summary {
+  grid-template-columns: 12px auto minmax(0, auto) auto 14px;
 }
 .surface-thinking summary {
   position: relative;
@@ -885,7 +928,7 @@ function errorMessage(node: SurfaceNode): string {
 }
 
 .surface-native-reasoning {
-  width: 96%;
+  width: fit-content;
   max-width: 100%;
   margin: 10px 0;
   overflow: hidden;
@@ -895,6 +938,18 @@ function errorMessage(node: SurfaceNode): string {
   color: var(--ui-text-secondary);
   box-shadow: 0 6px 18px color-mix(in srgb, var(--ui-accent-purple) 8%, transparent);
   font-size: 12px;
+}
+.surface-native-reasoning[open] {
+  width: min(100%, 60rem);
+}
+.surface-native-reasoning:not([open]) summary {
+  grid-template-columns: 12px auto minmax(0, auto) auto 14px;
+}
+.surface-native-reasoning__meta,
+.surface-thinking__meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .surface-native-reasoning summary {
   display: grid;

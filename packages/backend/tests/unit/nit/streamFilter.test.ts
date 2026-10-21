@@ -92,6 +92,8 @@ describe('ThinkingStreamFilter', () => {
     })
 
     it.each([
+      ['selfMinding', '<selfMinding>角色的碎碎念</selfMinding>'],
+      ['SELFMINDING', '<SELFMINDING>大小写兼容</SELFMINDING>'],
       ['thought', '<thought>另一种思考标签</thought>'],
       ['thinking', '<thinking>完整名称标签</thinking>'],
     ])('应当隐藏并采集%s别名块', (_name, block) => {
@@ -132,6 +134,50 @@ describe('ThinkingStreamFilter', () => {
       const output = filter.filter('可见<think>未闭合') + filter.flush()
 
       expect(output).toBe('可见')
+    })
+
+    it.each(['selfMinding', 'think'])('逐字符拆分 %s 仍保持正文与碎碎念事件顺序', (tag) => {
+      const filter = new ThinkingStreamFilter()
+      const input = `前<${tag}>碎碎念</${tag}>中<selfMinding>第二段</selfMinding>后`
+      const output =
+        [...input].map((character) => filter.filter(character)).join('') + filter.flush()
+      const events = filter.drainEvents()
+      expect(output).toBe('前中后')
+      expect(events.filter((event) => event.type === 'start')).toHaveLength(2)
+      expect(events.filter((event) => event.type === 'end')).toHaveLength(2)
+      expect(events.map((event) => (event.type === 'delta' ? event.delta : '')).join('')).toBe(
+        '碎碎念第二段',
+      )
+      expect(
+        events
+          .filter((event) => event.type === 'text')
+          .map((event) => event.text)
+          .join(''),
+      ).toBe('前中后')
+    })
+
+    it('selfMinding 开始标签的属性跨块时不泄漏到正文', () => {
+      const filter = new ThinkingStreamFilter()
+      const output = [
+        filter.filter('前<selfMinding '),
+        filter.filter('data-kind="长属性用于模拟跨块接收"'),
+        filter.filter('>碎碎念</selfMind'),
+        filter.filter('ing>后'),
+        filter.flush(),
+      ].join('')
+      expect(output).toBe('前后')
+      expect(filter.drainEvents()).toContainEqual({ type: 'delta', delta: '碎碎念' })
+    })
+
+    it('未闭合 selfMinding 保存碎碎念并结束事件，不混入正文', () => {
+      const filter = new ThinkingStreamFilter()
+      expect(filter.filter('正文<selfMinding>还没说完') + filter.flush()).toBe('正文')
+      expect(filter.drainEvents()).toEqual([
+        { type: 'text', text: '正文' },
+        { type: 'start' },
+        { type: 'delta', delta: '还没说完' },
+        { type: 'end' },
+      ])
     })
   })
 })

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import { computed, ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useSelectionIndicator } from '../../composables/ui/useSelectionIndicator'
 import type { DesktopTab } from '@infos/shared'
@@ -69,8 +71,13 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <header class="desktop-tabbar" aria-label="应用标签栏">
-    <div ref="strip" class="desktop-tab-strip" role="tablist" aria-label="已打开的应用">
+  <header class="desktop-tabbar" :aria-label="__t('ui.layout', '应用标签栏')">
+    <div
+      ref="strip"
+      class="desktop-tab-strip"
+      role="tablist"
+      :aria-label="__t('ui.layout', '已打开的应用')"
+    >
       <div
         class="desktop-tab-selection"
         :class="{ 'is-ready': selection.ready.value }"
@@ -120,21 +127,21 @@ onUnmounted(() => {
           <span
             v-if="tab.locked"
             class="desktop-tab-busy"
-            title="Agent 操作中"
-            aria-label="Agent 操作中"
+            :title="__t('ui.layout', 'Agent 操作中')"
+            :aria-label="__t('ui.layout', 'Agent 操作中')"
           />
           <span
             v-else-if="tab.dirty"
             class="desktop-tab-dirty"
-            title="有未提交的草稿"
-            aria-label="有未提交的草稿"
+            :title="__t('ui.layout', '有未提交的草稿')"
+            :aria-label="__t('ui.layout', '有未提交的草稿')"
           />
         </button>
         <button
           v-if="tab.kind !== 'home'"
           class="desktop-tab-close"
           type="button"
-          :aria-label="`关闭 ${tab.title}`"
+          :aria-label="__t('ui.layout', '关闭 {0}', [tab.title])"
           @click="emit('close', tab.id)"
         >
           <PixelIcon name="close" size="xs" />
@@ -144,8 +151,8 @@ onUnmounted(() => {
     <button
       class="desktop-bar-button desktop-new-tab"
       type="button"
-      title="新标签页（Ctrl+T）"
-      aria-label="新建标签页"
+      :title="__t('ui.layout', '新标签页（Ctrl+T）')"
+      :aria-label="__t('ui.layout', '新建标签页')"
       @click="emit('create')"
     >
       <PixelIcon name="plus" size="sm" />
@@ -155,8 +162,8 @@ onUnmounted(() => {
       <button
         class="desktop-bar-button"
         type="button"
-        :title="theme === 'light' ? '切换到深色' : '切换到浅色'"
-        aria-label="切换深浅主题"
+        :title="theme === 'light' ? __t('ui.layout', '切换到深色') : __t('ui.layout', '切换到浅色')"
+        :aria-label="__t('ui.layout', '切换深浅主题')"
         @click="emit('theme')"
       >
         <PixelIcon :name="theme === 'light' ? 'moon' : 'sun'" size="sm" />
@@ -164,8 +171,8 @@ onUnmounted(() => {
       <button
         class="desktop-bar-button"
         type="button"
-        title="应用更新中心"
-        aria-label="打开应用更新中心"
+        :title="__t('ui.layout', '应用更新中心')"
+        :aria-label="__t('ui.layout', '打开应用更新中心')"
         @click="emit('update')"
       >
         <PixelIcon name="download" size="sm" />
@@ -174,8 +181,8 @@ onUnmounted(() => {
       <button
         class="desktop-bar-button desktop-window-button"
         type="button"
-        title="最小化"
-        aria-label="最小化窗口"
+        :title="__t('ui.layout', '最小化')"
+        :aria-label="__t('ui.layout', '最小化窗口')"
         @click="invoke('window-minimize')"
       >
         <PixelIcon name="minus" size="sm" />
@@ -183,8 +190,8 @@ onUnmounted(() => {
       <button
         class="desktop-bar-button desktop-window-button"
         type="button"
-        :title="maximized ? '还原' : '最大化'"
-        :aria-label="maximized ? '还原窗口' : '最大化窗口'"
+        :title="maximized ? __t('ui.layout', '还原') : __t('ui.layout', '最大化')"
+        :aria-label="maximized ? __t('ui.layout', '还原窗口') : __t('ui.layout', '最大化窗口')"
         @click="toggleMaximize"
       >
         <PixelIcon :name="maximized ? 'copy' : 'square'" size="sm" />
@@ -192,8 +199,8 @@ onUnmounted(() => {
       <button
         class="desktop-bar-button desktop-window-button desktop-window-close"
         type="button"
-        title="关闭窗口"
-        aria-label="关闭窗口"
+        :title="__t('ui.layout', '关闭窗口')"
+        :aria-label="__t('ui.layout', '关闭窗口')"
         @click="invoke('window-close')"
       >
         <PixelIcon name="close" size="sm" />

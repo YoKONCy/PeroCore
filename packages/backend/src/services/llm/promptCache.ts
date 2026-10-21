@@ -1,7 +1,11 @@
+import { t as __t } from '../../lib/i18n'
 import { createHash } from 'node:crypto'
 import type { ChatMessage, ToolDefinition } from './types'
 import { releaseFileEditReferences } from '../execution/fileEditing'
 import { releaseToolObservations } from '../execution/toolObservation'
+import { createLogger } from '../../lib/logger'
+
+const logger = createLogger('PromptReplay')
 
 /** 对象键固定排序，数组与模型返回的原生数据顺序保持原样。 */
 export function canonicalValue(value: unknown): unknown {
@@ -54,6 +58,7 @@ interface Entry {
   fingerprint: string
   expected: string[]
   reply: string
+  deliveries?: Array<{ key: string; reply: string }>
   messages: ChatMessage[]
   expires: number
   bytes: number
@@ -133,15 +138,47 @@ export function preparePromptReplay(scope: string, input: ChatMessage[], identit
   entries.delete(scope)
   const replyGroup = previous && history[previous.expected.length]
   const replyMessage = replyGroup?.messages.at(-1)
+  const deliveriesMatch = previous?.deliveries?.length
+    ? previous.deliveries.every((delivery, index) => {
+        const group = history[previous.expected.length + index]
+        const message = group?.messages.at(-1)
+        return (
+          group?.key === delivery.key &&
+          message?.role === 'assistant' &&
+          !group.messages.some((item) => item.cacheControl?.edited) &&
+          (message.cacheControl?.reply ?? message.content) === delivery.reply
+        )
+      })
+    : replyMessage?.role === 'assistant' &&
+      !replyGroup?.messages.some((message) => message.cacheControl?.edited) &&
+      (replyMessage.cacheControl?.reply ?? replyMessage.content) === previous?.reply
   const compatible =
     ordered &&
     previous &&
     previous.expires > Date.now() &&
     previous.fingerprint === fingerprint &&
     previous.expected.every((key, index) => keys[index] === key) &&
-    replyMessage?.role === 'assistant' &&
-    !replyGroup?.messages.some((message) => message.cacheControl?.edited) &&
-    (replyMessage.cacheControl?.reply ?? replyMessage.content) === previous.reply
+    deliveriesMatch
+  const reason = compatible
+    ? '完整轨迹已复用'
+    : !previous
+      ? '无可用热轨迹或进程已重启'
+      : previous.expires <= Date.now()
+        ? '热轨迹已过期'
+        : !ordered
+          ? '历史消息布局不连续'
+          : previous.fingerprint !== fingerprint
+            ? '模型、工具或系统前缀发生变化'
+            : !previous.expected.every((key, index) => keys[index] === key)
+              ? '历史滑出、撤回或内容发生变化'
+              : '已送达消息组缺失、顺序变化或被修改'
+  logger.debug(__t('logs.llm', '提示词轨迹续接'), {
+    scope,
+    reused: Boolean(compatible),
+    reason,
+    historyMessages: history.length,
+    deliveredMessages: previous?.deliveries?.length ?? (previous ? 1 : 0),
+  })
   let messages = structuredClone(input)
   const turnStart = messages.find(
     (message) => message.role !== 'system' && message.cacheControl?.kind !== 'history',
@@ -153,7 +190,7 @@ export function preparePromptReplay(scope: string, input: ChatMessage[], identit
       turnStart: true,
     }
   if (compatible) {
-    const consumed = previous.expected.length + 1
+    const consumed = previous.expected.length + (previous.deliveries?.length || 1)
     const consumedThrough = history[consumed - 1]!.lastIndex
     const tail = messages.filter((message, index) => {
       if (message.role === 'system') return false
@@ -165,7 +202,12 @@ export function preparePromptReplay(scope: string, input: ChatMessage[], identit
   return {
     messages,
     reused: Boolean(compatible),
-    commit(transcript: ChatMessage[], visibleReply: string): void {
+    reason,
+    commit(
+      transcript: ChatMessage[],
+      visibleReply: string,
+      deliveries?: Array<{ key: string; reply: string }>,
+    ): void {
       if (epoch !== privacyEpoch || !visibleReply.trim()) return
       const last = transcript.at(-1)
       if (
@@ -185,6 +227,7 @@ export function preparePromptReplay(scope: string, input: ChatMessage[], identit
         fingerprint,
         expected,
         reply: visibleReply,
+        deliveries: deliveries?.length ? structuredClone(deliveries) : undefined,
         messages: structuredClone(transcript),
         bytes,
         expires: Date.now() + 30 * 60_000,

@@ -1,3 +1,5 @@
+import { t as __t, applyLanguage } from '../../i18n/index'
+import { createClientUuid } from '../../lib/clientPlatform'
 /**
  * Gateway WebSocket Composable
  *
@@ -30,8 +32,6 @@ export interface GatewayMessage {
   type: string
   payload: Record<string, unknown>
 }
-
-const sharedGateway = createGatewayClient()
 
 export function useGateway(events: GatewayEvents = {}) {
   const unsubscribeEvents = sharedGateway.subscribeEvents(events)
@@ -89,8 +89,6 @@ interface PendingRequest {
 
 /** 重连配置 */
 interface ReconnectConfig {
-  /** 最大重连次数 */
-  maxRetries: number
   /** 初始延迟（毫秒） */
   baseDelay: number
   /** 最大延迟（毫秒） */
@@ -98,21 +96,24 @@ interface ReconnectConfig {
 }
 
 const DEFAULT_RECONNECT: ReconnectConfig = {
-  maxRetries: 10,
   baseDelay: 1000,
   maxDelay: 30000,
 }
+
+const CONNECTION_TIMEOUT_MS = 12_000
+const HEARTBEAT_INTERVAL_MS = 25_000
+const HEARTBEAT_TIMEOUT_MS = 12_000
 
 const CLIENT_NODE_KEY = 'infos.clientNodeId'
 function getOrCreateStableNodeId(): string {
   try {
     const existing = localStorage.getItem(CLIENT_NODE_KEY)
     if (existing) return existing
-    const nodeId = `client-${crypto.randomUUID()}`
+    const nodeId = `client-${createClientUuid()}`
     localStorage.setItem(CLIENT_NODE_KEY, nodeId)
     return nodeId
   } catch {
-    return `client-${crypto.randomUUID()}`
+    return `client-${createClientUuid()}`
   }
 }
 
@@ -130,7 +131,10 @@ function detectClientOs(): 'windows' | 'linux' | 'macos' | 'android' | 'ios' | '
   return 'web'
 }
 
-function createGatewayClient() {
+const sharedGateway = createGatewayClient()
+if (import.meta.hot) import.meta.hot.dispose(() => sharedGateway.dispose())
+
+export function createGatewayClient() {
   const eventSubscribers = new Set<GatewayEvents>()
   const events: GatewayEvents = {
     onNotification: (data) => eventSubscribers.forEach((item) => item.onNotification?.(data)),
@@ -156,6 +160,14 @@ function createGatewayClient() {
   let ws: WebSocket | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null
+  let heartbeatDeadline: ReturnType<typeof setTimeout> | null = null
+  let connectionDeadline: ReturnType<typeof setTimeout> | null = null
+  let connectionAttempt: Promise<void> | null = null
+  let connectionEpoch = 0
+  let lastInboundAt = 0
+  let hasStarted = false
+  let authorizationBlocked = false
+  let disposed = false
   let seatRenewTimer: ReturnType<typeof setInterval> | null = null
   let seatRecovery: Promise<void> | null = null
   const seatAcquisitions = new Map<string, Promise<KernelInputSeat>>()
@@ -181,7 +193,7 @@ function createGatewayClient() {
   ): GatewayEnvelope {
     return {
       protocolVersion: 1,
-      id: crypto.randomUUID(),
+      id: createClientUuid(),
       type,
       sourceId: 'frontend',
       targetId,
@@ -232,40 +244,64 @@ function createGatewayClient() {
         stableNodeId = capabilityNodeId.trim()
       }
     } catch (error) {
-      logger.warn('Gateway', `读取 Electron 能力节点 ID 失败: ${(error as Error).message}`)
+      logger.warn(
+        'Gateway',
+        __t('logs.frontend.gateway', '读取 Electron 能力节点 ID 失败: {0}', [
+          (error as Error).message,
+        ]),
+      )
     }
   }
 
   /** 建立 WebSocket 连接 */
   async function connect(): Promise<void> {
-    if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
-      return
-    }
-
-    await resolveStableNodeId()
-    if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
-      return
-    }
-
+    if (disposed || authorizationBlocked) return
+    hasStarted = true
     isManualClose = false
+    if (navigator.onLine === false) {
+      state.value = 'disconnected'
+      return
+    }
+    if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+      if (
+        sessionId.value &&
+        Date.now() - lastInboundAt > HEARTBEAT_INTERVAL_MS + HEARTBEAT_TIMEOUT_MS
+      )
+        return reconnect()
+      return
+    }
+    if (connectionAttempt) return connectionAttempt
+    clearReconnectTimer()
+    const epoch = ++connectionEpoch
     state.value = retryCount.value > 0 ? 'reconnecting' : 'connecting'
+    connectionDeadline = setTimeout(() => {
+      if (connectionEpoch === epoch) restartConnection('连接或握手超时，正在重新连接')
+    }, CONNECTION_TIMEOUT_MS)
+    const attempt = openConnection(epoch)
+    connectionAttempt = attempt
+    try {
+      await attempt
+    } finally {
+      if (connectionAttempt === attempt) connectionAttempt = null
+    }
+  }
+
+  async function openConnection(epoch: number): Promise<void> {
+    await resolveStableNodeId()
+    if (epoch !== connectionEpoch || disposed || isManualClose || authorizationBlocked) return
 
     let socket: WebSocket
     try {
       socket = new WebSocket(getGatewayWsUrl())
       ws = socket
     } catch (error) {
-      lastError.value = (error as Error).message
-      scheduleReconnect()
+      restartConnection((error as Error).message)
       return
     }
 
     socket.onopen = () => {
       if (ws !== socket) return
-      state.value = 'connected'
-      retryCount.value = 0
-      lastError.value = null
-      sendEnvelope(
+      const sent = sendEnvelope(
         createEnvelope('hello', {
           nodeId: stableNodeId,
           principalId,
@@ -278,8 +314,7 @@ function createGatewayClient() {
           features: ['surface-v1', 'audience-v1', 'cursor-v1', 'input-seat-v1', 'audio-output-v1'],
         }),
       )
-      startHeartbeat()
-      logger.info('Gateway', 'WS 已连接')
+      if (!sent) restartConnection('发送连接握手失败')
     }
 
     socket.onmessage = (event) => {
@@ -290,26 +325,25 @@ function createGatewayClient() {
         return
       }
       if (event.data instanceof Blob) {
-        void event.data.arrayBuffer().then((buf) => events.onAudioChunk?.(buf))
+        void event.data.arrayBuffer().then((buf) => {
+          if (ws === socket) events.onAudioChunk?.(buf)
+        })
         return
       }
       handleMessage(event.data as string)
     }
 
-    socket.onclose = () => {
+    socket.onclose = (event) => {
       if (ws !== socket) return
-      ws = null
-      state.value = 'disconnected'
-      stopHeartbeat()
-      stopSeatRenewal()
-      inputSeat.value = null
-      sessionId.value = null
-      rejectSessionWaiters()
-      for (const pending of pendingRequests.values()) {
-        clearTimeout(pending.timer)
-        pending.reject(new Error('交互连接已断开，请稍后重试'))
+      closeCurrentConnection()
+
+      if (!isElectronClient() && event.code === 1008 && event.reason.includes('授权')) {
+        window.dispatchEvent(new Event('infos:unauthorized'))
       }
-      pendingRequests.clear()
+      if (!isElectronClient() && event.code === 1006 && !isManualClose) {
+        // 浏览器不暴露握手 HTTP 状态，由统一身份管理确认授权；临时断网仍继续重连。
+        window.dispatchEvent(new Event('infos:session-check-requested'))
+      }
 
       if (!isManualClose) {
         scheduleReconnect()
@@ -322,19 +356,26 @@ function createGatewayClient() {
     }
   }
 
-  function sendEnvelope(envelope: GatewayEnvelope): void {
+  function sendEnvelope(envelope: GatewayEnvelope): boolean {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      logger.warn('Gateway', 'WS 未连接，无法发送消息')
-      return
+      logger.warn('Gateway', __t('logs.frontend.gateway', 'WS 未连接，无法发送消息'))
+      return false
     }
-
-    ws.send(JSON.stringify(envelope))
+    try {
+      ws.send(JSON.stringify(envelope))
+      return true
+    } catch (error) {
+      logger.warn('Gateway', __t('logs.frontend.gateway', '发送网关消息失败'), error)
+      return false
+    }
   }
 
-  /** 断开连接 */
-  function disconnect(): void {
-    isManualClose = true
-    clearReconnectTimer()
+  /** 立即废弃旧连接及其异步回调，浏览器未触发 close 时也能重新建立连接。 */
+  function closeCurrentConnection(): void {
+    connectionEpoch++
+    connectionAttempt = null
+    if (connectionDeadline) clearTimeout(connectionDeadline)
+    connectionDeadline = null
     stopHeartbeat()
     stopSeatRenewal()
     inputSeat.value = null
@@ -348,19 +389,38 @@ function createGatewayClient() {
       pendingRequests.delete(id)
     }
 
-    if (ws) {
-      ws.close()
-      ws = null
-    }
-
+    const socket = ws
+    ws = null
+    if (socket) socket.close()
     state.value = 'disconnected'
+  }
+
+  /** 断开连接 */
+  function disconnect(): void {
+    isManualClose = true
+    hasStarted = false
+    clearReconnectTimer()
+    closeCurrentConnection()
     retryCount.value = 0
+  }
+
+  function restartConnection(message: string): void {
+    lastError.value = message
+    closeCurrentConnection()
+    scheduleReconnect()
+  }
+
+  /** 手动重连必须释放失活但仍显示 OPEN 的旧连接。 */
+  async function reconnect(): Promise<void> {
+    clearReconnectTimer()
+    closeCurrentConnection()
+    await connect()
   }
 
   /** 发送消息 (fire-and-forget) */
   function send(type: string, payload: Record<string, unknown> = {}): void {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      logger.warn('Gateway', 'WS 未连接，无法发送消息')
+      logger.warn('Gateway', __t('logs.frontend.gateway', 'WS 未连接，无法发送消息'))
       return
     }
     sendEnvelope(createEnvelope(type, payload))
@@ -384,32 +444,40 @@ function createGatewayClient() {
     timeoutMs = RPC_TIMEOUT_MS,
   ): Promise<Record<string, unknown>> {
     return new Promise((resolve, reject) => {
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
+      if (!ws || ws.readyState !== WebSocket.OPEN || !sessionId.value) {
         reject(new Error('[Gateway] WS 未连接，无法发送 RPC 请求'))
         return
       }
 
-      const id = crypto.randomUUID()
+      const id = createClientUuid()
       const timer = setTimeout(() => {
         pendingRequests.delete(id)
         reject(new Error(`[Gateway] RPC 超时: ${action} (${timeoutMs}ms)`))
       }, timeoutMs)
 
       pendingRequests.set(id, { resolve, reject, timer })
-      sendEnvelope({
+      const sent = sendEnvelope({
         ...createEnvelope('request', { action, ...payload }),
         id,
       })
+      if (!sent) {
+        clearTimeout(timer)
+        pendingRequests.delete(id)
+        reject(new Error('[Gateway] 发送请求失败，请稍后重试'))
+        restartConnection('发送请求失败，正在重新连接')
+      }
     })
   }
 
   async function subscribe(streamId: string): Promise<void> {
     if (!subscriptions.has(streamId)) subscriptions.set(streamId, 0)
     if (!ws || ws.readyState !== WebSocket.OPEN || !sessionId.value) return
+    const requestedSession = sessionId.value
     const result = await request('gateway.subscribe', {
       streamId,
       lastSequence: subscriptions.get(streamId) ?? 0,
     })
+    if (sessionId.value !== requestedSession) return
     subscriptions.set(streamId, Number(result.latestSequence ?? 0))
     if (result.snapshotRequired === true) {
       window.dispatchEvent(
@@ -517,9 +585,15 @@ function createGatewayClient() {
   }
 
   function handleWindowFocus(): void {
+    resumeConnection()
     if (sessionId.value) {
       void recoverInputSeat().catch((error) => {
-        logger.warn('Gateway', `聚焦窗口获取 Input Seat 失败: ${(error as Error).message}`)
+        logger.warn(
+          'Gateway',
+          __t('logs.frontend.gateway', '聚焦窗口获取 Input Seat 失败: {0}', [
+            (error as Error).message,
+          ]),
+        )
       })
     }
   }
@@ -529,9 +603,49 @@ function createGatewayClient() {
     inputSeat.value = null
   }
 
+  function resumeConnection(): void {
+    if (!hasStarted || disposed || isManualClose || authorizationBlocked || document.hidden) return
+    if (navigator.onLine === false) return
+    if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+      clearReconnectTimer()
+      void connect()
+    } else if (sessionId.value) {
+      if (Date.now() - lastInboundAt > HEARTBEAT_INTERVAL_MS + HEARTBEAT_TIMEOUT_MS) {
+        void reconnect()
+      } else {
+        probeConnection()
+      }
+    }
+  }
+
+  function handleOffline(): void {
+    if (!hasStarted) return
+    clearReconnectTimer()
+    closeCurrentConnection()
+    lastError.value = '网络已断开，恢复网络后将自动连接'
+  }
+
+  function handleUnauthorized(): void {
+    if (isElectronClient()) return
+    authorizationBlocked = true
+    clearReconnectTimer()
+    closeCurrentConnection()
+  }
+
+  function handleAuthorized(): void {
+    authorizationBlocked = false
+    resumeConnection()
+  }
+
   if (typeof window !== 'undefined') {
     window.addEventListener('focus', handleWindowFocus)
     window.addEventListener('blur', handleWindowBlur)
+    window.addEventListener('online', resumeConnection)
+    window.addEventListener('offline', handleOffline)
+    window.addEventListener('pageshow', resumeConnection)
+    window.addEventListener('infos:authorized', handleAuthorized)
+    window.addEventListener('infos:unauthorized', handleUnauthorized)
+    document.addEventListener('visibilitychange', resumeConnection)
   }
 
   function startSeatRenewal(): void {
@@ -551,11 +665,19 @@ function createGatewayClient() {
             error.code === 'INPUT_SEAT_IDENTITY_MISMATCH'
           ) {
             void recoverInputSeat().catch((recoveryError) => {
-              logger.warn('Gateway', `Input Seat 重新获取失败: ${(recoveryError as Error).message}`)
+              logger.warn(
+                'Gateway',
+                __t('logs.frontend.gateway', 'Input Seat 重新获取失败: {0}', [
+                  (recoveryError as Error).message,
+                ]),
+              )
             })
             return
           }
-          logger.warn('Gateway', `Input Seat 续租失败: ${error.message}`)
+          logger.warn(
+            'Gateway',
+            __t('logs.frontend.gateway', 'Input Seat 续租失败: {0}', [error.message]),
+          )
         })
     }, 30_000)
   }
@@ -647,7 +769,7 @@ function createGatewayClient() {
    */
   function sendStream(audioData: ArrayBuffer): void {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      logger.warn('Gateway', 'WS 未连接，无法发送音频流')
+      logger.warn('Gateway', __t('logs.frontend.gateway', 'WS 未连接，无法发送音频流'))
       return
     }
     ws.send(audioData)
@@ -666,7 +788,7 @@ function createGatewayClient() {
       try {
         handler(payload)
       } catch (error) {
-        logger.error('Gateway', '通配符回调错误', error)
+        logger.error('Gateway', __t('logs.frontend.gateway', '通配符回调错误'), error)
       }
     }
 
@@ -679,7 +801,7 @@ function createGatewayClient() {
       try {
         handler(payload)
       } catch (error) {
-        logger.error('Gateway', `回调错误 (${action})`, error)
+        logger.error('Gateway', __t('logs.frontend.gateway', '回调错误 ({0})', [action]), error)
       }
     }
   }
@@ -690,10 +812,26 @@ function createGatewayClient() {
         payload: Record<string, unknown>
       }
       validateVersionedMessage(msg)
+      lastInboundAt = Date.now()
       if (msg.type === 'hello_ack') {
-        if (msg.payload.agreedVersion !== 1) throw new Error('KERNEL_PROTOCOL_AGREEMENT_REQUIRED')
-        sessionId.value = typeof msg.payload.sessionId === 'string' ? msg.payload.sessionId : null
+        if (
+          msg.payload.agreedVersion !== 1 ||
+          typeof msg.payload.sessionId !== 'string' ||
+          !msg.payload.sessionId
+        ) {
+          restartConnection('网关握手无效，正在重新连接')
+          return
+        }
+        if (sessionId.value) return
+        if (connectionDeadline) clearTimeout(connectionDeadline)
+        connectionDeadline = null
+        sessionId.value = msg.payload.sessionId
         sessionGeneration.value = Number(msg.payload.generation ?? 0)
+        state.value = 'connected'
+        retryCount.value = 0
+        lastError.value = null
+        startHeartbeat()
+        logger.info('Gateway', __t('logs.frontend.gateway', '连接与会话握手已完成'))
         if (sessionId.value) {
           for (const waiter of sessionWaiters) {
             clearTimeout(waiter.timer)
@@ -703,12 +841,20 @@ function createGatewayClient() {
         }
         if (document.hasFocus()) {
           void acquireInputSeat().catch((error) => {
-            logger.error('Gateway', 'Input Seat 获取失败', error)
+            logger.error('Gateway', __t('logs.frontend.gateway', 'Input Seat 获取失败'), error)
           })
         }
+        const restoredSession = sessionId.value
         void restoreSubscriptions().catch((error) => {
-          logger.error('Gateway', 'Durable Stream 恢复失败', error)
+          logger.error('Gateway', __t('logs.frontend.gateway', 'Durable Stream 恢复失败'), error)
+          if (sessionId.value === restoredSession && !(error as { code?: string }).code)
+            restartConnection('恢复事件订阅失败，正在重新连接')
         })
+        window.dispatchEvent(
+          new CustomEvent('infos:gateway-ready', {
+            detail: { sessionId: restoredSession },
+          }),
+        )
       }
       if (msg.id && msg.type === 'push') {
         if (seenMessageIds.has(msg.id)) return
@@ -770,6 +916,7 @@ function createGatewayClient() {
           break
         }
         case 'state_update':
+          if (typeof msg.payload.language === 'string') applyLanguage(msg.payload.language)
           events.onStateUpdate?.(msg.payload)
           break
         case 'audio_chunk': {
@@ -789,10 +936,15 @@ function createGatewayClient() {
         case 'heartbeat':
         case 'heartbeat_ack':
         case 'pong':
+          if (heartbeatDeadline) clearTimeout(heartbeatDeadline)
+          heartbeatDeadline = null
           events.onHeartbeat?.()
           break
         default:
-          logger.debug('Gateway', `未知消息: type=${msg.type} action=${action}`)
+          logger.debug(
+            'Gateway',
+            __t('logs.frontend.gateway', '未知消息: type={0} action={1}', [msg.type, action]),
+          )
       }
     } catch {
       // JSON 解析失败，忽略
@@ -802,22 +954,26 @@ function createGatewayClient() {
   // ═══ 重连逻辑（指数退避） ═══
 
   function scheduleReconnect(): void {
-    if (retryCount.value >= DEFAULT_RECONNECT.maxRetries) {
-      logger.error('Gateway', `已达最大重连次数 (${DEFAULT_RECONNECT.maxRetries})，停止重连`)
-      state.value = 'disconnected'
-      return
-    }
+    if (disposed || isManualClose || authorizationBlocked || !hasStarted || reconnectTimer) return
+    if (navigator.onLine === false) return
 
     // 指数退避 + 随机抖动
     const delay = Math.min(
-      DEFAULT_RECONNECT.baseDelay * 2 ** retryCount.value + Math.random() * 500,
+      DEFAULT_RECONNECT.baseDelay * 2 ** Math.min(retryCount.value, 6) + Math.random() * 500,
       DEFAULT_RECONNECT.maxDelay,
     )
 
-    logger.info('Gateway', `${delay.toFixed(0)}ms 后重连 (第 ${retryCount.value + 1} 次)`)
+    logger.info(
+      'Gateway',
+      __t('logs.frontend.gateway', '{0}ms 后重连 (第 {1} 次)', [
+        delay.toFixed(0),
+        retryCount.value + 1,
+      ]),
+    )
     state.value = 'reconnecting'
 
     reconnectTimer = setTimeout(() => {
+      reconnectTimer = null
       retryCount.value++
       void connect()
     }, delay)
@@ -834,10 +990,21 @@ function createGatewayClient() {
 
   function startHeartbeat(): void {
     stopHeartbeat()
-    // 每 30 秒发送 ping，与后端 GatewayHub 心跳周期对齐
-    heartbeatTimer = setInterval(() => {
-      sendEnvelope(createEnvelope('heartbeat'))
-    }, 30_000)
+    heartbeatTimer = setInterval(probeConnection, HEARTBEAT_INTERVAL_MS)
+  }
+
+  /** OPEN 只是浏览器本地状态，必须收到心跳回执才算链路仍然可用。 */
+  function probeConnection(): void {
+    if (heartbeatDeadline || !sessionId.value) return
+    if (!sendEnvelope(createEnvelope('heartbeat'))) {
+      restartConnection('心跳发送失败，正在重新连接')
+      return
+    }
+    const socket = ws
+    heartbeatDeadline = setTimeout(() => {
+      heartbeatDeadline = null
+      if (ws === socket) restartConnection('心跳未收到回执，正在重新连接')
+    }, HEARTBEAT_TIMEOUT_MS)
   }
 
   function stopHeartbeat(): void {
@@ -845,9 +1012,26 @@ function createGatewayClient() {
       clearInterval(heartbeatTimer)
       heartbeatTimer = null
     }
+    if (heartbeatDeadline) clearTimeout(heartbeatDeadline)
+    heartbeatDeadline = null
   }
 
   // 应用级共享客户端由应用生命周期管理，不随单个组件卸载而断开。
+  function dispose(): void {
+    disposed = true
+    disconnect()
+    window.removeEventListener('focus', handleWindowFocus)
+    window.removeEventListener('blur', handleWindowBlur)
+    window.removeEventListener('online', resumeConnection)
+    window.removeEventListener('offline', handleOffline)
+    window.removeEventListener('pageshow', resumeConnection)
+    window.removeEventListener('infos:authorized', handleAuthorized)
+    window.removeEventListener('infos:unauthorized', handleUnauthorized)
+    document.removeEventListener('visibilitychange', resumeConnection)
+    eventSubscribers.clear()
+    pushHandlers.clear()
+    wildcardHandlers.length = 0
+  }
 
   return {
     subscribeEvents(events: GatewayEvents): () => void {
@@ -866,12 +1050,13 @@ function createGatewayClient() {
     connect,
     /** 断开连接 */
     disconnect,
+    dispose,
     /** 注册 push 回调 */
     onPush,
     /** 移除 push 回调 */
     offPush,
     /** 手动重连 */
-    reconnect: connect,
+    reconnect,
     /** 发送消息 (fire-and-forget) */
     send,
     /** RPC 请求/响应 */

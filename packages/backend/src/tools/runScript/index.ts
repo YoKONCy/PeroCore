@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * run_script — NIT 脚本执行工具
  *
@@ -116,7 +117,11 @@ export const runScriptTool: BuiltinTool = {
           capabilityGate.isPathAllowed(ctx.agentId, ctx.channel, 'run_script', cwd)
         if (!allowed) {
           logger.warn(
-            `run_script cwd 被 ResourceScope 拒绝: cwd=${cwd} (agent=${ctx.agentId}, channel=${ctx.channel})`,
+            __t(
+              'logs.tools',
+              'run_script cwd 被 ResourceScope 拒绝: cwd={0} (agent={1}, channel={2})',
+              [cwd, ctx.agentId, ctx.channel],
+            ),
           )
           throw new Error(`脚本工作目录被资源范围策略拒绝: ${cwd}`)
         }
@@ -124,7 +129,12 @@ export const runScriptTool: BuiltinTool = {
     }
 
     logger.info(
-      `执行 NIT 脚本 (${code.length} 字符, source=${ctx.source}, channel=${ctx.channel}, cwd=${cwd ?? '未注入'})`,
+      __t('logs.tools', '执行 NIT 脚本 ({0} 字符, source={1}, channel={2}, cwd={3})', [
+        code.length,
+        ctx.source,
+        ctx.channel,
+        cwd ?? '未注入',
+      ]),
     )
 
     const requestedTimeout =
@@ -196,19 +206,36 @@ export const runScriptTool: BuiltinTool = {
           let result: ToolExecutionResult
           try {
             if (!runScriptTool._toolExecutor) throw new Error('NIT 工具执行器尚未绑定')
+            const callId = `nit-${randomUUID()}`
+            if (ctx.toolCallId) {
+              try {
+                ctx.onNestedToolCall?.({
+                  callId,
+                  parentCallId: ctx.toolCallId,
+                  name,
+                  args: toolArgs,
+                })
+              } catch (error) {
+                logger.warn(__t('logs.tools', 'NIT 子工具开始事件记录失败，仍继续执行工具'), {
+                  name,
+                  error,
+                })
+              }
+            }
             const operation = runScriptTool._toolExecutor(name, toolArgs, ctx.source, {
               threadId: ctx.threadId,
               channel: ctx.channel,
               agentId: ctx.agentId,
               sessionId: ctx.sessionId,
               signal: branchSignal,
+              loopGuard: ctx.loopGuard,
               taskId: ctx.taskId,
               realmId: ctx.realmId,
               executionId: ctx.executionId,
               processId: ctx.processId,
               deadline,
               pairId: ctx.pairId,
-              toolCallId: `nit-${randomUUID()}`,
+              toolCallId: callId,
               executionMode: ctx.executionMode,
               interactionMode: ctx.interactionMode,
               disabledTools: ctx.disabledTools,
@@ -216,6 +243,7 @@ export const runScriptTool: BuiltinTool = {
               capabilityScope: ctx.capabilityScope,
               reviewMessages,
               onExecutionStatus: ctx.onExecutionStatus,
+              onNestedToolCall: ctx.onNestedToolCall,
               onToolObserved: ctx.onToolObserved,
             })
             pendingTools.add(operation)
@@ -255,7 +283,7 @@ export const runScriptTool: BuiltinTool = {
       const outputStr =
         typeof result.value === 'string' ? result.value : JSON.stringify(result.value ?? null)
 
-      logger.info(`NIT 脚本执行完成: ${result.toolCalls.length} 次工具调用`)
+      logger.info(__t('logs.tools', 'NIT 脚本执行完成: {0} 次工具调用', [result.toolCalls.length]))
 
       return JSON.stringify({
         success: true,
@@ -269,7 +297,7 @@ export const runScriptTool: BuiltinTool = {
     } catch (err) {
       controller.abort(err)
       const errMsg = err instanceof Error ? err.message : String(err)
-      logger.error(`NIT 脚本执行失败: ${errMsg}`)
+      logger.error(__t('logs.tools', 'NIT 脚本执行失败: {0}', [errMsg]))
       throw new Error(`NIT 脚本执行失败: ${errMsg}`)
     } finally {
       if (timer) clearTimeout(timer)
@@ -289,7 +317,11 @@ export const runScriptTool: BuiltinTool = {
               }),
             ])
             if (pendingTools.size || (scriptPromise && !scriptSettled))
-              logger.warn(`NIT 已发出取消，仍有 ${pendingTools.size} 个工具或脚本清理尚未确认结束`)
+              logger.warn(
+                __t('logs.tools', 'NIT 已发出取消，仍有 {0} 个工具或脚本清理尚未确认结束', [
+                  pendingTools.size,
+                ]),
+              )
           } finally {
             if (cleanupTimer) clearTimeout(cleanupTimer)
           }

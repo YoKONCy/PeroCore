@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 import type { EventNote, EventNoteRelation, MemoryBackgroundPolicy } from '@infos/shared'
 import { MemoryBackgroundControl } from './memoryBackgroundControl'
 import type { EventMemoryService } from './eventMemoryService'
@@ -116,7 +117,10 @@ export class EventReflectionService {
             continue
           }
           await this.repo.failReflectionTask(task.id, String(error))
-          logger.warn('事件关系维护失败，已记录重试退避', { taskId: task.id, error })
+          logger.warn(__t('logs.memory', '事件关系维护失败，已记录重试退避'), {
+            taskId: task.id,
+            error,
+          })
         }
       }
     } finally {

@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * WorkspaceService — Agent 个人文件空间服务
  *
@@ -251,7 +252,7 @@ export class LocalWorkspaceService implements WorkspaceService {
     const root = this.getWorkspaceRoot(agentId)
     if (!existsSync(root)) {
       mkdirSync(root, { recursive: true })
-      logger.info(`创建 workspace: ${root}`)
+      logger.info(__t('logs.workspace', '创建 workspace: {0}', [root]))
     }
   }
 
@@ -519,7 +520,9 @@ export class LocalWorkspaceService implements WorkspaceService {
       if (existsSync(requestedCwd) && statSync(requestedCwd).isDirectory()) {
         return requestedCwd
       }
-      logger.warn(`请求的 cwd 不存在或不是目录，回退到 workspace: ${requestedCwd}`)
+      logger.warn(
+        __t('logs.workspace', '请求的 cwd 不存在或不是目录，回退到 workspace: {0}', [requestedCwd]),
+      )
     }
 
     return workspaceRoot

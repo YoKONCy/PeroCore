@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import Icon from './PictoriaIcon.vue'
 import { resolutionRatio } from '../services/resolutionLabels'
@@ -13,7 +15,7 @@ const props = withDefaults(
     iconOnly?: boolean
     aspectRatio?: string
   }>(),
-  { modelValue: undefined, aspectRatio: undefined, placeholder: '选择', label: '选择' },
+  { modelValue: undefined, aspectRatio: undefined, placeholder: undefined, label: undefined },
 )
 const emit = defineEmits<{
   'update:modelValue': [value: string]
@@ -26,11 +28,14 @@ const trigger = ref<HTMLButtonElement | null>(null),
   active = ref(-1)
 const placement = ref({ left: 0, top: 0, width: 240, maxHeight: 240, up: false })
 const id = `select-${crypto.randomUUID()}`
+const displayLabel = computed(() => props.label ?? __t('apps.pictoria.ui', '选择'))
+const displayPlaceholder = computed(() => props.placeholder ?? __t('apps.pictoria.ui', '选择'))
 const optionCaption = (value: string) =>
   value.replace(/^(\d{2,5})\s*[*x×]\s*(\d{2,5})$/i, '$1 × $2')
 const caption = computed(() =>
   optionCaption(
-    props.options.find((option) => option.value === props.modelValue)?.label || props.placeholder,
+    props.options.find((option) => option.value === props.modelValue)?.label ||
+      displayPlaceholder.value,
   ),
 )
 const badge = computed(() =>
@@ -154,7 +159,7 @@ onBeforeUnmount(cleanup)
     :class="{ 'is-open': open, 'icon-only': iconOnly }"
     :disabled="disabled"
     role="combobox"
-    :aria-label="label"
+    :aria-label="displayLabel"
     :aria-expanded="open"
     :aria-controls="id"
     :aria-activedescendant="open && active >= 0 ? `${id}-${active}` : undefined"
@@ -186,7 +191,7 @@ onBeforeUnmount(cleanup)
           maxHeight: `${placement.maxHeight}px`,
         }"
         role="listbox"
-        :aria-label="label"
+        :aria-label="displayLabel"
         data-ui
         @keydown="key"
         @contextmenu.prevent
@@ -215,7 +220,9 @@ onBeforeUnmount(cleanup)
           </span>
           <Icon v-if="option.value === modelValue" name="check" :size="14" />
         </button>
-        <span v-if="!options.length" class="select-empty">暂无选项</span>
+        <span v-if="!options.length" class="select-empty">
+          {{ __t('apps.pictoria.ui', '暂无选项') }}
+        </span>
       </div>
     </Transition>
   </Teleport>

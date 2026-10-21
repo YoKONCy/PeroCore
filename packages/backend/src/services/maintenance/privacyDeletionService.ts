@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 import { randomUUID } from 'node:crypto'
 import type Database from 'better-sqlite3'
 import type { EventMemoryService } from '../memory/eventMemoryService'
@@ -500,7 +501,7 @@ export class PrivacyDeletionService {
         String(error).slice(0, 500),
         job.id,
       )
-      logger.error('永久删除尚未完成，清理记录已保留', {
+      logger.error(__t('logs.maintenance', '永久删除尚未完成，清理记录已保留'), {
         id: job.id,
         kind: job.kind,
         error: String(error),
@@ -517,7 +518,9 @@ export class PrivacyDeletionService {
     if (this.stopped || this.retryTimer) return
     this.retryTimer = setTimeout(() => {
       this.retryTimer = undefined
-      void this.recover().catch((error) => logger.error(`恢复数据清理失败: ${String(error)}`))
+      void this.recover().catch((error) =>
+        logger.error(__t('logs.maintenance', '恢复数据清理失败: {0}', [String(error)])),
+      )
     }, 30_000)
     this.retryTimer.unref?.()
   }

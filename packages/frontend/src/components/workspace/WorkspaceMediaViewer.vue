@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { WorkspacePreviewState } from './workspacePreview'
 import WorkspaceFileGlyph from './WorkspaceFileGlyph.vue'
@@ -114,7 +116,7 @@ onBeforeUnmount(() => {
         @waiting="waiting = true"
         @playing="waiting = false"
         @canplay="waiting = false"
-        @error="emit('error', '当前文件或编码无法播放，可用系统应用打开')"
+        @error="emit('error', __t('ui.workspace', '当前文件或编码无法播放，可用系统应用打开'))"
         @click="toggle"
       />
       <div v-if="kind === 'audio'" class="workspace-media__album" :class="{ playing }">
@@ -128,7 +130,9 @@ onBeforeUnmount(() => {
           />
         </div>
       </div>
-      <span v-if="waiting" class="workspace-media__waiting">缓冲中…</span>
+      <span v-if="waiting" class="workspace-media__waiting">
+        {{ __t('ui.workspace', '缓冲中…') }}
+      </span>
     </div>
     <div class="workspace-media__timeline">
       <span :style="{ width: `${progress}%` }" />
@@ -139,7 +143,7 @@ onBeforeUnmount(() => {
         step="0.1"
         :value="state.position"
         :disabled="!duration"
-        aria-label="播放进度"
+        :aria-label="__t('ui.workspace', '播放进度')"
         @input="seek"
       />
     </div>
@@ -148,7 +152,7 @@ onBeforeUnmount(() => {
         type="button"
         class="workspace-media__play"
         :disabled="!ready || !active"
-        :aria-label="playing ? '暂停' : '播放'"
+        :aria-label="playing ? __t('ui.workspace', '暂停') : __t('ui.workspace', '播放')"
         @click="toggle"
       >
         <svg viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true">
@@ -160,8 +164,14 @@ onBeforeUnmount(() => {
       </button>
       <time>{{ time(state.position) }} / {{ time(duration) }}</time>
       <span class="file-view-spacer" />
-      <button type="button" :aria-label="state.muted ? '取消静音' : '静音'" @click="mute">
-        {{ state.muted || !state.volume ? '静音' : '音量' }}
+      <button
+        type="button"
+        :aria-label="state.muted ? __t('ui.workspace', '取消静音') : __t('ui.workspace', '静音')"
+        @click="mute"
+      >
+        {{
+          state.muted || !state.volume ? __t('ui.workspace', '静音') : __t('ui.workspace', '音量')
+        }}
       </button>
       <input
         class="workspace-media__volume"
@@ -170,16 +180,18 @@ onBeforeUnmount(() => {
         max="1"
         step="0.01"
         :value="state.muted ? 0 : state.volume"
-        aria-label="音量"
+        :aria-label="__t('ui.workspace', '音量')"
         @input="volume"
       />
-      <select v-model.number="rate" aria-label="播放速度">
+      <select v-model.number="rate" :aria-label="__t('ui.workspace', '播放速度')">
         <option :value="0.5">0.5×</option>
         <option :value="1">1×</option>
         <option :value="1.5">1.5×</option>
         <option :value="2">2×</option>
       </select>
-      <button v-if="kind === 'video'" type="button" @click="fullscreen">全屏</button>
+      <button v-if="kind === 'video'" type="button" @click="fullscreen">
+        {{ __t('ui.workspace', '全屏') }}
+      </button>
     </div>
   </div>
 </template>

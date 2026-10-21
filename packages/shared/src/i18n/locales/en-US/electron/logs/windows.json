@@ -1,0 +1,18 @@
+{
+  "关闭主窗口标签失败：{0}": "Failed to close main window label: {0}",
+  "{0} 桥接加载失败：{1}": "{0} Bridge load failed: {1}",
+  "{0} 界面启动失败：{1}": "{0} Interface startup failed: {1}",
+  "关闭标签失败：{0}": "Failed to close tag: {0}",
+  "通知层加载失败：{0}": "Notification layer loading failed: {0}",
+  "通知层创建失败：{0}": "Notification layer creation failed: {0}",
+  "加载 Dev URL: {0}": "Load Dev URL: {0}",
+  "加载文件: {0}, hash: {1}": "load file: {0}, hash: {1}",
+  "{0} 已就绪 ({1})": "{0} ready ({1})",
+  "{0} 页面加载超时，先显示窗口": "{0} Page loading timeout, display the window first",
+  "{0} 首帧事件缺失，显示已加载窗口": "{0} The first frame event is missing and the loaded window is displayed.",
+  "{0} 内嵌页面加载失败: {1} ({2}), URL: {3}": "{0} Embedded page failed to load: {1} ({2}), URL: {3}",
+  "{0} 加载失败: {1} ({2}), URL: {3}": "{0} Loading failed: {1} ({2}), URL: {3}",
+  "已隐藏 Launcher 窗口": "Launcher window hidden",
+  "Pet 渲染进程崩溃: {0} ({1})": "Pet rendering process crashed: {0} ({1})",
+  "Pet 关闭且无其他可见窗口，恢复 Launcher": "Pet is closed with no other visible windows, restore Launcher\nThere is unsubmitted content in"
+}

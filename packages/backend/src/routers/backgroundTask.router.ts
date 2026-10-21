@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * BackgroundTask Router — 统一任务中心 API（M05 §5）
  *
@@ -47,7 +48,7 @@ const dispatchSchema = z
     deadline: z.string().datetime({ offset: true }).optional(),
   })
   .refine((body) => body.completionAction !== 'send_to_chat' || !!body.targetThreadId, {
-    message: '发送到对话时必须提供目标 Thread',
+    message: __t('server.routers', '发送到对话时必须提供目标 Thread'),
     path: ['targetThreadId'],
   })
 
@@ -144,7 +145,9 @@ export function createBackgroundTaskRouter(ctx: AppContext) {
     service.onEvent((event) => {
       gatewayHub
         .broadcast(createEnvelope('push', { action: event.type, task: event.task }))
-        .catch((err) => logger.warn(`任务事件广播失败 (${event.type}): ${err}`))
+        .catch((err) =>
+          logger.warn(__t('logs.routers', '任务事件广播失败 ({0}): {1}', [event.type, err])),
+        )
     })
   }
 
@@ -174,7 +177,10 @@ export function createBackgroundTaskRouter(ctx: AppContext) {
         ...(body.deadline ? { deadline: body.deadline } : {}),
       },
     })
-    return c.json({ code: 'CREATED', message: '任务已创建', data: task }, 201)
+    return c.json(
+      { code: 'CREATED', message: __t('server.routers', '任务已创建'), data: task },
+      201,
+    )
   })
 
   /** GET /api/background-tasks — 分页查询 */
@@ -254,7 +260,10 @@ export function createBackgroundTaskRouter(ctx: AppContext) {
 
   router.post('/:id/retry', async (c) => {
     const task = await requireService().retry(c.req.param('id'))
-    return c.json({ code: 'CREATED', message: '任务已重新派发', data: task }, 201)
+    return c.json(
+      { code: 'CREATED', message: __t('server.routers', '任务已重新派发'), data: task },
+      201,
+    )
   })
 
   /** POST /api/background-tasks/:id/cancel — 取消 */
@@ -266,7 +275,7 @@ export function createBackgroundTaskRouter(ctx: AppContext) {
   /** DELETE /api/background-tasks/:id — 删除记录 */
   router.delete('/:id', async (c) => {
     await requireService().deleteTask(c.req.param('id'))
-    return c.json({ code: 'OK', message: '任务已删除' })
+    return c.json({ code: 'OK', message: __t('server.routers', '任务已删除') })
   })
 
   return router

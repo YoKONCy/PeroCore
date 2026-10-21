@@ -1,98 +1,171 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
+import type { MessageResource } from '@infos/shared'
+import '@infos/shared/i18n/catalogs/resourcePreview'
+import { t } from '../../i18n'
 import ResourceGlyph from './ResourceGlyph.vue'
-import { openResourceLink } from '../../composables/resources/useResources'
+import ResourceCard from './ResourceCard.vue'
+import { PixelIcon } from '../pixel'
+import { resolveResourceLink, openResourceLink } from '../../composables/resources/useResources'
+import { useResourceVisibility } from '../../composables/resources/useResourceVisibility'
 import { resourceLinkKind } from '../../lib/resourceLinks'
 import { useNotificationStore } from '../../stores'
-const props = defineProps<{ source: string; label?: string; agentId: string; threadId: string }>()
+const props = withDefaults(
+  defineProps<{
+    source: string
+    label?: string
+    agentId: string
+    threadId: string
+    active?: boolean
+  }>(),
+  { active: true, label: undefined },
+)
+const root = ref<HTMLElement | null>(null)
+const visible = useResourceVisibility(root)
+const enabled = computed(() => visible.value && props.active)
+const item = shallowRef<MessageResource | null>(null)
 const pending = ref(false)
+const opening = ref(false)
 const notification = useNotificationStore()
-const name = computed(() => props.label || props.source.split(/[\\/]/).pop() || '文件')
+const name = computed(
+  () => props.label || props.source.split(/[\\/]/).pop() || t('ui.resource-preview', '文件'),
+)
+let controller: AbortController | undefined
+let revision = 0
+let lastKey = ''
+watch(
+  [() => props.source, () => props.agentId, () => props.threadId, enabled],
+  async ([source, agentId, threadId, ready]) => {
+    const version = ++revision
+    controller?.abort()
+    pending.value = false
+    const key = JSON.stringify([source, agentId, threadId])
+    if (lastKey !== key) {
+      item.value = null
+      lastKey = key
+    }
+    if (!ready || item.value) return
+    controller = new AbortController()
+    pending.value = true
+    try {
+      const resource = await resolveResourceLink(source, { agentId, threadId }, controller.signal)
+      if (version === revision) item.value = resource
+    } catch {
+      // 元数据不可用时仍保留引用卡片，用户可以点击重新打开。
+    } finally {
+      if (version === revision) pending.value = false
+    }
+  },
+  { immediate: true },
+)
+onBeforeUnmount(() => {
+  ++revision
+  controller?.abort()
+})
 async function open() {
-  if (pending.value) return
-  pending.value = true
+  if (opening.value) return
+  opening.value = true
   try {
     await openResourceLink(props.source, props)
   } catch (error) {
-    notification.toast(error instanceof Error ? error.message : '无法打开资源', { type: 'error' })
+    notification.toast(
+      (!props.agentId || !props.threadId) && !/^(?:resource:)?https?:\/\//i.test(props.source)
+        ? t('ui.resource-preview', '请从所属会话打开文件')
+        : error instanceof Error
+          ? error.message
+          : t('ui.resource-preview', '无法打开文件'),
+      { type: 'error' },
+    )
   } finally {
-    pending.value = false
+    opening.value = false
   }
 }
 </script>
 <template>
-  <button
-    type="button"
-    class="resource-reference"
-    :disabled="pending"
-    :title="source"
-    @click="open"
-  >
-    <ResourceGlyph :kind="resourceLinkKind(source)" />
-    <span class="resource-reference__name">{{ name }}</span>
-    <span class="resource-reference__mark" aria-hidden="true">{{ pending ? '···' : '↗' }}</span>
-  </button>
+  <div ref="root" class="resource-reference">
+    <ResourceCard v-if="item" :resource="item" :label="label" :active="enabled" />
+    <button
+      v-else
+      type="button"
+      class="resource-reference__fallback"
+      :disabled="opening"
+      :title="source"
+      @click="open"
+    >
+      <span class="resource-reference__window">
+        <ResourceGlyph :kind="resourceLinkKind(source)" />
+        <span>
+          {{
+            pending ? t('ui.resource-preview', '读取中…') : t('ui.resource-preview', '点击打开文件')
+          }}
+        </span>
+      </span>
+      <span class="resource-reference__body">
+        <ResourceGlyph :kind="resourceLinkKind(source)" />
+        <strong>{{ name }}</strong>
+        <PixelIcon
+          :name="opening ? 'refresh' : 'external-link'"
+          size="sm"
+          :animation="opening ? 'spin' : undefined"
+        />
+      </span>
+    </button>
+  </div>
 </template>
 <style scoped>
 .resource-reference {
+  width: min(100%, 380px);
+  margin: 10px 0 12px;
+}
+.resource-reference :deep(.resource-card) {
+  width: 100%;
+  margin: 0;
+}
+.resource-reference__fallback {
   --resource-accent: var(--ui-accent-purple);
+  display: grid;
+  width: 100%;
+  padding: 0;
+  border: 1px solid var(--ui-border-default);
+  background: var(--ui-bg-surface);
+  color: var(--ui-text-primary);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  box-shadow: 2px 3px 0 var(--ui-border-subtle);
+}
+.resource-reference__window {
+  display: grid;
+  height: 160px;
+  align-content: center;
+  justify-items: center;
+  gap: 12px;
+  color: var(--ui-text-tertiary);
+  background: var(--ui-bg-surface-soft);
+  border-bottom: 1px solid var(--ui-border-subtle);
+  font-size: 11px;
+}
+.resource-reference__body {
   display: flex;
   align-items: center;
-  gap: 12px;
-  width: fit-content;
-  max-width: min(100%, 360px);
-  padding: 9px 13px 10px 11px;
-  margin: 8px 0;
-  border: 1px solid color-mix(in srgb, var(--resource-accent) 28%, var(--ui-border-default));
-  border-radius: 0;
-  color: var(--ui-text-primary);
-  background:
-    linear-gradient(
-      120deg,
-      color-mix(in srgb, var(--resource-accent) 7%, transparent),
-      transparent 75%
-    ),
-    color-mix(in srgb, var(--ui-bg-surface) 88%, transparent);
-  box-shadow:
-    inset 1px 1px color-mix(in srgb, white 12%, transparent),
-    2px 3px 0 color-mix(in srgb, var(--resource-accent) 15%, var(--ui-bg-surface));
-  font: inherit;
-  cursor: pointer;
-  text-align: left;
-  transition:
-    transform 130ms steps(2, end),
-    border-color 130ms,
-    box-shadow 130ms;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
 }
-.resource-reference:hover {
-  transform: translateY(-2px);
-  border-color: var(--resource-accent);
-  box-shadow:
-    inset 1px 1px color-mix(in srgb, white 16%, transparent),
-    2px 5px 0 color-mix(in srgb, var(--resource-accent) 18%, var(--ui-bg-surface));
-}
-.resource-reference:active {
-  transform: translate(1px, 1px);
-}
-.resource-reference :deep(.resource-glyph) {
-  width: 23px;
-  height: 27px;
-}
-.resource-reference__name {
+.resource-reference__body > strong {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
-  font-weight: 600;
 }
-.resource-reference__mark {
-  color: var(--resource-accent);
-  margin-left: 12px;
-  font-family: var(--ui-font-pixel);
+.resource-reference__body > .resource-glyph {
+  width: 24px;
+  height: 27px;
 }
-@media (prefers-reduced-motion: reduce) {
-  .resource-reference {
-    transition: none;
-  }
+.resource-reference__fallback:focus-visible {
+  outline: 2px solid var(--ui-accent-purple);
+  outline-offset: 2px;
 }
 </style>

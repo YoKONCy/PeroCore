@@ -1,5 +1,5 @@
 import { createReadStream } from 'node:fs'
-import { stat } from 'node:fs/promises'
+import { stat, realpath } from 'node:fs/promises'
 import path from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
@@ -230,7 +230,7 @@ export class ResourceService {
       }
     }
     if (/^https?:\/\//i.test(value)) {
-      const { name, mimeType, sizeBytes } = await inspectResource(value)
+      const { name, mimeType, sizeBytes } = await inspectResource(value, context.signal)
       const kind = resourceKind(mimeType)
       return {
         kind: ['text/html', 'application/xhtml+xml'].includes(mimeType) ? 'web' : kind,
@@ -267,6 +267,42 @@ export class ResourceService {
     const resource = await this.resolveReference(context, source)
     if (resource.origin?.type !== 'workspace') throw new Error('引用不是工作区文件')
     return { resource, filePath: (await this.localFile(context, resource.origin.value)).filePath }
+  }
+
+  /** 文档只读取受控工作区或当前会话附件，不接受服务端任意路径与远程 URL。 */
+  async readDocumentSource(context: ResourceContext, source: string, maxBytes: number) {
+    context.signal?.throwIfAborted()
+    const session = await this.scope(context)
+    let filePath: string
+    let name: string
+    let mimeType: string
+    if (source.startsWith('attachment:')) {
+      const row = await this.existing(source.slice(11), context)
+      if (row.threadId !== context.threadId) throw new Error('文档附件不属于当前会话')
+      filePath = this.attachments.resolveStoragePath(row.storageKey)
+      name = row.originalName
+      mimeType = row.mimeType
+    } else {
+      if (/^[a-z][a-z\d+.-]*:/i.test(source) && !/^[a-z]:[\\/]/i.test(source))
+        throw new Error('文档 source 请使用工作区路径或 attachment:附件ID')
+      filePath = await getProductivityRuntime().virtualWorkspace.resolveReadablePath(
+        session,
+        source,
+      )
+      const root = await realpath(session.workspaceRoot)
+      const actual = await realpath(filePath)
+      const relative = path.relative(root, actual)
+      if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
+        throw new Error('文档 source 必须位于当前工作区内')
+      name = path.basename(filePath)
+      mimeType = resourceMime(name)
+    }
+    const info = await stat(filePath)
+    if (!info.isFile() || info.size > maxBytes)
+      throw new Error(`文档必须是 ${maxBytes / 1024 / 1024}MB 以内的普通文件`)
+    const bytes = await boundedResourceBytes(createReadStream(filePath), context.signal, maxBytes)
+    if (source.startsWith('attachment:')) await this.existing(source.slice(11), context)
+    return { name, mimeType, bytes }
   }
 
   /** 按需读取原图；不创建发送记录，也不复制附件。 */

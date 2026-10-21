@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 import { arcaHostKey } from '@infos/arca/hostCredentials'
 import {
   parseApplicationDesktopGuard,
@@ -83,7 +84,7 @@ export class ArcaApplicationController {
         this.watch = watchApplicationDesktop(this.desktop, () => {
           this.desktopLost = true
           void this.shutdownManaged().catch((error) =>
-            logger.warn(`回收 Arca 失败：${String(error)}`),
+            logger.warn(__t('logs.applications', '回收 Arca 失败：{0}', [String(error)])),
           )
         })
       try {
@@ -153,7 +154,11 @@ export class ArcaApplicationController {
         }),
       ])
     } catch (error) {
-      logger.warn(`协作回收尚未完成，继续停止后台并由实例监视器重试：${String(error)}`)
+      logger.warn(
+        __t('logs.applications', '协作回收尚未完成，继续停止后台并由实例监视器重试：{0}', [
+          String(error),
+        ]),
+      )
     } finally {
       if (timer) clearTimeout(timer)
     }

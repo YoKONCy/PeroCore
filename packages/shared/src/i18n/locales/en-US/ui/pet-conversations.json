@@ -1,0 +1,18 @@
+{
+  "切换角色": "Switch character",
+  "切换会话": "Switch conversation",
+  "新会话": "New conversation",
+  "未命名会话": "Untitled conversation",
+  "选择会话": "Choose conversation",
+  "暂无其他角色": "No other characters",
+  "暂无会话": "No conversations yet",
+  "加载中…": "Loading…",
+  "切换中…": "Switching…",
+  "加载失败": "Couldn't load",
+  "重试": "Retry",
+  "更多会话": "More conversations",
+  "当前会话": "Current conversation",
+  "{0} 条消息": "{0} messages",
+  "切换失败，请重试": "Couldn't switch. Try again",
+  "新建失败，请重试": "Couldn't create a conversation. Try again"
+}

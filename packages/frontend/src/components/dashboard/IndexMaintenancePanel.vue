@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   maintenanceApi,
@@ -43,7 +45,12 @@ function avatarSource(agentId: string): string {
     : `${getApiBaseUrl()}${url.startsWith('/') ? '' : '/'}${url}`
 }
 const choices = computed(() => [
-  { value: '', label: '全部角色' },
+  {
+    value: '',
+    get label() {
+      return __t('ui.settings', '全部角色')
+    },
+  },
   ...agents.agents.map((agent) => ({ value: agent.id, label: agent.name })),
 ])
 const indexes = computed(
@@ -113,11 +120,14 @@ async function rebuild(scope: IndexScope | 'all', agentId = target.value) {
   submitting.value = true
   try {
     await maintenanceApi.reindex(agentId || undefined, scope)
-    notification.toast('索引重建已安排', 'success')
+    notification.toast(__t('ui.settings', '索引重建已安排'), 'success')
     if (timer) clearTimeout(timer)
     await refresh()
   } catch (cause) {
-    notification.toast(cause instanceof Error ? cause.message : '重建失败', 'error')
+    notification.toast(
+      cause instanceof Error ? cause.message : __t('ui.settings', '重建失败'),
+      'error',
+    )
   } finally {
     submitting.value = false
   }
@@ -145,9 +155,12 @@ onUnmounted(() => {
       <div>
         <h4>
           <PixelIcon name="database" size="sm" />
-          {{ social ? '社交图谱维护' : '索引维护' }}
+          {{ social ? __t('ui.settings', '社交图谱维护') : __t('ui.settings', '索引维护') }}
         </h4>
-        <p v-if="status">{{ status.model || '未配置向量模型' }} · {{ status.dimension }} 维</p>
+        <p v-if="status">
+          {{ status.model || __t('ui.settings', '未配置向量模型') }} · {{ status.dimension }}
+          {{ __t('ui.settings', '维') }}
+        </p>
       </div>
       <PSelect v-if="!social" v-model="selectedAgent" :options="choices" size="sm" teleport />
       <PButton
@@ -157,18 +170,18 @@ onUnmounted(() => {
         :disabled="submitting || status?.busy || !target"
         @click="rebuild('social')"
       >
-        重建图谱
+        {{ __t('ui.settings', '重建图谱') }}
       </PButton>
     </div>
     <p class="index-hint">
       {{
         social
-          ? '保留摘要与关系，重建关键词、文本索引和零向量。'
-          : '保留记忆和原文，按当前模型重建索引。'
+          ? __t('ui.settings', '重建社交检索索引，保留摘要与关系。')
+          : __t('ui.settings', '保留记忆和原文，按当前模型重建索引。')
       }}
     </p>
     <p v-if="status && !status.embeddingAvailable" class="index-warning">
-      未配置 Embedding，主记忆和文档仅建立文本索引。
+      {{ __t('ui.settings', '未配置 Embedding，主记忆和文档仅建立文本索引。') }}
     </p>
     <p v-if="error" class="index-warning" role="alert">{{ error }}</p>
     <div
@@ -214,11 +227,14 @@ onUnmounted(() => {
             {{
               item.error ||
               (!item.exists
-                ? '未建立'
-                : `${item.dimension ?? '未知'} 维 · ${item.nodeCount ?? '未知'} 节点`)
+                ? __t('ui.settings', '未建立')
+                : __t('ui.settings', '{0} 维 · {1} 节点', [
+                    item.dimension ?? '未知',
+                    item.nodeCount ?? '未知',
+                  ]))
             }}
             <span v-if="item.dimension !== null && item.dimension !== status?.dimension">
-              · 待重建
+              {{ __t('ui.settings', '· 待重建') }}
             </span>
           </small>
         </div>
@@ -231,18 +247,18 @@ onUnmounted(() => {
         :disabled="submitting || status?.busy"
         @click="rebuild(item.scope, item.agentId)"
       >
-        重建
+        {{ __t('ui.settings', '重建') }}
       </PButton>
     </div>
     <div v-if="!social" class="index-footer">
-      <small>主记忆和文档重建可能产生 Embedding 调用。</small>
+      <small>{{ __t('ui.settings', '主记忆和文档重建可能产生 Embedding 调用。') }}</small>
       <PButton
         size="sm"
         variant="secondary"
         :disabled="submitting || status?.busy"
         @click="rebuild('all')"
       >
-        重建全部
+        {{ __t('ui.settings', '重建全部') }}
       </PButton>
     </div>
     <div v-if="job" class="index-progress" role="status" aria-live="polite">

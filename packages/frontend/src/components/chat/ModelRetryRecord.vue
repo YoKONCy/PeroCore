@@ -1,11 +1,15 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import { computed } from 'vue'
 import type { ModelRetrySurfaceProps } from '@infos/shared'
 
 const props = defineProps<{ record: ModelRetrySurfaceProps; active: boolean }>()
 const moving = computed(() => props.active && ['waiting', 'retrying'].includes(props.record.state))
 // 回连只结束动画；原始提示、原因、次数和等待时长始终保持不变。
-const delayText = computed(() => `${(props.record.delayMs / 1000).toFixed(1)} 秒后重试`)
+const delayText = computed(() =>
+  __t('ui.chat', '{0} 秒后重试', [(props.record.delayMs / 1000).toFixed(1)]),
+)
 </script>
 
 <template>
@@ -29,9 +33,21 @@ const delayText = computed(() => `${(props.record.delayMs / 1000).toFixed(1)} �
     </svg>
     <div class="model-retry__body">
       <div class="model-retry__heading">
-        <span>上游连接异常，正在重试</span>
+        <span>
+          {{
+            record.modelLevel && record.modelLevel > 1 && record.modelAttempt === 1
+              ? __t('ui.chat', '上游连接异常，切换回退模型')
+              : __t('ui.chat', '上游连接异常，正在重试')
+          }}
+        </span>
         <b>{{ record.attempt }}/{{ record.maxRetries }}</b>
         <small>{{ delayText }}</small>
+        <small v-if="record.modelId">
+          {{ record.modelId }} {{ __t('ui.chat', '· 第') }} {{ record.modelLevel }}/{{
+            record.modelLevels
+          }}
+          {{ __t('ui.chat', '级 · 尝试') }} {{ record.modelAttempt }}/2
+        </small>
       </div>
       <p class="model-retry__reason">{{ record.reason }}</p>
     </div>

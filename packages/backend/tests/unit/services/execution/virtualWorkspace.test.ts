@@ -29,6 +29,51 @@ afterEach(async () => {
 })
 
 describe('VirtualWorkspace', () => {
+  it('二进制成果完整落盘，同字节重试复用，已有不同版本不被覆盖', async () => {
+    const workspace = new VirtualWorkspace()
+    const bytes = Buffer.from([0, 255, 128, 10, 0, 7])
+    const result = await workspace.createBinary(session, { path: '任务/成果.pdf', bytes })
+    expect(result.created).toBe(true)
+    expect(await readFile(path.join(root, '任务/成果.pdf'))).toEqual(bytes)
+    expect(await workspace.createBinary(session, { path: '任务/成果.pdf', bytes })).toMatchObject({
+      created: false,
+      newHash: result.newHash,
+    })
+    await expect(
+      workspace.createBinary(session, { path: '任务/成果.pdf', bytes: Buffer.from('不同内容') }),
+    ).rejects.toThrow('已存在')
+    expect(await readFile(path.join(root, '任务/成果.pdf'))).toEqual(bytes)
+  })
+
+  it('二进制导出取消时不发布成果，目录链接不能越出工作区', async () => {
+    const workspace = new VirtualWorkspace()
+    const controller = new AbortController()
+    controller.abort()
+    await expect(
+      workspace.createBinary(session, {
+        path: '任务/取消.pdf',
+        bytes: Buffer.from('取消'),
+        signal: controller.signal,
+      }),
+    ).rejects.toBeDefined()
+    const outside = await mkdtemp(path.join(tmpdir(), 'infos-doc-outside-'))
+    try {
+      await symlink(
+        outside,
+        path.join(root, 'linked'),
+        process.platform === 'win32' ? 'junction' : 'dir',
+      )
+      await expect(
+        workspace.createBinary(session, {
+          path: 'linked/outside.pdf',
+          bytes: Buffer.from('禁止越界'),
+        }),
+      ).rejects.toThrow()
+    } finally {
+      await rm(outside, { recursive: true, force: true })
+    }
+  })
+
   it('设备级只读工具可访问 Workspace 外路径，但写入权限不会随之扩大', async () => {
     const externalRoot = await mkdtemp(path.join(tmpdir(), 'infos-device-read-'))
     const externalFile = path.join(externalRoot, 'outside.md')

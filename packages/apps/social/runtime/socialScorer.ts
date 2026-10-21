@@ -1,3 +1,4 @@
+import { t as __t } from './i18n'
 /**
  * Social Scorer Service — 社交记忆图谱引擎
  *
@@ -172,8 +173,8 @@ export class SocialScorerService {
 
     if (!messageTriggered && !tokenTriggered) {
       logger.debug(
-        `[${agentId}] 社交记忆未达门控: ` +
-          `${stats.count}/${this.config.messageThreshold} 条, ` +
+        __t('apps.social.logs', '[{0}] 社交记忆未达门控: ', [agentId]) +
+          __t('apps.social.logs', '{0}/{1} 条, ', [stats.count, this.config.messageThreshold]) +
           `${totalTokens}/${this.config.charThreshold} Token`,
       )
       return
@@ -183,7 +184,7 @@ export class SocialScorerService {
       ? `Token 溢出 (${totalTokens} >= ${this.config.charThreshold})`
       : `消息数达标 (${stats.count} >= ${this.config.messageThreshold})`
 
-    logger.info(`[${agentId}] 触发社交记忆炼化: ${reason}`)
+    logger.info(__t('apps.social.logs', '[{0}] 触发社交记忆炼化: {1}', [agentId, reason]))
     await this.processBatch(agentId, signal)
   }
 
@@ -219,11 +220,13 @@ export class SocialScorerService {
       const messages = await this.socialMessageRepo.getUnsummarized(agentId, this.config.batchLimit)
 
       if (messages.length === 0) {
-        logger.debug(`[${agentId}] 无未总结社交消息`)
+        logger.debug(__t('apps.social.logs', '[{0}] 无未总结社交消息', [agentId]))
         return
       }
 
-      logger.info(`[${agentId}] 开始炼化 ${messages.length} 条社交消息`)
+      logger.info(
+        __t('apps.social.logs', '[{0}] 开始炼化 {1} 条社交消息', [agentId, messages.length]),
+      )
 
       // 格式化对话上下文
       const chatText = messages.map((m) => `${m.senderName ?? '未知'}: ${m.content}`).join('\n')
@@ -235,7 +238,7 @@ export class SocialScorerService {
       // 获取反思模型配置
       const modelConfig = await this.getModelConfig()
       if (!modelConfig) {
-        logger.warn('未配置反思模型，跳过社交记忆炼化')
+        logger.warn(__t('apps.social.logs', '未配置反思模型，跳过社交记忆炼化'))
         return
       }
 
@@ -267,7 +270,7 @@ export class SocialScorerService {
       signal.throwIfAborted()
 
       if (!result?.new_event?.summary) {
-        logger.warn(`[${agentId}] LLM 未返回有效事件`)
+        logger.warn(__t('apps.social.logs', '[{0}] LLM 未返回有效事件', [agentId]))
         await this.socialMessageRepo.markSummarized(messages.map((m) => m.id))
         return
       }
@@ -280,14 +283,14 @@ export class SocialScorerService {
       await this.socialMessageRepo.markSummarized(messages.map((m) => m.id))
 
       logger.info(
-        `[${agentId}] 社交图谱已更新: ` +
+        __t('apps.social.logs', '[{0}] 社交图谱已更新: ', [agentId]) +
           `"${result.new_event.summary.slice(0, 50)}" | ` +
           `features: [${result.new_event.features.join(', ')}] | ` +
-          `ontology: ${result.ontology_updates?.length ?? 0} 条边`,
+          __t('apps.social.logs', 'ontology: {0} 条边', [result.ontology_updates?.length ?? 0]),
       )
     } catch (err) {
       if (signal.aborted) return
-      logger.error(`[${agentId}] 社交记忆炼化失败: ${err}`)
+      logger.error(__t('apps.social.logs', '[{0}] 社交记忆炼化失败: {1}', [agentId, err]))
       throw err
     } finally {
       if (this.controllers.get(agentId) === controller) this.controllers.delete(agentId)
@@ -406,11 +409,13 @@ export class SocialScorerService {
 
         if (parsed?.new_event?.summary) return parsed
 
-        logger.warn(`[尝试 ${attempt + 1}] LLM 返回无效 JSON，重试`)
+        logger.warn(__t('apps.social.logs', '[尝试 {0}] LLM 返回无效 JSON，重试', [attempt + 1]))
       } catch (err) {
         signal?.throwIfAborted()
         if (socialFailure(err).retryable && attempt < this.config.maxRetries - 1) {
-          logger.warn(`[尝试 ${attempt + 1}] LLM 调用失败: ${err}，2 秒后重试`)
+          logger.warn(
+            __t('apps.social.logs', '[尝试 {0}] LLM 调用失败: {1}，2 秒后重试', [attempt + 1, err]),
+          )
           await socialDelay(2000, signal)
         } else {
           throw err

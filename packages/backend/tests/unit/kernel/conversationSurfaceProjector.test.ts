@@ -31,6 +31,66 @@ function message(revision = 1): ConversationMessageProjection {
 }
 
 describe('Conversation Surface Projector', () => {
+  it('旧 NIT 审计记录补进对应脚本，已有子时间线不重复渲染', () => {
+    const value = message()
+    value.contentBlocks = [
+      {
+        kind: 'tool',
+        blockId: 'script-block',
+        sequence: 1,
+        turn: 1,
+        callId: 'script',
+        name: 'run_script',
+        args: '{}',
+        result: '完成',
+        isError: false,
+      },
+    ]
+    value.toolCalls = [
+      {
+        callId: 'nit-one',
+        name: 'read_file',
+        args: '{"path":"a.ts"}',
+        result: '读取完成',
+        isError: false,
+      },
+      {
+        callId: 'nit-two',
+        name: 'edit_file',
+        args: '{"path":"a.ts"}',
+        result: '修改完成',
+        isError: false,
+      },
+      { callId: 'script', name: 'run_script', args: '{}', result: '完成', isError: false },
+    ]
+    const projector = new ConversationSurfaceProjector()
+    const calls = projector
+      .projectMessage(value, 'pero')
+      .nodes.filter((node) => node.kind === 'tool-call')
+    expect(calls.map((node) => node.props)).toMatchObject([
+      { callId: 'script' },
+      { callId: 'nit-one', parentCallId: 'script' },
+      { callId: 'nit-two', parentCallId: 'script' },
+    ])
+    value.contentBlocks.push({
+      kind: 'tool',
+      blockId: 'new-child',
+      sequence: 2,
+      turn: 1,
+      callId: 'nit-one',
+      parentCallId: 'script',
+      name: 'read_file',
+      args: '{}',
+      result: '读取完成',
+    })
+    const restored = projector
+      .projectMessage(value, 'pero')
+      .nodes.filter((node) => node.kind === 'tool-call')
+    expect(
+      restored.filter((node) => (node.props as { callId: string }).callId === 'nit-one'),
+    ).toHaveLength(1)
+  })
+
   it('暂停记录可从持久消息重建，不显示失败或输出完成', () => {
     const value = message()
     value.status = 'active'

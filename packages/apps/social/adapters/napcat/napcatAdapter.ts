@@ -1,3 +1,4 @@
+import { t as __t } from '../../runtime/i18n'
 /**
  * NapCat 适配器 — OneBot v11 WebSocket 客户端 (Layer 3)
  *
@@ -93,7 +94,9 @@ export class NapcatAdapter extends AbstractSocialAdapter {
   constructor(config: NapcatConfig) {
     super()
     this.config = config
-    logger.info(`NapcatAdapter 已创建, Social Agent: ${config.defaultAgentId}`)
+    logger.info(
+      __t('apps.social.logs', 'NapcatAdapter 已创建, Social Agent: {0}', [config.defaultAgentId]),
+    )
   }
 
   // ── Layer 2 接口实现 ──
@@ -101,7 +104,7 @@ export class NapcatAdapter extends AbstractSocialAdapter {
   async connect(): Promise<void> {
     // NapCat 使用反向 WS (NapCat 主动连接我们)
     // 实际连接注入由 socialRouter 的 WS 升级端点处理
-    logger.info('NapcatAdapter 等待反向 WS 连接...')
+    logger.info(__t('apps.social.logs', 'NapcatAdapter 等待反向 WS 连接...'))
   }
 
   async disconnect(): Promise<void> {
@@ -113,7 +116,10 @@ export class NapcatAdapter extends AbstractSocialAdapter {
     this.emitDisconnected('手动断开')
   }
 
-  async sendMessage(msg: OutboundMessage, signal?: AbortSignal): Promise<void> {
+  async sendMessage(
+    msg: OutboundMessage,
+    signal?: AbortSignal,
+  ): Promise<import('../../runtime/types').SocialDeliveryReceipt> {
     signal?.throwIfAborted()
     if (!this.getActiveSender(msg.accountId))
       throw Object.assign(new Error('社交账号尚未连接，本次消息尚未发送'), {
@@ -121,6 +127,11 @@ export class NapcatAdapter extends AbstractSocialAdapter {
         data: { retryable: true },
       })
     const segments = toOneBotSegments(msg.content, msg.attachments)
+    for (const qq of [...new Set(msg.mentions ?? [])].reverse()) {
+      if (!/^[1-9]\d{4,19}$/.test(qq))
+        throw Object.assign(new Error('提及账号格式不正确'), { code: 'DELIVERY_NOT_SENT' })
+      segments.unshift({ type: 'at', data: { qq } })
+    }
     const params = buildSendParams(msg.channelId, msg.channelType, segments)
 
     // 如果有回复引用，添加 reply 段
@@ -131,18 +142,21 @@ export class NapcatAdapter extends AbstractSocialAdapter {
       })
     }
 
+    const ids: string[] = []
     const check = (value: unknown) => {
       const response = value as {
         status?: string
         retcode?: number
         message?: string
         wording?: string
+        data?: { message_id?: string | number }
       } | null
       if (response?.status !== 'ok' || response.retcode !== 0)
         throw Object.assign(
           new Error(response?.message || response?.wording || '社交平台拒绝发送'),
           { code: 'DELIVERY_REJECTED' },
         )
+      if (response?.data?.message_id !== undefined) ids.push(String(response.data.message_id))
     }
     if (segments.length)
       check(
@@ -172,7 +186,13 @@ export class NapcatAdapter extends AbstractSocialAdapter {
         ),
       )
     }
-    logger.debug(`消息已发送: channel=${msg.channelId}, type=${msg.channelType}`)
+    logger.debug(
+      __t('apps.social.logs', '消息已发送: channel={0}, type={1}', [
+        msg.channelId,
+        msg.channelType,
+      ]),
+    )
+    return { messageId: ids[0], platformMessageIds: ids, sentAt: Date.now() }
   }
 
   async getStatus(): Promise<AdapterStatus> {
@@ -253,7 +273,9 @@ export class NapcatAdapter extends AbstractSocialAdapter {
       .map((event) => {
         const messageType = event.message_type === 'group' ? 'group' : 'private'
         const senderId = String(event.user_id ?? event.sender?.user_id ?? '')
-        const rawContent = event.raw_message ?? segmentsToCQString(event.message ?? [])
+        const rawContent = event.message?.length
+          ? segmentsToCQString(event.message)
+          : (event.raw_message ?? '')
         return {
           msgId: String(event.message_id ?? ''),
           messageSeq:
@@ -307,7 +329,9 @@ export class NapcatAdapter extends AbstractSocialAdapter {
       channelType,
       senderId: senderId === accountId ? 'self' : senderId,
       senderName: event.sender?.card ?? event.sender?.nickname ?? senderId,
-      content: cleanCQCodes(event.raw_message ?? segmentsToCQString(event.message ?? [])),
+      content: cleanCQCodes(
+        event.message?.length ? segmentsToCQString(event.message) : (event.raw_message ?? ''),
+      ),
       attachments: extractAttachments(event.message ?? []),
       replyTo: extractReplyId(event.message ?? []),
       rawEvent: { ...event, self_id: accountId },
@@ -326,17 +350,22 @@ export class NapcatAdapter extends AbstractSocialAdapter {
     const previous = selfId ? this.connections.get(String(selfId)) : this.defaultConnection
     if (selfId) {
       this.connections.set(String(selfId), sender)
-      logger.info(`已注册 QQ 连接: ${selfId} → Social Agent ${this.config.defaultAgentId}`)
+      logger.info(
+        __t('apps.social.logs', '已注册 QQ 连接: {0} → Social Agent {1}', [
+          selfId,
+          this.config.defaultAgentId,
+        ]),
+      )
     } else {
       this.defaultConnection = sender
-      logger.info('已注册默认 QQ 连接 (无 X-Self-ID)')
+      logger.info(__t('apps.social.logs', '已注册默认 QQ 连接 (无 X-Self-ID)'))
     }
     if (previous && previous !== sender) previous.close()
     this.emitConnected()
 
     // 异步获取 Bot 自身信息 (昵称、QQ号等)
     this.fetchBotInfo(selfId).catch((err) => {
-      logger.warn(`获取 Bot 信息失败 (非致命): ${err}`)
+      logger.warn(__t('apps.social.logs', '获取 Bot 信息失败 (非致命): {0}', [err]))
     })
   }
 
@@ -355,7 +384,7 @@ export class NapcatAdapter extends AbstractSocialAdapter {
             user_id: botId,
             nickname: data.nickname ?? '',
           })
-          logger.info(`Bot 信息已获取: ${data.nickname} (${botId})`)
+          logger.info(__t('apps.social.logs', 'Bot 信息已获取: {0} ({1})', [data.nickname, botId]))
         }
       }
     } catch {
@@ -379,7 +408,7 @@ export class NapcatAdapter extends AbstractSocialAdapter {
    */
   setOwnerQq(qq: string | undefined): void {
     this.config.ownerQq = qq || undefined
-    logger.info(`主人 QQ 已更新: ${this.config.ownerQq ?? '(未配置)'}`)
+    logger.info(__t('apps.social.logs', '主人 QQ 已更新: {0}', [this.config.ownerQq ?? '(未配置)']))
   }
 
   /** 注销连接 */
@@ -388,10 +417,10 @@ export class NapcatAdapter extends AbstractSocialAdapter {
     if (sender && current !== sender) return
     if (selfId && this.connections.has(String(selfId))) {
       this.connections.delete(String(selfId))
-      logger.info(`QQ 连接已断开: ${selfId}`)
+      logger.info(__t('apps.social.logs', 'QQ 连接已断开: {0}', [selfId]))
     } else if (!selfId && this.defaultConnection) {
       this.defaultConnection = null
-      logger.info('默认 QQ 连接已断开')
+      logger.info(__t('apps.social.logs', '默认 QQ 连接已断开'))
     }
 
     if (this.connections.size === 0 && !this.defaultConnection) {
@@ -462,11 +491,17 @@ export class NapcatAdapter extends AbstractSocialAdapter {
       const botIds = [...this.botInfos.keys()]
       if (botIds.length === 1) {
         selfId = botIds[0]!
-        logger.debug(`event.self_id 缺失，从 botInfos 兜底获取 selfId=${selfId}`)
+        logger.debug(
+          __t('apps.social.logs', 'event.self_id 缺失，从 botInfos 兜底获取 selfId={0}', [selfId]),
+        )
       } else if (this.connections.size === 1) {
         // 只有一个连接时，直接用该连接的 selfId
         selfId = [...this.connections.keys()][0]!
-        logger.debug(`event.self_id 缺失，从 connections 兜底获取 selfId=${selfId}`)
+        logger.debug(
+          __t('apps.social.logs', 'event.self_id 缺失，从 connections 兜底获取 selfId={0}', [
+            selfId,
+          ]),
+        )
       }
     }
     const userId = String(event.user_id ?? event.sender?.user_id ?? '')
@@ -480,7 +515,7 @@ export class NapcatAdapter extends AbstractSocialAdapter {
     // 缓存 Bot 信息
     if (selfId && !this.botInfos.has(selfId)) {
       this.botInfos.set(selfId, { user_id: selfId })
-      logger.info(`检测到 Bot: ${selfId} (Agent: ${agentId})`)
+      logger.info(__t('apps.social.logs', '检测到 Bot: {0} (Agent: {1})', [selfId, agentId]))
     }
 
     // 解析字段
@@ -489,7 +524,7 @@ export class NapcatAdapter extends AbstractSocialAdapter {
     const senderName = event.sender?.nickname ?? event.sender?.card ?? `User${userId}`
 
     const segments = event.message ?? []
-    const rawContent = event.raw_message ?? segmentsToCQString(segments)
+    const rawContent = segments.length ? segmentsToCQString(segments) : (event.raw_message ?? '')
 
     // 清洗 CQ 码
     const cleanedContent = cleanCQCodes(rawContent)
@@ -501,8 +536,13 @@ export class NapcatAdapter extends AbstractSocialAdapter {
     const isMentioned = checkIsMentioned(segments, selfId)
     if (msgType === 'group') {
       logger.info(
-        `[群聊] channelId=${channelId}, selfId=${selfId || '(空)'}, ` +
-          `at段数=${segments.filter((s) => s.type === 'at').length}, ` +
+        __t('apps.social.logs', '[群聊] channelId={0}, selfId={1}, ', [
+          channelId,
+          selfId || '(空)',
+        ]) +
+          __t('apps.social.logs', 'at段数={0}, ', [
+            segments.filter((s) => s.type === 'at').length,
+          ]) +
           `isMentioned=${isMentioned}`,
       )
     }
@@ -538,7 +578,7 @@ export class NapcatAdapter extends AbstractSocialAdapter {
    */
   private async handleAutoFriendRequest(event: OneBotMessageEvent): Promise<void> {
     if (!this.config.autoAcceptFriend) {
-      logger.info(`收到好友请求 (未启用自动接受), flag=${event.flag}`)
+      logger.info(__t('apps.social.logs', '收到好友请求 (未启用自动接受), flag={0}', [event.flag]))
       return
     }
 
@@ -556,9 +596,9 @@ export class NapcatAdapter extends AbstractSocialAdapter {
       )) as { status?: string; retcode?: number }
       if (response?.status !== 'ok' || response.retcode !== 0)
         throw new Error('QQ 拒绝了好友申请处理')
-      logger.info(`已自动接受好友请求: flag=${event.flag}`)
+      logger.info(__t('apps.social.logs', '已自动接受好友请求: flag={0}', [event.flag]))
     } catch (err) {
-      logger.warn(`接受好友请求失败: ${err}`)
+      logger.warn(__t('apps.social.logs', '接受好友请求失败: {0}', [err]))
     }
   }
 
@@ -800,8 +840,8 @@ export class NapcatAdapter extends AbstractSocialAdapter {
         }
       }
 
-      // 如果有 raw_message 直接用（已是 CQ 码字符串），否则从 segments 重建
-      const rawContent = msg.raw_message ?? segmentsToCQString(segments)
+      // 优先从结构化消息段安全重建，避免摘要中的括号截断原始 CQ 清洗。
+      const rawContent = segments.length ? segmentsToCQString(segments) : (msg.raw_message ?? '')
       const content = cleanCQCodes(rawContent)
 
       return { senderName, senderId, content, hasNestedForward }

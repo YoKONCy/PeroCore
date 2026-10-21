@@ -26,13 +26,31 @@ export class ConversationSurfaceSession {
   private readonly createdAt = performance.now()
   private firstFrameRecorded = false
   private latestContextBudget?: LiveContextBudget
+  private readonly liveNodes = new Map<SurfaceNodeId, SurfaceNode>()
+  private liveState: import('@infos/shared').SurfaceDescriptor['state'] = 'open'
 
   constructor(
     readonly threadId: string,
     readonly principalId: string,
     readonly executionId?: string,
+    private readonly retainLiveSnapshot = false,
   ) {
     this.surfaceId = `conversation:${threadId}:${executionId ?? this.generation}` as SurfaceId
+  }
+
+  /** 队列回合在页面刷新或切换后，可恢复当前画面而无需重放模型请求。 */
+  liveSnapshot(): import('@infos/shared').SurfaceDescriptor {
+    return {
+      surfaceId: this.surfaceId,
+      generation: this.generation,
+      threadId: this.threadId,
+      principalId: this.principalId,
+      executionId: this.executionId,
+      revision: this.revision,
+      sequence: this.sequence,
+      state: this.liveState,
+      nodes: [...this.liveNodes.values()],
+    }
   }
 
   open(): SurfaceFrame {
@@ -261,12 +279,18 @@ export class ConversationSurfaceSession {
     })
   }
 
-  toolCall(input: { callId: string; name: string; args: unknown }): SurfaceFrame {
+  toolCall(input: {
+    callId: string
+    parentCallId?: string
+    name: string
+    args: unknown
+  }): SurfaceFrame {
     const nodeId = `${this.surfaceId}:tool:${input.callId}` as SurfaceNodeId
     return this.frame({
       type: 'surface.upsert-node',
       node: this.node<ToolCallSurfaceProps>(nodeId, 'tool-call', 'interactive', {
         callId: input.callId,
+        parentCallId: input.parentCallId,
         name: input.name,
         args: this.fileArgsOrPreview(input.name, input.args),
         state: 'calling',
@@ -432,6 +456,36 @@ export class ConversationSurfaceSession {
   }
 
   private frame(operation: SurfaceFrame['operation']): SurfaceFrame {
+    if (this.retainLiveSnapshot) {
+      if (operation.type === 'surface.open') {
+        this.liveNodes.clear()
+        for (const node of operation.nodes ?? []) this.liveNodes.set(node.nodeId, node)
+      } else if (operation.type === 'surface.upsert-node') {
+        this.liveNodes.set(operation.node.nodeId, operation.node)
+      } else if (
+        operation.type === 'surface.patch-node' ||
+        operation.type === 'surface.append-text' ||
+        operation.type === 'surface.append-tool-arguments'
+      ) {
+        const node = this.liveNodes.get(operation.nodeId)
+        if (node) {
+          const props = { ...node.props } as Record<string, unknown>
+          if (operation.type === 'surface.patch-node') Object.assign(props, operation.patch)
+          else if (operation.type === 'surface.append-text')
+            props.source = String(props.source ?? '') + operation.delta
+          else {
+            props.name = String(props.name ?? '') + (operation.nameDelta ?? '')
+            props.argsPreview = String(props.argsPreview ?? '') + (operation.argumentsDelta ?? '')
+            props.args = props.argsPreview
+            props.receivedChars = operation.receivedChars
+            props.previewTruncated = operation.previewTruncated
+          }
+          this.liveNodes.set(node.nodeId, { ...node, props, revision: this.revision + 1 })
+        }
+      } else if (operation.type === 'surface.commit') this.liveState = 'committed'
+      else if (operation.type === 'surface.fail') this.liveState = 'failed'
+      else if (operation.type === 'surface.dispose') this.liveState = 'disposed'
+    }
     const frame: SurfaceFrame = {
       protocolVersion: 1,
       surfaceId: this.surfaceId,

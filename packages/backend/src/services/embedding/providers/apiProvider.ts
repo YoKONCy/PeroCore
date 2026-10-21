@@ -1,3 +1,4 @@
+import { t as __t } from '../../../lib/i18n'
 /**
  * API Embedding Provider — OpenAI 兼容
  *
@@ -98,7 +99,10 @@ export class ApiEmbeddingProvider implements EmbeddingProvider {
         this.settledSequence = sequence
         const previous = this.cooldown
         this.cooldown = undefined
-        if (previous) logger.info('向量服务已恢复，后续请求恢复正常', { model: this.config.model })
+        if (previous)
+          logger.info(__t('logs.embedding', '向量服务已恢复，后续请求恢复正常'), {
+            model: this.config.model,
+          })
       }
       return vectors
     } catch (error) {
@@ -130,7 +134,7 @@ export class ApiEmbeddingProvider implements EmbeddingProvider {
         const retryAt = Math.max(this.cooldown?.retryAt ?? 0, Date.now() + duration)
         this.cooldown = { retryAt, error: failure }
         if (!alreadyCooling) {
-          logger.warn('向量服务暂不可用，已进入请求冷却', {
+          logger.warn(__t('logs.embedding', '向量服务暂不可用，已进入请求冷却'), {
             model: this.config.model,
             status: data?.status,
             kind: data?.kind,

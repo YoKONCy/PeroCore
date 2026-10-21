@@ -1,3 +1,4 @@
+import { t as __t } from './i18n'
 import { projectSocialSurface } from './socialSurfaceProjection'
 import type { SocialStoragePort } from '@infos/shared'
 import { invalidatePromptReplay } from '@infos/backend/applicationHostAbi'
@@ -42,7 +43,7 @@ export class SocialDataService {
         deletedBefore: Math.floor(Date.now() / 1000),
       })
       return {
-        message: '会话记录已清除',
+        message: __t('apps.social.ui', '会话记录已清除'),
         data: {
           deleted: await this.deps.storage.deleteChannelMessages(agentId, channelType, channelId),
         },
@@ -53,7 +54,7 @@ export class SocialDataService {
       if (!userId) return { error: '缺少用户 ID' as const }
       await this.deps.storage.deleteContactImpression(agentId, 'qq', userId)
       invalidatePromptReplay('social:')
-      return { message: '联系人印象已清除' }
+      return { message: __t('apps.social.ui', '联系人印象已清除') }
     }
     if (String(input.confirmAgentName ?? '') !== agentName) {
       return { precondition: `请输入角色名“${agentName}”确认` }
@@ -69,16 +70,19 @@ export class SocialDataService {
       })
       const messages = await this.deps.storage.deleteAllMessages(agentId)
       if (scope === 'all_messages')
-        return { message: '全部社交消息已清除', data: { deleted: messages } }
+        return { message: __t('apps.social.ui', '全部社交消息已清除'), data: { deleted: messages } }
       const impressions = await this.deps.storage.deleteAllContactImpressions(agentId)
       await this.deps.storage.deleteLongMemory(agentId)
-      return { message: '全部社交数据已清除', data: { messages, impressions } }
+      return {
+        message: __t('apps.social.ui', '全部社交数据已清除'),
+        data: { messages, impressions },
+      }
     }
     if (scope === 'long_memory') {
       invalidatePromptReplay('social:')
       this.deps.cancelTasks?.(agentId)
       await this.deps.storage.deleteLongMemory(agentId)
-      return { message: '全部社交长记忆已清除' }
+      return { message: __t('apps.social.ui', '全部社交长记忆已清除') }
     }
     return { error: '未知清理范围' as const }
   }

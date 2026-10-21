@@ -1,0 +1,14 @@
+{
+  "开发版本不使用 Release 自动更新": "development version does not use Release to automatically update\nThe current release form of",
+  "当前发行形态不支持此更新器": "does not support this updater.",
+  "尚未检查更新": "has not checked for updates yet",
+  "正在检查 GitHub Release…": "Checking GitHub Release…",
+  "发现 {0} 个可用版本": "Found {0} available versions",
+  "当前已是最新版本": "is currently the latest version",
+  "检查更新失败：{0}": "Failed to check for updates: {0}",
+  "正在下载 {0}%": "is downloading {0}%",
+  "正在下载更新包…": "is downloading the update package...",
+  "准备下载 {0}": "ready to download {0}\nThe",
+  "更新已下载，点击安装后应用将完整退出": "update has been downloaded. After clicking the install button, the application will exit completely.",
+  "下载更新失败：{0}": "failed to download update: {0}"
+}

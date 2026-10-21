@@ -1,6 +1,9 @@
 <script setup lang="ts">
+import { t as __t } from '../../../i18n/index'
+
 import { computed, onMounted, ref } from 'vue'
 import { PButton, PDialog, PInput, PixelIcon } from '../../pixel'
+import ClientAccessSettings from '../../connection/ClientAccessSettings.vue'
 import {
   distributedApi,
   type CapabilityNodeStatus,
@@ -72,9 +75,19 @@ async function probe() {
   try {
     probeResult.value =
       (await distributedApi.probe({ endpoint: endpoint.value, token: token.value })).data ?? null
-    notify.toast('远程服务器连接正常', { type: 'success', title: '连接测试' })
+    notify.toast(__t('ui.settings', '远程服务器连接正常'), {
+      type: 'success',
+      get title() {
+        return __t('ui.settings', '连接测试')
+      },
+    })
   } catch (error) {
-    notify.toast((error as Error).message, { type: 'error', title: '连接失败' })
+    notify.toast((error as Error).message, {
+      type: 'error',
+      get title() {
+        return __t('ui.settings', '连接失败')
+      },
+    })
   } finally {
     busy.value = ''
   }
@@ -94,9 +107,19 @@ async function save() {
     displayName.value = ''
     probeResult.value = null
     await refresh()
-    notify.toast('已加入“我的服务器”', { type: 'success', title: '保存成功' })
+    notify.toast(__t('ui.settings', '已加入“我的服务器”'), {
+      type: 'success',
+      get title() {
+        return __t('ui.settings', '保存成功')
+      },
+    })
   } catch (error) {
-    notify.toast((error as Error).message, { type: 'error', title: '保存失败' })
+    notify.toast((error as Error).message, {
+      type: 'error',
+      get title() {
+        return __t('ui.settings', '保存失败')
+      },
+    })
   } finally {
     busy.value = ''
   }
@@ -117,7 +140,12 @@ async function switchServer(server: SavedServer) {
     setWebServerOrigin(server.endpoint, browserServerToken(server.serverId))
     location.reload()
   } catch (error) {
-    notify.toast((error as Error).message, { type: 'error', title: '切换失败' })
+    notify.toast((error as Error).message, {
+      type: 'error',
+      get title() {
+        return __t('ui.settings', '切换失败')
+      },
+    })
   }
 }
 
@@ -130,11 +158,24 @@ async function sync() {
     confirmServer.value = null
     await refresh()
     notify.toast(
-      `完整快照已安全暂存（${formatBytes(result.data?.manifest.totalBytes ?? 0)}），请重启 Daemon 应用`,
-      { type: 'success', title: '同步准备完成', duration: 10000 },
+      __t('ui.settings', '同步已准备好（{0}），请重启服务', [
+        formatBytes(result.data?.manifest.totalBytes ?? 0),
+      ]),
+      {
+        type: 'success',
+        get title() {
+          return __t('ui.settings', '同步准备完成')
+        },
+        duration: 10000,
+      },
     )
   } catch (error) {
-    notify.toast((error as Error).message, { type: 'error', title: '同步失败' })
+    notify.toast((error as Error).message, {
+      type: 'error',
+      get title() {
+        return __t('ui.settings', '同步失败')
+      },
+    })
   } finally {
     busy.value = ''
   }
@@ -144,13 +185,20 @@ async function rollback() {
   busy.value = 'rollback'
   try {
     await distributedApi.rollback()
-    notify.toast('撤销已暂存，请重启 Daemon 恢复同步前数据', {
+    notify.toast(__t('ui.settings', '请重启服务以恢复同步前的数据'), {
       type: 'success',
-      title: '撤销准备完成',
+      get title() {
+        return __t('ui.settings', '撤销准备完成')
+      },
       duration: 10000,
     })
   } catch (error) {
-    notify.toast((error as Error).message, { type: 'error', title: '撤销失败' })
+    notify.toast((error as Error).message, {
+      type: 'error',
+      get title() {
+        return __t('ui.settings', '撤销失败')
+      },
+    })
   } finally {
     busy.value = ''
   }
@@ -161,7 +209,12 @@ async function createInvite() {
   try {
     invite.value = (await distributedApi.createCapabilityInvite()).data ?? null
   } catch (error) {
-    notify.toast((error as Error).message, { type: 'error', title: '邀请生成失败' })
+    notify.toast((error as Error).message, {
+      type: 'error',
+      get title() {
+        return __t('ui.settings', '邀请生成失败')
+      },
+    })
   } finally {
     busy.value = ''
   }
@@ -182,55 +235,64 @@ onMounted(() => void refresh())
     <header class="distributed-hero">
       <div class="hero-icon"><PixelIcon name="network" size="xl" /></div>
       <div>
-        <h1>分布式</h1>
-        <p>连接服务器、配置能力节点，并一键同步完整用户数据。</p>
+        <h1>{{ __t('ui.settings', '分布式') }}</h1>
+        <p>{{ __t('ui.settings', '管理设备、服务器与数据同步') }}</p>
       </div>
       <span class="mode-badge" :class="{ local: isElectronBound }">
-        {{ isElectronBound ? '本机 Daemon 固定模式' : '远程纯客户端模式' }}
+        {{ isElectronBound ? __t('ui.settings', '本机服务') : __t('ui.settings', '远程连接') }}
       </span>
     </header>
+
+    <ClientAccessSettings class="distributed-access" />
 
     <section class="pixel-card current-card">
       <div class="card-heading">
         <PixelIcon name="home" size="md" />
         <div>
-          <h2>当前服务器</h2>
-          <p>此设备正在使用的业务数据来源</p>
+          <h2>{{ __t('ui.settings', '当前服务器') }}</h2>
+          <p>{{ __t('ui.settings', '此设备正在使用的业务数据来源') }}</p>
         </div>
       </div>
       <div class="identity-grid">
         <div>
-          <span>名称</span>
-          <strong>{{ identity?.displayName ?? '读取中…' }}</strong>
+          <span>{{ __t('ui.settings', '名称') }}</span>
+          <strong>{{ identity?.displayName ?? __t('ui.settings', '读取中…') }}</strong>
         </div>
         <div>
           <span>Server ID</span>
           <code>{{ identity?.serverId ?? '—' }}</code>
         </div>
         <div>
-          <span>版本</span>
+          <span>{{ __t('ui.settings', '版本') }}</span>
           <strong>{{ identity?.appVersion ?? '—' }}</strong>
         </div>
         <div>
-          <span>入口规则</span>
-          <strong>{{ isElectronBound ? '固定 localhost，不可切换' : '可选择我的服务器' }}</strong>
+          <span>{{ __t('ui.settings', '入口规则') }}</span>
+          <strong>
+            {{
+              isElectronBound
+                ? __t('ui.settings', '使用本机服务')
+                : __t('ui.settings', '可切换服务器')
+            }}
+          </strong>
         </div>
       </div>
       <div v-if="isElectronBound" class="soft-note">
-        Electron、Steam 与便携版客户端始终死绑定同设备服务端；远程服务器仅作为完整数据同步来源。
+        {{ __t('ui.settings', '桌面客户端连接本机服务，可从远程服务器同步数据。') }}
       </div>
       <div v-if="pendingSync" class="sync-state pending-state">
         <PixelIcon name="clock" size="sm" />
-        <span>快照 {{ pendingSync.snapshotId }} 已暂存，重启 Daemon 后应用。</span>
+        <span>{{ __t('ui.settings', '数据已就绪，重启服务后应用。') }}</span>
       </div>
       <div v-if="lastSync" class="sync-state">
         <PixelIcon name="check" size="sm" />
         <span>
-          上次完整同步：{{ new Date(lastSync.createdAt).toLocaleString() }} ·
+          {{ __t('ui.settings', '上次完整同步：')
+          }}{{ new Date(lastSync.createdAt).toLocaleString() }} ·
           {{ formatBytes(lastSync.totalBytes) }}
         </span>
         <PButton size="sm" variant="ghost" :loading="busy === 'rollback'" @click="rollback">
-          撤销上次同步
+          {{ __t('ui.settings', '撤销上次同步') }}
         </PButton>
       </div>
     </section>
@@ -239,18 +301,27 @@ onMounted(() => void refresh())
       <div class="card-heading">
         <PixelIcon name="plus" size="md" />
         <div>
-          <h2>添加服务器</h2>
-          <p>鉴权密码仅用于连接验证，保存后会在本机加密</p>
+          <h2>{{ __t('ui.settings', '添加服务器') }}</h2>
+          <p>{{ __t('ui.settings', '鉴权密码仅用于连接验证，保存后会在本机加密') }}</p>
         </div>
       </div>
       <div class="server-form">
-        <PInput v-model="endpoint" placeholder="服务器地址，例如 https://home.example.com" />
-        <PInput v-model="token" type="password" placeholder="鉴权密码 / Token" />
-        <PInput v-model="displayName" placeholder="显示名称（可选）" />
+        <PInput
+          v-model="endpoint"
+          :placeholder="__t('ui.settings', '服务器地址，例如 https://home.example.com')"
+        />
+        <PInput
+          v-model="token"
+          type="password"
+          :placeholder="__t('ui.settings', '鉴权密码 / Token')"
+        />
+        <PInput v-model="displayName" :placeholder="__t('ui.settings', '显示名称（可选）')" />
         <div class="form-actions">
-          <PButton variant="secondary" :loading="busy === 'probe'" @click="probe">测试连接</PButton>
+          <PButton variant="secondary" :loading="busy === 'probe'" @click="probe">
+            {{ __t('ui.settings', '测试连接') }}
+          </PButton>
           <PButton :loading="busy === 'save'" :disabled="!endpoint" @click="save">
-            保存到我的服务器
+            {{ __t('ui.settings', '保存到我的服务器') }}
           </PButton>
         </div>
       </div>
@@ -264,8 +335,8 @@ onMounted(() => void refresh())
       <div class="card-heading">
         <PixelIcon name="database" size="md" />
         <div>
-          <h2>我的服务器</h2>
-          <p>点击一次即可从指定服务器同步全部用户数据</p>
+          <h2>{{ __t('ui.settings', '我的服务器') }}</h2>
+          <p>{{ __t('ui.settings', '点击一次即可从指定服务器同步全部用户数据') }}</p>
         </div>
       </div>
       <div v-if="servers.length" class="server-list">
@@ -283,14 +354,14 @@ onMounted(() => void refresh())
               variant="secondary"
               @click="switchServer(server)"
             >
-              设为当前服务器
+              {{ __t('ui.settings', '设为当前服务器') }}
             </PButton>
             <PButton
               size="sm"
               :loading="busy === `sync:${server.serverId}`"
               @click="confirmServer = server"
             >
-              从此服务器上同步最新数据
+              {{ __t('ui.settings', '从此服务器上同步最新数据') }}
             </PButton>
             <PButton
               size="sm"
@@ -298,38 +369,43 @@ onMounted(() => void refresh())
               :loading="busy === `remove:${server.serverId}`"
               @click="remove(server)"
             >
-              删除
+              {{ __t('ui.settings', '删除') }}
             </PButton>
           </div>
         </article>
       </div>
-      <div v-else class="empty-state">还没有保存服务器，先从上面添加一台吧。</div>
+      <div v-else class="empty-state">
+        {{ __t('ui.settings', '还没有保存服务器，先从上面添加一台吧。') }}
+      </div>
     </section>
 
     <section class="pixel-card">
       <div class="card-heading">
         <PixelIcon name="cpu" size="md" />
         <div>
-          <h2>能力节点</h2>
-          <p>能力节点主动出站直连当前服务器，无需配置公网入站</p>
+          <h2>{{ __t('ui.settings', '能力节点') }}</h2>
+          <p>{{ __t('ui.settings', '能力节点主动出站直连当前服务器，无需配置公网入站') }}</p>
         </div>
       </div>
       <div class="invite-form">
-        <p>邀请端点由当前服务器监听配置生成，配对成功后节点会保存独立设备凭据。</p>
-        <PButton :loading="busy === 'invite'" @click="createInvite">生成一次性配对邀请</PButton>
+        <p>{{ __t('ui.settings', '生成邀请以添加节点。') }}</p>
+        <PButton :loading="busy === 'invite'" @click="createInvite">
+          {{ __t('ui.settings', '生成一次性配对邀请') }}
+        </PButton>
       </div>
       <div v-if="invite" class="invite-ticket">
         <span>PAIRING CODE</span>
         <strong>{{ invite.pairingCode }}</strong>
         <small>
-          {{ invite.endpoint }} · {{ new Date(invite.expiresAt).toLocaleString() }} 失效
+          {{ invite.endpoint }} · {{ new Date(invite.expiresAt).toLocaleString() }}
+          {{ __t('ui.settings', '失效') }}
         </small>
       </div>
       <div class="capability-summary">
-        <span>已登记节点 {{ capabilities.nodes.length }}</span>
-        <span>在线会话 {{ activeSessions.length }}</span>
+        <span>{{ __t('ui.settings', '已登记节点') }} {{ capabilities.nodes.length }}</span>
+        <span>{{ __t('ui.settings', '在线会话') }} {{ activeSessions.length }}</span>
         <span>
-          可用 Offer
+          {{ __t('ui.settings', '可用 Offer') }}
           {{ capabilities.offers.filter((offer) => offer.health === 'available').length }}
         </span>
       </div>
@@ -337,8 +413,12 @@ onMounted(() => void refresh())
 
     <PDialog
       :model-value="Boolean(confirmServer)"
-      title="同步全部数据"
-      :message="`将从“${confirmServer?.displayName ?? ''}”同步全部最新用户数据。当前数据会自动备份，Daemon 重启后完成原子替换。此操作不会同步机器身份。`"
+      :title="__t('ui.settings', '同步全部数据')"
+      :message="
+        __t('ui.settings', '从“{0}”同步全部用户数据？当前数据会备份，重启服务后生效。', [
+          confirmServer?.displayName ?? '',
+        ])
+      "
       confirm-variant="danger"
       @confirm="sync"
       @cancel="confirmServer = null"
@@ -408,6 +488,10 @@ onMounted(() => void refresh())
 }
 .mode-badge.local {
   color: var(--ui-accent-purple);
+}
+.distributed-access {
+  max-width: 1080px;
+  margin: 0 auto 18px;
 }
 .pixel-card {
   max-width: 1080px;

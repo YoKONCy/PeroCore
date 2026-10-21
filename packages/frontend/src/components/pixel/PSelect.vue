@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /**
  * PSelect — 像素风下拉选择器
  *
@@ -9,6 +11,7 @@
 import { ref, computed, nextTick, onBeforeUnmount } from 'vue'
 import PixelIcon from './PixelIcon.vue'
 import { useEventListener } from '../../composables'
+import { useMobileLayout } from '../../composables/ui/useMobileLayout'
 
 export interface SelectOption {
   label: string
@@ -32,7 +35,7 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
   label: '',
   icon: '',
-  placeholder: '请选择...',
+  placeholder: undefined,
   disabled: false,
   size: 'md',
   teleport: false,
@@ -44,23 +47,27 @@ const emit = defineEmits<{
 }>()
 
 const isOpen = ref(false)
+const displayPlaceholder = computed(() => props.placeholder ?? __t('ui.pixel', '请选择...'))
 const containerRef = ref<HTMLElement | null>(null)
 const dropdownRef = ref<HTMLElement | null>(null)
 const dropdownStyle = ref<Record<string, string>>({})
+const { isMobile } = useMobileLayout()
+const shouldTeleport = computed(() => props.teleport || isMobile.value)
 
 function updateDropdownPosition(): void {
-  if (!props.teleport || !containerRef.value) return
+  if (!shouldTeleport.value || !containerRef.value) return
   const trigger = containerRef.value.querySelector('.p-select-trigger') as HTMLElement | null
   if (!trigger) return
   const rect = trigger.getBoundingClientRect()
-  const availableBelow = window.innerHeight - rect.bottom - 12
+  const visibleHeight = window.visualViewport?.height || window.innerHeight
+  const availableBelow = visibleHeight - rect.bottom - 12
   const availableAbove = rect.top - 12
   const openAbove = availableBelow < 180 && availableAbove > availableBelow
   const maxHeight = Math.max(120, Math.min(240, openAbove ? availableAbove : availableBelow))
   dropdownStyle.value = {
     position: 'fixed',
-    left: `${rect.left}px`,
-    width: `${rect.width}px`,
+    left: `${Math.max(8, Math.min(rect.left, window.innerWidth - Math.min(rect.width, window.innerWidth - 16) - 8))}px`,
+    width: `${Math.min(rect.width, window.innerWidth - 16)}px`,
     maxHeight: `${maxHeight}px`,
     ...(openAbove
       ? { bottom: `${window.innerHeight - rect.top + 4}px`, top: 'auto' }
@@ -81,7 +88,7 @@ const selectedOption = computed(() => props.options.find((opt) => opt.value === 
 function toggleDropdown() {
   if (props.disabled) return
   isOpen.value = !isOpen.value
-  if (isOpen.value && props.teleport) void nextTick(updateDropdownPosition)
+  if (isOpen.value && shouldTeleport.value) void nextTick(updateDropdownPosition)
 }
 
 function selectOption(option: SelectOption) {
@@ -103,6 +110,7 @@ useEventListener(document as unknown as EventTarget, 'click', (e: Event) => {
   }
 })
 useEventListener(window, 'resize', handleViewportChange)
+if (window.visualViewport) useEventListener(window.visualViewport, 'resize', handleViewportChange)
 useEventListener(document, 'scroll', handleViewportChange, { capture: true, passive: true })
 onBeforeUnmount(closeDropdown)
 </script>
@@ -125,7 +133,7 @@ onBeforeUnmount(closeDropdown)
         <span :class="selectedOption ? 'p-select-value' : 'p-select-placeholder'">
           <slot name="selected" :option="selectedOption">
             <PixelIcon v-if="selectedOption?.icon" :name="selectedOption.icon" size="xs" />
-            {{ selectedOption?.label || placeholder }}
+            {{ selectedOption?.label || displayPlaceholder }}
           </slot>
         </span>
         <PixelIcon
@@ -135,13 +143,13 @@ onBeforeUnmount(closeDropdown)
         />
       </button>
 
-      <Teleport to="body" :disabled="!teleport">
+      <Teleport to="body" :disabled="!shouldTeleport">
         <Transition name="select-dropdown">
           <div
             v-if="isOpen"
             ref="dropdownRef"
-            :class="['p-select-dropdown', { 'p-select-dropdown-teleported': teleport }]"
-            :style="teleport ? dropdownStyle : undefined"
+            :class="['p-select-dropdown', { 'p-select-dropdown-teleported': shouldTeleport }]"
+            :style="shouldTeleport ? dropdownStyle : undefined"
           >
             <div class="p-select-options">
               <div

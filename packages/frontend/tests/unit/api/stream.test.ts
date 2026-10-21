@@ -91,7 +91,8 @@ describe('streamRequest', () => {
     expect(controller).toBeInstanceOf(AbortController)
     expect(fetchMock).toHaveBeenCalledWith('http://localhost:7359/api/chat/stream', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: expect.any(Headers),
+      credentials: 'include',
       body: JSON.stringify({ message: '你好' }),
       signal: controller.signal,
     })
@@ -177,5 +178,56 @@ describe('streamRequest', () => {
     const upstreamAbort = { onError: vi.fn() }
     streamRequest('/chat/stream', {}, upstreamAbort)
     await vi.waitFor(() => expect(upstreamAbort.onError).toHaveBeenCalledOnce())
+  })
+})
+
+describe('流式连接保活与断流恢复入口', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.clearAllTimers()
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  it('半开连接超过保活窗口后只报告一次断流，不重新发送任务', async () => {
+    const onError = vi.fn()
+    const body = new ReadableStream<Uint8Array>({ start() {} })
+    const fetchMock = vi.fn(async () => ({ ok: true, body }))
+    vi.stubGlobal('fetch', fetchMock)
+    const controller = streamRequest('/chat/stream', { threadId: '原任务' }, { onError })
+    await vi.advanceTimersByTimeAsync(45_000)
+    expect(controller.signal.aborted).toBe(true)
+    expect(onError).toHaveBeenCalledOnce()
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ code: 'STREAM_ERROR' }))
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(onError).toHaveBeenCalledOnce()
+    expect(fetchMock).toHaveBeenCalledOnce()
+  })
+
+  it('只有保活帧的长工具任务可以持续等待，不按整段任务时长超时', async () => {
+    let source!: ReadableStreamDefaultController<Uint8Array>
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        source = controller
+      },
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, body })),
+    )
+    const onError = vi.fn()
+    const controller = streamRequest('/chat/stream', {}, { onError })
+    for (let cycle = 0; cycle < 8; cycle++) {
+      await vi.advanceTimersByTimeAsync(15_000)
+      source.enqueue(new TextEncoder().encode('event: heartbeat\ndata: {}\n\n'))
+      await Promise.resolve()
+    }
+    expect(controller.signal.aborted).toBe(false)
+    expect(onError).not.toHaveBeenCalled()
+    controller.abort()
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(onError).not.toHaveBeenCalled()
   })
 })

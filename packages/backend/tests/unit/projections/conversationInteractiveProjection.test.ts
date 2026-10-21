@@ -23,6 +23,49 @@ function createProjection() {
 }
 
 describe('Conversation交互Surface投影', () => {
+  it('NIT 父子关系经过消息落盘读取后仍保留，历史子调用可被前端归组', async () => {
+    const tool = {
+      blockId: 'nested',
+      sequence: 2,
+      kind: 'tool',
+      turn: 1,
+      callId: 'nit-child',
+      parentCallId: 'script',
+      name: 'read_file',
+      args: '{}',
+      result: '读取完成',
+      isError: false,
+    }
+    const service = new ConversationProjectionService(
+      {
+        getThread: async () => ({ id: 'thread-1', agentId: 'pero' }),
+        listMessages: async () => ({
+          items: [
+            {
+              id: 1,
+              threadId: 'thread-1',
+              agentId: 'pero',
+              role: 'assistant',
+              content: '完成',
+              status: 'active',
+              revision: 1,
+              timestamp: '2026-10-20T00:00:00Z',
+              metadataJson: JSON.stringify({ contentBlocks: [tool], toolCalls: [tool] }),
+            },
+          ],
+          total: 1,
+        }),
+      } as never,
+      { listForMessages: async () => new Map() } as never,
+    )
+    const snapshot = await service.getSnapshot('thread-1')
+    expect(snapshot.messages[0]?.contentBlocks[0]).toMatchObject({ parentCallId: 'script' })
+    expect(snapshot.messages[0]?.toolCalls[0]).toMatchObject({ parentCallId: 'script' })
+    expect(
+      snapshot.surfaces[0]?.nodes.find((node) => node.kind === 'tool-call')?.props,
+    ).toMatchObject({ parentCallId: 'script' })
+  })
+
   it('从消息 metadata 重建原始重试记录，计数和位置不因回连丢失', async () => {
     const retry = {
       retryId: 'retry-1',

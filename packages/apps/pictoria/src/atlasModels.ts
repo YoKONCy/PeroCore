@@ -1,3 +1,4 @@
+import { t as __t } from './i18n'
 type Fields = Record<string, Record<string, unknown>>
 export interface AtlasModel {
   id: string
@@ -18,7 +19,13 @@ const choice = (title: string, values: string[], fallback?: string) => ({
   enum: values,
   ...(fallback === undefined ? {} : { default: fallback }),
 })
-const seed = { type: 'integer', title: '随机种子', minimum: -1, maximum: 2147483647, default: -1 }
+const seed = {
+  type: 'integer',
+  title: __t('apps.pictoria.ui', '随机种子'),
+  minimum: -1,
+  maximum: 2147483647,
+  default: -1,
+}
 const format = choice('图片格式', ['png', 'jpeg'], 'png')
 const ratios = ['1:1', '3:2', '2:3', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9']
 const media = choice('参考图精度', ['default', 'low', 'medium', 'high'], 'default')
@@ -28,12 +35,22 @@ const google = {
   media_resolution: media,
   seed,
   top_p: { type: 'number', title: 'Top P', minimum: 0, maximum: 1, default: 0.95 },
-  temperature: { type: 'number', title: '温度', minimum: 0, maximum: 1, default: 1 },
+  temperature: {
+    type: 'number',
+    title: __t('apps.pictoria.ui', '温度'),
+    minimum: 0,
+    maximum: 1,
+    default: 1,
+  },
 } satisfies Fields
 const pro = {
   ...google,
   resolution: choice('分辨率', ['1k', '2k', '4k'], '2k'),
-  enable_web_search: { type: 'boolean', title: '联网搜索', default: false },
+  enable_web_search: {
+    type: 'boolean',
+    title: __t('apps.pictoria.ui', '联网搜索'),
+    default: false,
+  },
 } satisfies Fields
 const seedream: Fields = {
   size: choice(
@@ -92,12 +109,18 @@ const seedreamLiteSizes = [
 const flux: Fields = {
   size: {
     type: 'string',
-    title: '画面尺寸',
+    title: __t('apps.pictoria.ui', '画面尺寸'),
     pattern: '^(?:[2-9]\\d{2}|1\\d{3}|20[0-4]\\d)\\*(?:[2-9]\\d{2}|1\\d{3}|20[0-4]\\d)$',
   },
   output_format: format,
   seed,
-  safety_tolerance: { type: 'integer', title: '容忍度', minimum: 0, maximum: 5, default: 2 },
+  safety_tolerance: {
+    type: 'integer',
+    title: __t('apps.pictoria.ui', '容忍度'),
+    minimum: 0,
+    maximum: 5,
+    default: 2,
+  },
 }
 const docs = (path: string) => `https://www.atlascloud.ai/docs/more-models/${path}/generateImage`
 // 各型号分别声明接口字段，避免把一个模型的参数和参考图上限套到另一个模型。
@@ -151,7 +174,11 @@ export const atlasModels: AtlasModel[] = [
     sync: true,
     fields: {
       ...pro,
-      enable_image_search: { type: 'boolean', title: '图片搜索', default: false },
+      enable_image_search: {
+        type: 'boolean',
+        title: __t('apps.pictoria.ui', '图片搜索'),
+        default: false,
+      },
       thinking_level: choice('思考等级', ['default', 'high', 'minimal'], 'default'),
     },
     docs: docs('google/nano-banana-2-edit'),
@@ -194,9 +221,25 @@ export const atlasModels: AtlasModel[] = [
     sync: true,
     fields: {
       ...flux,
-      enable_prompt_expansion: { type: 'boolean', title: '提示词扩展', default: true },
-      guidance_scale: { type: 'number', title: '引导强度', minimum: 1.5, maximum: 10, default: 5 },
-      num_inference_steps: { type: 'integer', title: '步数', minimum: 1, maximum: 50, default: 50 },
+      enable_prompt_expansion: {
+        type: 'boolean',
+        title: __t('apps.pictoria.ui', '提示词扩展'),
+        default: true,
+      },
+      guidance_scale: {
+        type: 'number',
+        title: __t('apps.pictoria.ui', '引导强度'),
+        minimum: 1.5,
+        maximum: 10,
+        default: 5,
+      },
+      num_inference_steps: {
+        type: 'integer',
+        title: __t('apps.pictoria.ui', '步数'),
+        minimum: 1,
+        maximum: 50,
+        default: 50,
+      },
     },
     docs: docs('black-forest-labs/flux-2-flex-edit'),
   },
@@ -241,7 +284,14 @@ export const atlasModels: AtlasModel[] = [
     mode: 'edit',
     maxImages: 3,
     promptLimit: 800,
-    fields: { seed, size: { type: 'string', title: '画面尺寸', pattern: '^\\d{3,4}\\*\\d{3,4}$' } },
+    fields: {
+      seed,
+      size: {
+        type: 'string',
+        title: __t('apps.pictoria.ui', '画面尺寸'),
+        pattern: '^\\d{3,4}\\*\\d{3,4}$',
+      },
+    },
     docs: docs('qwen/qwen-image-2.0-edit'),
   },
   {
@@ -275,7 +325,13 @@ export const atlasModels: AtlasModel[] = [
       ),
       resolution: choice('分辨率', ['1k', '2k'], '1k'),
       quality: choice('质量', ['low', 'medium'], 'medium'),
-      num_images: { type: 'integer', title: '张数', minimum: 1, maximum: 4, default: 1 },
+      num_images: {
+        type: 'integer',
+        title: __t('apps.pictoria.ui', '张数'),
+        minimum: 1,
+        maximum: 4,
+        default: 1,
+      },
     },
     docs: docs('xai/grok-imagine-image-2.0-edit'),
   },

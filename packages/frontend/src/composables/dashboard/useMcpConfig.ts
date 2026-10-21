@@ -1,3 +1,4 @@
+import { t as __t } from '../../i18n/index'
 /**
  * useMcpConfig — MCP / Skill 配置管理 composable
  *
@@ -76,28 +77,46 @@ export function useMcpConfig() {
   })
 
   const typeOptions = [
-    { label: 'stdio (命令行)', value: 'stdio' },
-    { label: 'SSE (远程)', value: 'sse' },
+    {
+      get label() {
+        return __t('ui.settings', 'stdio (命令行)')
+      },
+      value: 'stdio',
+    },
+    {
+      get label() {
+        return __t('ui.settings', 'SSE (远程)')
+      },
+      value: 'sse',
+    },
   ]
 
   const statusMeta: Record<string, { label: string; dotClass: string; badgeClass: string }> = {
     connected: {
-      label: '已连接',
+      get label() {
+        return __t('ui.settings', '已连接')
+      },
       dotClass: 'bg-emerald-500',
       badgeClass: 'text-emerald-600 border-emerald-300 bg-emerald-50',
     },
     disconnected: {
-      label: '未连接',
+      get label() {
+        return __t('ui.settings', '未连接')
+      },
       dotClass: 'bg-slate-400',
       badgeClass: 'text-slate-400 border-slate-300 bg-slate-50',
     },
     error: {
-      label: '错误',
+      get label() {
+        return __t('ui.settings', '错误')
+      },
       dotClass: 'bg-red-500',
       badgeClass: 'text-red-500 border-red-300 bg-red-50',
     },
     unknown: {
-      label: '未知',
+      get label() {
+        return __t('ui.settings', '未知')
+      },
       dotClass: 'bg-slate-400',
       badgeClass: 'text-slate-400 border-slate-300 bg-slate-50',
     },
@@ -159,8 +178,8 @@ export function useMcpConfig() {
         }
       })
     } catch (err) {
-      notify.toast('加载 MCP 配置失败: ' + (err as Error).message, 'error')
-      logger.error('McpConfig', '加载 MCP 配置失败', err)
+      notify.toast(__t('ui.settings', '加载 MCP 配置失败: ') + (err as Error).message, 'error')
+      logger.error('McpConfig', __t('logs.frontend.settings', '加载 MCP 配置失败'), err)
       servers.value = []
     } finally {
       isLoading.value = false
@@ -196,7 +215,7 @@ export function useMcpConfig() {
         try {
           env = JSON.parse(addForm.value.env)
         } catch {
-          logger.warn('McpConfig', '环境变量 JSON 解析失败，已忽略')
+          logger.warn('McpConfig', __t('logs.frontend.settings', '环境变量 JSON 解析失败，已忽略'))
         }
       }
 
@@ -213,11 +232,11 @@ export function useMcpConfig() {
       isAddOpen.value = false
       addForm.value = { name: '', type: 'stdio', command: '', url: '', args: '', env: '' }
       await loadServers()
-      notify.toast(`MCP 服务 "${name}" 已创建`, 'success')
-      logger.info('McpConfig', `MCP 服务 "${name}" 已创建`)
+      notify.toast(__t('ui.settings', 'MCP 服务 "{0}" 已创建', [name]), 'success')
+      logger.info('McpConfig', __t('logs.frontend.settings', 'MCP 服务 "{0}" 已创建', [name]))
     } catch (err) {
-      notify.toast('创建 MCP 服务失败: ' + (err as Error).message, 'error')
-      logger.error('McpConfig', '创建 MCP 服务失败', err)
+      notify.toast(__t('ui.settings', '创建 MCP 服务失败: ') + (err as Error).message, 'error')
+      logger.error('McpConfig', __t('logs.frontend.settings', '创建 MCP 服务失败'), err)
     }
   }
 
@@ -226,11 +245,11 @@ export function useMcpConfig() {
     try {
       await mcpApi.deleteConfig(id)
       await loadServers()
-      notify.toast('MCP 服务已删除', 'success')
-      logger.info('McpConfig', `MCP 配置 #${id} 已删除`)
+      notify.toast(__t('ui.settings', 'MCP 服务已删除'), 'success')
+      logger.info('McpConfig', __t('logs.frontend.settings', 'MCP 配置 #{0} 已删除', [id]))
     } catch (err) {
-      notify.toast('删除 MCP 服务失败: ' + (err as Error).message, 'error')
-      logger.error('McpConfig', '删除 MCP 服务失败', err)
+      notify.toast(__t('ui.settings', '删除 MCP 服务失败: ') + (err as Error).message, 'error')
+      logger.error('McpConfig', __t('logs.frontend.settings', '删除 MCP 服务失败'), err)
     }
   }
 
@@ -240,8 +259,8 @@ export function useMcpConfig() {
       await mcpApi.toggleEnabled(id)
       await loadServers()
     } catch (err) {
-      notify.toast('切换 MCP 启用状态失败: ' + (err as Error).message, 'error')
-      logger.error('McpConfig', '切换 MCP 启用状态失败', err)
+      notify.toast(__t('ui.settings', '切换 MCP 启用状态失败: ') + (err as Error).message, 'error')
+      logger.error('McpConfig', __t('logs.frontend.settings', '切换 MCP 启用状态失败'), err)
     }
   }
 
@@ -258,11 +277,21 @@ export function useMcpConfig() {
 
       await mcpApi.reconnect(srv.name)
       await loadServers()
-      notify.toast(`MCP 服务 "${srv.name}" 已重新连接`, 'success')
-      logger.info('McpConfig', `MCP 服务 "${srv.name}" 已重新连接`)
+      notify.toast(__t('ui.settings', 'MCP 服务 "{0}" 已重新连接', [srv.name]), 'success')
+      logger.info(
+        'McpConfig',
+        __t('logs.frontend.settings', 'MCP 服务 "{0}" 已重新连接', [srv.name]),
+      )
     } catch (err) {
-      notify.toast(`重连 MCP 服务 "${srv.name}" 失败: ${(err as Error).message}`, 'error')
-      logger.error('McpConfig', `重连 MCP 服务 "${srv.name}" 失败`, err)
+      notify.toast(
+        __t('ui.settings', '重连 MCP 服务 "{0}" 失败: {1}', [srv.name, (err as Error).message]),
+        'error',
+      )
+      logger.error(
+        'McpConfig',
+        __t('logs.frontend.settings', '重连 MCP 服务 "{0}" 失败', [srv.name]),
+        err,
+      )
       // 刷新获取真实状态
       await loadServers()
     }
@@ -273,11 +302,11 @@ export function useMcpConfig() {
     try {
       await mcpApi.connectAll()
       await loadServers()
-      notify.toast('所有 MCP 服务已连接', 'success')
-      logger.info('McpConfig', '所有 MCP 服务已连接')
+      notify.toast(__t('ui.settings', '所有 MCP 服务已连接'), 'success')
+      logger.info('McpConfig', __t('logs.frontend.settings', '所有 MCP 服务已连接'))
     } catch (err) {
-      notify.toast('批量连接 MCP 服务失败: ' + (err as Error).message, 'error')
-      logger.error('McpConfig', '批量连接 MCP 服务失败', err)
+      notify.toast(__t('ui.settings', '批量连接 MCP 服务失败: ') + (err as Error).message, 'error')
+      logger.error('McpConfig', __t('logs.frontend.settings', '批量连接 MCP 服务失败'), err)
     }
   }
 
@@ -290,8 +319,8 @@ export function useMcpConfig() {
       const res = await mcpApi.getSkills()
       skills.value = res.data ?? []
     } catch (err) {
-      notify.toast('加载 Skill 列表失败: ' + (err as Error).message, 'error')
-      logger.error('McpConfig', '加载 Skill 列表失败', err)
+      notify.toast(__t('ui.settings', '加载 Skill 列表失败: ') + (err as Error).message, 'error')
+      logger.error('McpConfig', __t('logs.frontend.settings', '加载 Skill 列表失败'), err)
       skills.value = []
     } finally {
       isSkillLoading.value = false
@@ -313,7 +342,11 @@ export function useMcpConfig() {
       const res = await mcpApi.getSkillContent(id)
       skillContent.value = res.data?.content ?? '(无内容)'
     } catch (err) {
-      logger.error('McpConfig', `加载 Skill "${id}" 内容失败`, err)
+      logger.error(
+        'McpConfig',
+        __t('logs.frontend.settings', '加载 Skill "{0}" 内容失败', [id]),
+        err,
+      )
       skillContent.value = '加载失败'
     }
   }
@@ -324,11 +357,14 @@ export function useMcpConfig() {
     try {
       const res = await mcpApi.reloadSkills()
       skills.value = res.data ?? []
-      notify.toast(`Skill 已重新加载: ${skills.value.length} 个`, 'success')
-      logger.info('McpConfig', `Skill 已重新加载: ${skills.value.length} 个`)
+      notify.toast(__t('ui.settings', 'Skill 已重新加载: {0} 个', [skills.value.length]), 'success')
+      logger.info(
+        'McpConfig',
+        __t('logs.frontend.settings', 'Skill 已重新加载: {0} 个', [skills.value.length]),
+      )
     } catch (err) {
-      notify.toast('Skill 重新加载失败: ' + (err as Error).message, 'error')
-      logger.error('McpConfig', 'Skill 重新加载失败', err)
+      notify.toast(__t('ui.settings', 'Skill 重新加载失败: ') + (err as Error).message, 'error')
+      logger.error('McpConfig', __t('logs.frontend.settings', 'Skill 重新加载失败'), err)
     } finally {
       isSkillLoading.value = false
     }
@@ -375,13 +411,13 @@ export function useMcpConfig() {
       skills.value = res.data ?? []
       isImportOpen.value = false
       importPath.value = ''
-      notify.toast(`Skill 导入成功: ${sourcePath}`, 'success')
-      logger.info('McpConfig', `Skill 导入成功: ${sourcePath}`)
+      notify.toast(__t('ui.settings', 'Skill 导入成功: {0}', [sourcePath]), 'success')
+      logger.info('McpConfig', __t('logs.frontend.settings', 'Skill 导入成功: {0}', [sourcePath]))
     } catch (err: unknown) {
       const msg = (err as { message?: string })?.message ?? '导入失败'
       importError.value = msg
-      notify.toast('Skill 导入失败: ' + msg, 'error')
-      logger.error('McpConfig', 'Skill 导入失败', err)
+      notify.toast(__t('ui.settings', 'Skill 导入失败: ') + msg, 'error')
+      logger.error('McpConfig', __t('logs.frontend.settings', 'Skill 导入失败'), err)
     } finally {
       isSkillLoading.value = false
     }
@@ -392,11 +428,14 @@ export function useMcpConfig() {
     try {
       await mcpApi.deleteSkill(id)
       await loadSkills()
-      notify.toast(`Skill "${id}" 已删除`, 'success')
-      logger.info('McpConfig', `Skill "${id}" 已删除`)
+      notify.toast(__t('ui.settings', 'Skill "{0}" 已删除', [id]), 'success')
+      logger.info('McpConfig', __t('logs.frontend.settings', 'Skill "{0}" 已删除', [id]))
     } catch (err) {
-      notify.toast(`删除 Skill "${id}" 失败: ${(err as Error).message}`, 'error')
-      logger.error('McpConfig', `删除 Skill "${id}" 失败`, err)
+      notify.toast(
+        __t('ui.settings', '删除 Skill "{0}" 失败: {1}', [id, (err as Error).message]),
+        'error',
+      )
+      logger.error('McpConfig', __t('logs.frontend.settings', '删除 Skill "{0}" 失败', [id]), err)
     }
   }
 

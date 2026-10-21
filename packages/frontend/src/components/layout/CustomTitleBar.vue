@@ -18,7 +18,7 @@
       :class="isWorkMode ? 'text-slate-400' : 'text-sky-700'"
     >
       <InfosLogo class="ctb-brand" variant="mark" aria-hidden="true" />
-      <span class="text-xs font-bold tracking-wide font-mono opacity-90">{{ title }}</span>
+      <span class="text-xs font-bold tracking-wide font-mono opacity-90">{{ displayTitle }}</span>
     </div>
 
     <!-- 右侧：窗口控制 -->
@@ -32,7 +32,7 @@
             ? 'hover:bg-white/5 text-slate-400 hover:text-amber-500'
             : 'hover:bg-sky-100 text-sky-600/70 hover:text-sky-600'
         "
-        :title="isWorkMode ? '切换至对话' : '切换至工作'"
+        :title="isWorkMode ? __t('ui.layout', '切换至对话') : __t('ui.layout', '切换至工作')"
         @click="emit('toggle-mode')"
       >
         <PixelIcon :name="isWorkMode ? 'chat' : 'briefcase'" size="xs" />
@@ -84,13 +84,15 @@
 </template>
 
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /**
  * CustomTitleBar — 自定义窗口标题栏 (还原 v1 原版)
  *
  * 仅在 Electron 模式下渲染 (使用方通过 v-if="isElectron()" 控制)。
  * 深浅色适配跟随 document 根元素的 data-theme 属性，无需额外 JS 状态。
  */
-import { ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { PixelIcon } from '../pixel'
 import InfosLogo from '../brands/InfosLogo.vue'
 import { invoke, listen } from '../../utils/ipcAdapter'
@@ -106,12 +108,13 @@ interface Props {
   showModeToggle?: boolean
 }
 
-withDefaults(defineProps<Props>(), {
-  title: '萌动链接：PeroperoChat！',
+const props = withDefaults(defineProps<Props>(), {
+  title: undefined,
   transparent: false,
   isWorkMode: false,
   showModeToggle: false,
 })
+const displayTitle = computed(() => props.title ?? __t('ui.layout', '萌动链接：PeroperoChat！'))
 
 const emit = defineEmits<{
   (e: 'toggle-mode'): void

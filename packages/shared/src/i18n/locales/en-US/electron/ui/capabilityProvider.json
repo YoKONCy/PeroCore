@@ -1,0 +1,4 @@
+{
+  "已截取屏幕 ({0}x{1})。": "took a screenshot ({0}x{1}).",
+  "如需点击截图位置，请使用coordinateSpace=screenshot、displayId={0}、": "If you want to click on the screenshot location, please use coordinateSpace=screenshot, displayId={0},"
+}

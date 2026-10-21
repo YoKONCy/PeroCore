@@ -3,6 +3,7 @@ import type {
   TokenUsagePeriod,
   TokenUsageStatistics,
   TokenUsageTotals,
+  TokenUsageFilters,
 } from '@infos/shared'
 import type { TokenUsageRepository } from '../../repositories/tokenUsage.repo'
 
@@ -39,7 +40,16 @@ function shiftDate(key: string, days: number): string {
 export class TokenUsageService {
   constructor(private repository: TokenUsageRepository) {}
 
-  statistics(period: TokenUsagePeriod, timeZone: string, agentId?: string): TokenUsageStatistics {
+  filterOptions(agentId?: string) {
+    return this.repository.filterOptions(agentId)
+  }
+
+  statistics(
+    period: TokenUsagePeriod,
+    timeZone: string,
+    agentId?: string,
+    filters: TokenUsageFilters = {},
+  ): TokenUsageStatistics {
     const now = Date.now()
     const formatter = new Intl.DateTimeFormat('en-CA', {
       timeZone,
@@ -86,7 +96,7 @@ export class TokenUsageService {
     const channels = new Map<string, TokenUsageGroup>()
     const totals = emptyTotals()
     const minuteParts = new Map<number, ReturnType<typeof parts>>()
-    for (const row of this.repository.aggregate(from, to, agentId)) {
+    for (const row of this.repository.aggregate(from, to, agentId, filters)) {
       const date = minuteParts.get(row.at) ?? parts(Math.max(row.at, from))
       minuteParts.set(row.at, date)
       const bucket = bucketMap.get(period === 'today' ? date.hour : date.day)
@@ -109,7 +119,7 @@ export class TokenUsageService {
       add(channel, row)
       channels.set(channelKey, channel)
     }
-    const firstAt = this.repository.firstRecordedAt(agentId)
+    const firstAt = this.repository.firstRecordedAt(agentId, filters)
     return {
       period,
       timeZone,

@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 import { existsSync, readFileSync, rmSync } from 'node:fs'
 import type { ApplicationDiscoveryRecord, KernelNodeId } from '@infos/shared'
 import { LoopbackWebSocketNodeTransport } from '@infos/node-host'
@@ -132,7 +133,10 @@ export class ApplicationFederationConnector {
       )
       if (!this.isProcessAlive(record.pid)) {
         logger.info(
-          `清理陈旧Application Discovery: app=${record.application.appId}, pid=${record.pid}`,
+          __t('logs.capabilities', '清理陈旧Application Discovery: app={0}, pid={1}', [
+            record.application.appId,
+            record.pid,
+          ]),
         )
         rmSync(this.discoveryPath, { force: true })
         this.discovery = undefined
@@ -156,7 +160,9 @@ export class ApplicationFederationConnector {
         failedDiscovery && this.isProcessAlive(failedDiscovery.pid) ? failedDiscovery : undefined
       const message = error instanceof Error ? error.message : String(error)
       if (message !== this.lastError)
-        logger.warn(`Application Federation同步失败，等待重连: ${message}`)
+        logger.warn(
+          __t('logs.capabilities', 'Application Federation同步失败，等待重连: {0}', [message]),
+        )
       this.lastError = message
       await this.disconnect()
     }
@@ -165,7 +171,9 @@ export class ApplicationFederationConnector {
   async connect(discovered?: ApplicationDiscovery): Promise<boolean> {
     if (this.stopped) return false
     if (!existsSync(this.discoveryPath) && !discovered) {
-      logger.info(`Application未运行，跳过 Federation: ${this.discoveryPath}`)
+      logger.info(
+        __t('logs.capabilities', 'Application未运行，跳过 Federation: {0}', [this.discoveryPath]),
+      )
       return false
     }
     const record =
@@ -265,7 +273,11 @@ export class ApplicationFederationConnector {
       this.lastConnectedAt = new Date().toISOString()
       this.activeIdentity = `${record.application.instanceId}:${record.generation}`
       logger.info(
-        `Application Federation已接入: app=${record.application.appId}, node=${record.nodeId}, offers=${hello.offers.length}`,
+        __t('logs.capabilities', 'Application Federation已接入: app={0}, node={1}, offers={2}', [
+          record.application.appId,
+          record.nodeId,
+          hello.offers.length,
+        ]),
       )
       return true
     } catch (error) {

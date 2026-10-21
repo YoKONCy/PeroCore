@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * Tool Registry — 工具注册表
  *
@@ -12,7 +13,7 @@
  */
 
 import type { ToolDefinition } from '../pipeline/types'
-import type { ToolExecutionResult } from './reactLoop'
+import type { ToolExecutionResult, NestedToolCall } from './reactLoop'
 import type { StructuredToolResult } from '../execution/toolResult'
 import { createLogger } from '../../lib/logger'
 import { isStrongholdChannelTool } from '../../tools/systemProtocolTools'
@@ -51,6 +52,7 @@ export interface ToolContext {
   toolCallId?: string
   /** 当前 ReAct/任务的取消信号，长时工具必须主动监听。 */
   signal?: AbortSignal
+  loopGuard?: import('./toolLoopGuard').ToolLoopGuard
   executionMode?: import('@infos/shared').ExecutionMode
   interactionMode?: import('@infos/shared').InteractionMode
   disabledTools?: string[]
@@ -59,6 +61,7 @@ export interface ToolContext {
   capabilityScope?: import('../../capabilities/types').CapabilityScope
   reviewMessages?: import('../llm/types').ChatMessage[]
   onExecutionStatus?: (message: string) => void
+  onNestedToolCall?: (call: NestedToolCall) => void
   onToolObserved?: (
     result: import('../context/toolContextService').ObservedToolResult,
   ) => void | Promise<void>
@@ -140,7 +143,7 @@ export class ToolRegistry {
       allowedSources,
       chatEnabled: options?.chatEnabled === true,
     })
-    logger.debug(`工具已注册: ${definition.name}`)
+    logger.debug(__t('logs.agent', '工具已注册: {0}', [definition.name]))
   }
 
   /** 注销普通工具；仅移除当前注册项。 */
@@ -183,7 +186,7 @@ export class ToolRegistry {
     }
     appSet.add(prefixedName)
 
-    logger.debug(`应用工具已注册: ${prefixedName}`)
+    logger.debug(__t('logs.agent', '应用工具已注册: {0}', [prefixedName]))
   }
 
   /**
@@ -204,7 +207,7 @@ export class ToolRegistry {
     this.appTools.delete(appId)
 
     if (count > 0) {
-      logger.info(`应用工具已注销: appId=${appId}, count=${count}`)
+      logger.info(__t('logs.agent', '应用工具已注销: appId={0}, count={1}', [appId, count]))
     }
     return count
   }

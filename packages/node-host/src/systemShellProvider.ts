@@ -1,3 +1,5 @@
+import { translate as __t } from '@infos/shared/i18n'
+import '@infos/shared/i18n/catalogs/platform'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import os from 'node:os'
@@ -200,7 +202,7 @@ export function createSystemShellProvider(nodeId: KernelNodeId): NodeProvider {
         })
         const abort = () => {
           void terminate(session, 'SIGKILL').catch((error) =>
-            console.warn('远程终端回收失败', error),
+            console.warn(__t('platform.node-host', '远程终端回收失败'), error),
           )
         }
         let deadlineTimer: ReturnType<typeof setTimeout> | undefined

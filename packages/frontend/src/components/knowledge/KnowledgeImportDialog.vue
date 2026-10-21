@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import { ref, watch } from 'vue'
 import type { KnowledgeDocumentInfo } from '@infos/shared'
 import { PButton, PDialog, PixelIcon } from '../pixel'
@@ -72,17 +74,17 @@ async function submit(): Promise<void> {
 <template>
   <PDialog
     :model-value="modelValue"
-    :title="target ? '更新资料' : '导入资料'"
+    :title="target ? __t('ui.knowledge', '更新资料') : __t('ui.knowledge', '导入资料')"
     width="620px"
     @update:model-value="!busy && emit('update:modelValue', $event)"
   >
     <form class="knowledge-import" @submit.prevent="submit">
-      <nav class="import-kinds" aria-label="资料来源">
+      <nav class="import-kinds" :aria-label="__t('ui.knowledge', '资料来源')">
         <button
           v-for="item in [
-            ['file', '文本文件', 'file'],
-            ['text', '粘贴文本', 'edit'],
-            ['url', '网页', 'globe'],
+            ['file', __t('ui.knowledge', '文本文件'), 'file'],
+            ['text', __t('ui.knowledge', '粘贴文本'), 'edit'],
+            ['url', __t('ui.knowledge', '网页'), 'globe'],
           ] as const"
           :key="item[0]"
           type="button"
@@ -95,18 +97,20 @@ async function submit(): Promise<void> {
         </button>
       </nav>
       <label>
-        名称
+        {{ __t('ui.knowledge', '名称') }}
         <input
           v-model="title"
           maxlength="200"
-          placeholder="可选，留空使用来源名称"
+          :placeholder="__t('ui.knowledge', '可选，留空使用来源名称')"
           :disabled="busy"
         />
       </label>
       <label v-if="kind === 'file'" class="file-picker">
         <PixelIcon name="file" size="lg" />
-        <b>{{ file?.name || '选择文本文件' }}</b>
-        <span>TXT / Markdown / JSON / CSV 等 UTF-8 文本 · 最多 8 MiB</span>
+        <b>{{ file?.name || __t('ui.knowledge', '选择文本文件') }}</b>
+        <span>
+          {{ __t('ui.knowledge', 'TXT / Markdown / JSON / CSV 等 UTF-8 文本 · 最多 8 MiB') }}
+        </span>
         <input
           type="file"
           accept="text/*,.md,.markdown,.json,.csv,.tsv,.yaml,.yml,.log,.xml,.toml,.ini"
@@ -115,26 +119,36 @@ async function submit(): Promise<void> {
         />
       </label>
       <label v-else-if="kind === 'text'">
-        正文
-        <textarea v-model="content" rows="9" placeholder="粘贴要保存的资料……" :disabled="busy" />
+        {{ __t('ui.knowledge', '正文') }}
+        <textarea
+          v-model="content"
+          rows="9"
+          :placeholder="__t('ui.knowledge', '粘贴要保存的资料……')"
+          :disabled="busy"
+        />
       </label>
       <label v-else>
-        网页地址
+        {{ __t('ui.knowledge', '网页地址') }}
         <input v-model="url" type="url" placeholder="https://…" :disabled="busy" />
-        <small>读取网页正文，不包含需登录或由脚本加载的内容。</small>
+        <small>{{ __t('ui.knowledge', '读取网页正文，不包含需登录或由脚本加载的内容。') }}</small>
       </label>
       <p class="import-note">
-        少于 10K Token 整篇摘要，10K–400K 按语义分段；超过 400K 请先手动切分。整理模型可在「模型配置
-        → 任务指派」中指定。
+        {{
+          __t('ui.knowledge', '最多 400K Token，超出请分批导入。整理模型可在「任务指派」中设置。')
+        }}
       </p>
-      <p v-if="target" class="import-note">更新后重新整理；整理期间这份资料暂不参与检索。</p>
+      <p v-if="target" class="import-note">
+        {{ __t('ui.knowledge', '更新后重新整理；整理期间这份资料暂不参与检索。') }}
+      </p>
       <p v-if="error" class="knowledge-error" role="alert">{{ error }}</p>
     </form>
     <template #footer>
       <PButton variant="secondary" :disabled="busy" @click="emit('update:modelValue', false)">
-        取消
+        {{ __t('ui.knowledge', '取消') }}
       </PButton>
-      <PButton :loading="busy" @click="submit">{{ target ? '更新' : '导入' }}</PButton>
+      <PButton :loading="busy" @click="submit">
+        {{ target ? __t('ui.knowledge', '更新') : __t('ui.knowledge', '导入') }}
+      </PButton>
     </template>
   </PDialog>
 </template>

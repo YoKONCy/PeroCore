@@ -50,6 +50,95 @@ afterEach(() => {
 })
 
 describe('持久跟进与建议', () => {
+  it('周期通知使用每次到期时间去重，重启后按原节奏继续，不补发错过的所有时段', async () => {
+    const { service, gateway } = setup()
+    const item = await service.create({
+      agentId: 'nana',
+      time: future(),
+      content: '喝水',
+      repeatIntervalMinutes: 60,
+    })
+    vi.advanceTimersByTime(120_001)
+    await service.dispatchDueTasks()
+    expect(row(item.id)).toMatchObject({ status: 'pending', attempts: 0, isTriggered: false })
+    expect(gateway.pushNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ notificationId: `schedule:${item.id}:${item.time}` }),
+    )
+    const next = row(item.id).time
+    const restarted = setup()
+    vi.setSystemTime(new Date(Date.parse(next) + 3 * 3600_000 + 1))
+    await restarted.service.dispatchDueTasks()
+    expect(restarted.gateway.pushNotification).toHaveBeenCalledOnce()
+    expect(restarted.gateway.pushNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ notificationId: `schedule:${item.id}:${next}` }),
+    )
+    expect(Date.parse(row(item.id).time)).toBeGreaterThan(Date.now())
+    await restarted.service.dispatchDueTasks()
+    expect(restarted.gateway.pushNotification).toHaveBeenCalledOnce()
+  })
+
+  it('周期任务绑定固定会话；前一次还在运行时延后且不耗失败次数', async () => {
+    const { service, dispatch } = setup()
+    const runtime = { inspect: vi.fn(async () => ({ status: 'running' })), cancel: vi.fn() }
+    service.setTaskDispatcher(dispatch, runtime)
+    const item = await service.create({
+      type: 'agent_task',
+      agentId: 'nana',
+      threadId: 'thread-nana',
+      time: future(),
+      content: '检查进展',
+      repeatIntervalMinutes: 1,
+    })
+    vi.advanceTimersByTime(120_001)
+    await service.dispatchDueTasks()
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetThreadId: 'thread-nana',
+        completionAction: 'send_to_chat',
+        idempotencyKey: `schedule:${item.id}:${item.time}`,
+      }),
+    )
+    vi.setSystemTime(new Date(row(item.id).time))
+    await service.dispatchDueTasks()
+    expect(dispatch).toHaveBeenCalledOnce()
+    expect(row(item.id)).toMatchObject({ status: 'pending', attempts: 0 })
+    runtime.inspect.mockResolvedValue({ status: 'completed' })
+    vi.setSystemTime(new Date(row(item.id).nextAttemptAt!))
+    await service.dispatchDueTasks()
+    expect(dispatch).toHaveBeenCalledTimes(2)
+  })
+
+  it('周期暂停会取消活动任务，恢复跳过暂停期间；旧领取者不能覆盖取消', async () => {
+    const { service, dispatch } = setup()
+    const runtime = {
+      inspect: vi.fn(async () => ({ status: 'running' })),
+      cancel: vi.fn(async () => true),
+    }
+    service.setTaskDispatcher(dispatch, runtime)
+    const item = await service.create({
+      type: 'agent_task',
+      agentId: 'nana',
+      threadId: 'thread-nana',
+      time: future(),
+      content: '定时检查',
+      repeatIntervalMinutes: 1,
+    })
+    vi.advanceTimersByTime(120_001)
+    await service.dispatchDueTasks()
+    expect(await service.pause(item.id, 'nana', true)).toBe(true)
+    expect(runtime.cancel).toHaveBeenCalledOnce()
+    vi.advanceTimersByTime(300_000)
+    await service.dispatchDueTasks()
+    expect(dispatch).toHaveBeenCalledOnce()
+    expect(await service.pause(item.id, 'nana', false)).toBe(true)
+    expect(Date.parse(row(item.id).time)).toBeGreaterThan(Date.now())
+    vi.setSystemTime(new Date(row(item.id).time))
+    const repo = new ProactiveWorkRepository(db)
+    const [claimed] = repo.claimDue(new Date().toISOString())
+    expect(await service.cancel(item.id, 'nana')).toBe(true)
+    expect(repo.settle(claimed!, '迟到任务')).toBeUndefined()
+    expect(row(item.id).status).toBe('cancelled')
+  })
   it('采纳派发失败会恢复待处理状态，允许用户重试或忽略', async () => {
     const { service, dispatch } = setup()
     const item = await service.suggest({

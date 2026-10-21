@@ -1,13 +1,24 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { t as __t } from '../../i18n/index'
+
+import { computed } from 'vue'
 import type { MessageResource } from '@infos/shared'
 import ResourceGlyph from './ResourceGlyph.vue'
-import ResourceAudioPlayer from './ResourceAudioPlayer.vue'
+import ResourceInlinePreview from './ResourceInlinePreview.vue'
+import { resourcePreviewKind } from '../../lib/resourceLinks'
+import { t } from '../../i18n'
 import { PixelIcon } from '../pixel'
-import { openResource, resourceSize, resourceUrl } from '../../composables/resources/useResources'
-const props = defineProps<{ resource: MessageResource }>()
-const url = computed(() => resourceUrl(props.resource))
-const mediaFailed = ref(false)
+import {
+  openResource,
+  previewResource,
+  resourceSize,
+  resourceUrl,
+} from '../../composables/resources/useResources'
+const props = withDefaults(
+  defineProps<{ resource: MessageResource; label?: string; active?: boolean }>(),
+  { active: true, label: undefined },
+)
+const kind = computed(() => resourcePreviewKind(props.resource))
 const format = computed(
   () =>
     props.resource.name.split('.').pop()?.slice(0, 7).toUpperCase() ||
@@ -15,38 +26,10 @@ const format = computed(
 )
 </script>
 <template>
-  <article class="resource-card" :class="`resource-card--${resource.kind}`">
-    <button
-      v-if="resource.kind === 'image' || resource.kind === 'video'"
-      type="button"
-      class="resource-card__preview"
-      :aria-label="`查看${resource.name}`"
-      @click="openResource(resource)"
-    >
-      <img
-        v-if="resource.kind === 'image' && !mediaFailed"
-        :src="url"
-        :alt="resource.name"
-        loading="lazy"
-        @error="mediaFailed = true"
-      />
-      <video
-        v-else-if="resource.kind === 'video' && !mediaFailed"
-        :src="url"
-        preload="metadata"
-        muted
-        aria-hidden="true"
-        @error="mediaFailed = true"
-      />
-      <ResourceGlyph v-else :kind="resource.kind" />
-      <span v-if="resource.kind === 'video'" class="resource-card__play" aria-hidden="true">▶</span>
-      <span class="resource-card__format">{{ format }}</span>
-    </button>
+  <article class="resource-card" :class="`resource-card--${kind}`">
+    <ResourceInlinePreview :resource="resource" :active="active" @open="openResource(resource)" />
     <div class="resource-card__body">
-      <ResourceGlyph
-        v-if="resource.kind !== 'image' && resource.kind !== 'video'"
-        :kind="resource.kind"
-      />
+      <ResourceGlyph v-if="kind !== 'image' && kind !== 'video'" :kind="kind" />
       <div class="resource-card__copy">
         <button
           type="button"
@@ -54,37 +37,54 @@ const format = computed(
           :title="resource.name"
           @click="openResource(resource)"
         >
-          {{ resource.name }}
+          {{ label || resource.name }}
         </button>
         <span class="resource-card__meta">
           {{ format }}
           <span v-if="resource.sizeBytes">· {{ resourceSize(resource.sizeBytes) }}</span>
         </span>
       </div>
+      <button
+        type="button"
+        class="resource-card__action"
+        :title="t('ui.resource-preview', '放大预览')"
+        :aria-label="t('ui.resource-preview', '放大预览')"
+        @click="previewResource(resource)"
+      >
+        <PixelIcon name="maximize" size="xs" />
+      </button>
       <a
+        v-if="resourceUrl(resource, true)"
         class="resource-card__action"
         :href="resourceUrl(resource, true)"
         :download="resource.name"
         :target="!resource.id && resource.origin?.type === 'url' ? '_blank' : undefined"
         rel="noopener noreferrer"
-        title="下载"
-        aria-label="下载文件"
+        :title="__t('ui.resources', '下载')"
+        :aria-label="__t('ui.resources', '下载文件')"
       >
         <PixelIcon name="download" size="xs" />
       </a>
     </div>
-    <ResourceAudioPlayer v-if="resource.kind === 'audio'" :src="url" class="resource-card__audio" />
     <p v-if="resource.caption" class="resource-card__caption" :title="resource.caption">
       {{ resource.caption }}
     </p>
     <button
-      v-if="resource.origin"
+      v-if="
+        resource.origin &&
+        resource.origin.type !== 'application' &&
+        !(resource.origin.type === 'workspace' && resource.origin.taskId)
+      "
       type="button"
       class="resource-card__source"
       @click="openResource(resource, true)"
     >
       <PixelIcon name="link" size="xs" />
-      {{ resource.origin.type === 'workspace' ? '源文件' : '来源' }}
+      {{
+        resource.origin.type === 'workspace'
+          ? __t('ui.resources', '源文件')
+          : __t('ui.resources', '来源')
+      }}
       <span>↗</span>
     </button>
   </article>
@@ -94,7 +94,7 @@ const format = computed(
   --resource-accent: var(--ui-accent-sky);
   position: relative;
   isolation: isolate;
-  width: min(100%, 340px);
+  width: min(100%, 380px);
   overflow: hidden;
   margin: 10px 0 12px;
   color: var(--ui-text-primary);
@@ -190,52 +190,6 @@ const format = computed(
   color: var(--resource-accent);
   transform: translateY(-1px);
 }
-.resource-card__preview {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 100%;
-  height: 166px;
-  padding: 0;
-  border: 0;
-  border-bottom: 1px solid var(--ui-border-subtle);
-  overflow: hidden;
-  background: color-mix(in srgb, var(--resource-accent) 5%, var(--ui-bg-surface));
-  cursor: zoom-in;
-}
-.resource-card__preview img,
-.resource-card__preview video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  transition: transform 220ms ease;
-}
-.resource-card__preview:hover img,
-.resource-card__preview:hover video {
-  transform: scale(1.025);
-}
-.resource-card__format {
-  position: absolute;
-  right: 9px;
-  bottom: 8px;
-  padding: 2px 5px;
-  background: rgba(14, 18, 30, 0.76);
-  color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  font: 9px var(--ui-font-mono);
-}
-.resource-card__play {
-  position: absolute;
-  display: grid;
-  place-items: center;
-  width: 34px;
-  height: 34px;
-  background: color-mix(in srgb, var(--ui-bg-surface) 86%, transparent);
-  border: 1px solid var(--resource-accent);
-  color: var(--resource-accent);
-  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.25);
-  font-size: 14px;
-}
 .resource-card__caption {
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -266,10 +220,6 @@ const format = computed(
 }
 .resource-card__source:hover {
   color: var(--resource-accent);
-}
-.resource-card__audio {
-  margin: -2px 12px 12px;
-  width: calc(100% - 24px);
 }
 @keyframes resource-arrive {
   from {

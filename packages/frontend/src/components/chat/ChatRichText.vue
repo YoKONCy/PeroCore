@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
+import { copyClientText } from '../../lib/clientPlatform'
+
 /**
  * ChatRichText — 聊天专用安全富文本
  *
@@ -76,9 +80,7 @@ function updateSegments(): void {
                 source: string
                 label?: string
               }>((segment) =>
-                segment.type === 'rich-text' && props.agentId && props.threadId
-                  ? splitResourceCards(segment.source)
-                  : [segment],
+                segment.type === 'rich-text' ? splitResourceCards(segment.source) : [segment],
               )
               .map((segment) => ({
                 ...segment,
@@ -141,7 +143,7 @@ async function handleClick(event: MouseEvent) {
           sizeBytes: 0,
           origin: { type: 'url', value: source },
         })
-      else notify.toast('请从所属会话打开文件', { type: 'warning' })
+      else notify.toast(__t('ui.chat', '请从所属会话打开文件'), { type: 'warning' })
       return
     }
     try {
@@ -150,7 +152,9 @@ async function handleClick(event: MouseEvent) {
         threadId: props.threadId,
       })
     } catch (error) {
-      notify.toast(error instanceof Error ? error.message : '无法打开资源', { type: 'error' })
+      notify.toast(error instanceof Error ? error.message : __t('ui.chat', '无法打开资源'), {
+        type: 'error',
+      })
     }
     return
   }
@@ -158,10 +162,10 @@ async function handleClick(event: MouseEvent) {
   if (!button) return
   try {
     const code = button.closest('.chat-code-block')?.querySelector('code')?.textContent ?? ''
-    await navigator.clipboard.writeText(code)
-    notify.toast('代码已复制', { type: 'success' })
+    await copyClientText(code)
+    notify.toast(__t('ui.chat', '代码已复制'), { type: 'success' })
   } catch {
-    notify.toast('复制失败', { type: 'error' })
+    notify.toast(__t('ui.chat', '复制失败'), { type: 'error' })
   }
 }
 </script>
@@ -179,6 +183,7 @@ async function handleClick(event: MouseEvent) {
       :label="segment.label"
       :agent-id="agentId || ''"
       :thread-id="threadId || ''"
+      :active="active && mainVisible && pageActive"
     />
     <StreamText
       v-else-if="segment.html === undefined"

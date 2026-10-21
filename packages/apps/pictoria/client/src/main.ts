@@ -1,3 +1,4 @@
+import { t as __t } from './i18n'
 import { createApp, nextTick } from 'vue'
 import type { SurfaceBridge } from './types'
 import './styles/canvas.css'
@@ -9,7 +10,7 @@ const bridge = (window as unknown as { electron?: SurfaceBridge }).electron
 let mounted = false
 let failed = false
 function fail(error: unknown): void {
-  console.error('Pictoria 界面运行失败：', error)
+  console.error(__t('apps.pictoria.logs', 'Pictoria 界面运行失败：'), error)
   if (mounted || failed) return
   failed = true
   const message = error instanceof Error ? error.message : String(error)

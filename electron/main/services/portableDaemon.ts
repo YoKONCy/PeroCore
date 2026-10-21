@@ -1,3 +1,4 @@
+import { t as __t } from '../utils/i18n'
 /**
  * 内置 Daemon — 打包发行版统一运行时拉起
  *
@@ -98,7 +99,10 @@ async function waitForBusinessReady(timeoutMs: number): Promise<boolean> {
 /** 回收本模块拉起的 Daemon 子进程 */
 export function stopPortableDaemon(): void {
   if (!daemonChild) return
-  logger.info('PortableDaemon', '正在停止本模块拉起的 Daemon...')
+  logger.info(
+    'PortableDaemon',
+    __t('electron.logs.portableDaemon', '正在停止本模块拉起的 Daemon...'),
+  )
   daemonChild.kill()
   daemonChild = null
 }
@@ -123,14 +127,21 @@ export async function ensurePortableDaemon(): Promise<boolean> {
   if (isDev) {
     logger.info(
       'PortableDaemon',
-      `开发模式，跳过内置 Daemon 拉起（:${BUSINESS_PORT} 未就绪，请运行 dev:daemon）`,
+      __t(
+        'electron.logs.portableDaemon',
+        '开发模式，跳过内置 Daemon 拉起（:{0} 未就绪，请运行 dev:daemon）',
+        [BUSINESS_PORT],
+      ),
     )
     return false
   }
 
   // 打包发行版：拉起内置 Daemon（幂等，只尝试一次）
   if (ensureStarted) {
-    logger.info('PortableDaemon', '已尝试过拉起内置 Daemon，等待其就绪...')
+    logger.info(
+      'PortableDaemon',
+      __t('electron.logs.portableDaemon', '已尝试过拉起内置 Daemon，等待其就绪...'),
+    )
     return waitForBusinessReady(READY_TIMEOUT_MS)
   }
   ensureStarted = true
@@ -140,7 +151,10 @@ export async function ensurePortableDaemon(): Promise<boolean> {
   if (!fs.existsSync(bundlePath)) {
     const error = `未找到内置 Daemon bundle: ${bundlePath}`
     startupStatus = { ...startupStatus, error }
-    logger.warn('PortableDaemon', `${error}，桌面能力将不可用`)
+    logger.warn(
+      'PortableDaemon',
+      __t('electron.logs.portableDaemon', '{0}，桌面能力将不可用', [error]),
+    )
     return false
   }
 
@@ -151,10 +165,19 @@ export async function ensurePortableDaemon(): Promise<boolean> {
   // Steam API 返回真实安装目录，兼容多磁盘和跨平台；非 Steam 版自然为空。
   const workshopDirs = getWorkshopInstallations().map((item) => item.folder)
 
-  logger.info('PortableDaemon', `打包版拉起内置 Daemon: ${bundlePath}`)
-  logger.info('PortableDaemon', `  数据目录: ${dataDir}`)
-  logger.info('PortableDaemon', `  后端根:   ${backendRoot}`)
-  logger.info('PortableDaemon', `  Workshop: ${workshopDirs.length} 个订阅目录`)
+  logger.info(
+    'PortableDaemon',
+    __t('electron.logs.portableDaemon', '打包版拉起内置 Daemon: {0}', [bundlePath]),
+  )
+  logger.info('PortableDaemon', __t('electron.logs.portableDaemon', '  数据目录: {0}', [dataDir]))
+  logger.info(
+    'PortableDaemon',
+    __t('electron.logs.portableDaemon', '  后端根:   {0}', [backendRoot]),
+  )
+  logger.info(
+    'PortableDaemon',
+    __t('electron.logs.portableDaemon', '  Workshop: {0} 个订阅目录', [workshopDirs.length]),
+  )
 
   // Daemon 在窗口隐藏模式下运行，必须持久化 stdout/stderr，否则启动早期异常会完全丢失。
   fs.mkdirSync(paths.logs, { recursive: true })
@@ -168,11 +191,13 @@ export async function ensurePortableDaemon(): Promise<boolean> {
       env: electronProcessEnvironment(
         {
           ...process.env,
+          NODE_ENV: 'production',
           // 数据目录一锤定音，确保数据库、Agent、Workspace、扩展和 Skills 全部同根。
           PERO_DATA_DIR: dataDir,
           // 后端根目录（内置角色/提示词/预设资源位置）。
           PERO_APP_ROOT: backendRoot,
           INFOS_RESOURCES_ROOT: process.resourcesPath,
+          INFOS_FRONTEND_ROOT: path.join(process.resourcesPath, 'frontend'),
           // 多个 Workshop item 根以 JSON 传递，避免 Windows 路径分隔与盘符歧义。
           PERO_WORKSHOP_DIRS: JSON.stringify(workshopDirs),
         },
@@ -185,7 +210,10 @@ export async function ensurePortableDaemon(): Promise<boolean> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     startupStatus = { ...startupStatus, running: false, error: `进程启动失败: ${message}` }
-    logger.error('PortableDaemon', `内置 Daemon 启动失败: ${message}`)
+    logger.error(
+      'PortableDaemon',
+      __t('electron.logs.portableDaemon', '内置 Daemon 启动失败: {0}', [message]),
+    )
     return false
   } finally {
     // spawn 已为子进程复制日志句柄，父进程必须立即释放自己的描述符。
@@ -194,7 +222,10 @@ export async function ensurePortableDaemon(): Promise<boolean> {
 
   daemonChild.on('error', (err) => {
     startupStatus = { ...startupStatus, running: false, error: `进程启动失败: ${err.message}` }
-    logger.error('PortableDaemon', `内置 Daemon 启动失败: ${err.message}`)
+    logger.error(
+      'PortableDaemon',
+      __t('electron.logs.portableDaemon', '内置 Daemon 启动失败: {0}', [err.message]),
+    )
   })
   daemonChild.on('exit', (code, signal) => {
     startupStatus = {
@@ -204,7 +235,11 @@ export async function ensurePortableDaemon(): Promise<boolean> {
     }
     logger.warn(
       'PortableDaemon',
-      `内置 Daemon 退出: code=${code}, signal=${signal}；启动日志: ${daemonLogPath}`,
+      __t('electron.logs.portableDaemon', '内置 Daemon 退出: code={0}, signal={1}；启动日志: {2}', [
+        code,
+        signal,
+        daemonLogPath,
+      ]),
     )
     daemonChild = null
   })
@@ -213,14 +248,22 @@ export async function ensurePortableDaemon(): Promise<boolean> {
   const ready = await waitForBusinessReady(READY_TIMEOUT_MS)
   if (ready) {
     startupStatus = { ...startupStatus, ready: true, running: true, error: undefined }
-    logger.info('PortableDaemon', `内置 Daemon 已就绪 → :${BUSINESS_PORT}`)
+    logger.info(
+      'PortableDaemon',
+      __t('electron.logs.portableDaemon', '内置 Daemon 已就绪 → :{0}', [BUSINESS_PORT]),
+    )
   } else {
     startupStatus = {
       ...startupStatus,
       ready: false,
       error: startupStatus.error ?? `Daemon 启动超时（:${BUSINESS_PORT}）`,
     }
-    logger.warn('PortableDaemon', `内置 Daemon 启动超时（:${BUSINESS_PORT}），桌面能力可能暂不可用`)
+    logger.warn(
+      'PortableDaemon',
+      __t('electron.logs.portableDaemon', '内置 Daemon 启动超时（:{0}），桌面能力可能暂不可用', [
+        BUSINESS_PORT,
+      ]),
+    )
   }
   return ready
 }

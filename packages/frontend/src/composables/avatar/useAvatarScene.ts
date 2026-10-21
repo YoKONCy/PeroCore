@@ -93,8 +93,9 @@ export function useAvatarScene(options: SceneOptions = {}): UseAvatarSceneReturn
     r.setPixelRatio(Math.min(window.devicePixelRatio || 1, AVATAR_QUALITY[quality].pixelRatio))
     r.setSize(Math.max(1, containerEl.clientWidth), Math.max(1, containerEl.clientHeight))
     r.shadowMap.enabled = true
-    // 由渲染循环按预算刷新阴影，不为每个高帧率画面重复绘制阴影。
-    r.shadowMap.autoUpdate = false
+    // 阴影必须与当前骨骼姿态同步；整帧频率仍由渲染循环的画质预算限制。
+    // 单独降低阴影帧率会让自阴影交替落在旧姿态上，造成面部和衣物局部闪烁。
+    r.shadowMap.autoUpdate = true
     r.shadowMap.needsUpdate = true
     // 像素风体素模型用硬阴影（PCFShadowMap）而非软阴影（PCFSoftShadowMap）：
     // 软阴影的 Poisson 采样核在发卡这类亚像素薄片（约 10 个阴影纹素）上会跨越

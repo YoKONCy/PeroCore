@@ -25,7 +25,9 @@
 @import './ui-tokens.css';
 @import './dashboard-dark.css';
 @import './app-background.css';
+@import './light-theme.css';
 @import './scrollbars.css';
+@import './mobile.css';
 
 /*
  * 3. @theme 桥接 — 将 tokens.css 的 --color-* 变量注册为 Tailwind 令牌

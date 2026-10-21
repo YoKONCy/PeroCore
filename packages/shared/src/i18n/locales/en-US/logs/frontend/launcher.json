@@ -1,0 +1,6 @@
+{
+  "保存 EULA 状态失败": "failed to save EULA status",
+  "保存引导状态失败": "failed to save boot status",
+  "启动流程出错": "startup process error",
+  "后端已就绪!": "backend is ready!"
+}

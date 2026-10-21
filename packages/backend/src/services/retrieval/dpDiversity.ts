@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * DPDiversity — Context-aware 重排 + 多样性保障
  *
@@ -130,7 +131,7 @@ export function contextAwareRerank(
 
   if (result.length > 0) {
     logger.debug(
-      `重排完成: ${candidates.length} 候选 → ${result.length} 结果 ` +
+      __t('logs.retrieval', '重排完成: {0} 候选 → {1} 结果 ', [candidates.length, result.length]) +
         `(top1: id=${result[0]!.id}, score=${result[0]!.finalScore.toFixed(3)})`,
     )
   }

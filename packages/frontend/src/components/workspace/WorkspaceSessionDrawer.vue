@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /**
  * WorkspaceSessionDrawer — 会话切换抽屉
  *
@@ -40,12 +42,12 @@ function formatTime(iso: string | null): string {
   const date = new Date(iso)
   const diffMs = Date.now() - date.getTime()
   const mins = Math.floor(diffMs / 60000)
-  if (mins < 1) return '刚刚'
-  if (mins < 60) return `${mins}分钟前`
+  if (mins < 1) return __t('ui.workspace', '刚刚')
+  if (mins < 60) return __t('ui.workspace', '{0}分钟前', [mins])
   const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}小时前`
+  if (hours < 24) return __t('ui.workspace', '{0}小时前', [hours])
   const days = Math.floor(hours / 24)
-  if (days < 7) return `${days}天前`
+  if (days < 7) return __t('ui.workspace', '{0}天前', [days])
   return `${date.getMonth() + 1}/${date.getDate()}`
 }
 
@@ -86,10 +88,15 @@ async function selectThread(agentId: string, thread: ThreadInfo): Promise<void> 
     if (generation !== switchGeneration) return // 已被更新的操作取代，丢弃过期响应
     if (agentStore.activeAgentId !== agentId) await agentStore.switchAgent(agentId)
     if (generation !== switchGeneration) return
-    notify.toast(`已切换到「${thread.title || '未命名会话'}」`, { type: 'success' })
+    notify.toast(
+      __t('ui.workspace', '已切换到「{0}」', [thread.title || __t('ui.workspace', '未命名会话')]),
+      { type: 'success' },
+    )
     emit('update:open', false)
   } catch (error) {
-    notify.toast(error instanceof Error ? error.message : '切换会话失败', { type: 'error' })
+    notify.toast(error instanceof Error ? error.message : __t('ui.workspace', '切换会话失败'), {
+      type: 'error',
+    })
   } finally {
     if (generation === switchGeneration) isSwitching.value = false
   }
@@ -106,10 +113,12 @@ async function createThread(agentId: string): Promise<void> {
     if (generation !== switchGeneration) return
     if (agentStore.activeAgentId !== agentId) await agentStore.switchAgent(agentId)
     if (generation !== switchGeneration) return
-    notify.toast('新会话已创建', { type: 'success' })
+    notify.toast(__t('ui.workspace', '新会话已创建'), { type: 'success' })
     emit('update:open', false)
   } catch (error) {
-    notify.toast(error instanceof Error ? error.message : '新建会话失败', { type: 'error' })
+    notify.toast(error instanceof Error ? error.message : __t('ui.workspace', '新建会话失败'), {
+      type: 'error',
+    })
   } finally {
     if (generation === switchGeneration) isSwitching.value = false
   }
@@ -131,20 +140,22 @@ watch(
   <Teleport to="body">
     <Transition name="drawer">
       <div v-if="open" class="session-drawer-layer" @click.self="close">
-        <aside class="session-drawer" role="dialog" aria-label="切换会话">
+        <aside class="session-drawer" role="dialog" :aria-label="__t('ui.workspace', '切换会话')">
           <header class="session-drawer__header">
             <div class="session-drawer__title">
               <PixelIcon name="chat" size="sm" />
-              <strong>切换会话</strong>
+              <strong>{{ __t('ui.workspace', '切换会话') }}</strong>
               <span>SESSION SWITCHER</span>
             </div>
-            <button title="关闭" @click="close"><PixelIcon name="close" size="sm" /></button>
+            <button :title="__t('ui.workspace', '关闭')" @click="close">
+              <PixelIcon name="close" size="sm" />
+            </button>
           </header>
 
           <div class="session-drawer__body">
             <div v-if="isLoading" class="session-drawer__loading">
               <PixelIcon name="refresh" size="md" animation="spin" />
-              <span>正在加载会话…</span>
+              <span>{{ __t('ui.workspace', '正在加载会话…') }}</span>
             </div>
 
             <section v-for="group in groups" :key="group.agent.id" class="agent-group">
@@ -160,7 +171,7 @@ watch(
                 <strong>{{ group.agent.name }}</strong>
                 <i>{{ group.threads.length }}</i>
                 <button
-                  title="新建会话"
+                  :title="__t('ui.workspace', '新建会话')"
                   :disabled="isSwitching"
                   @click="createThread(group.agent.id)"
                 >
@@ -181,17 +192,23 @@ watch(
                   }"
                   @click="selectThread(group.agent.id, thread)"
                 >
-                  <span class="thread-item__title">{{ thread.title || '未命名会话' }}</span>
+                  <span class="thread-item__title">
+                    {{ thread.title || __t('ui.workspace', '未命名会话') }}
+                  </span>
                   <span class="thread-item__meta">
-                    <span>{{ thread.messageCount }} 条消息</span>
+                    <span>{{ thread.messageCount }} {{ __t('ui.workspace', '条消息') }}</span>
                     <span>{{ formatTime(thread.lastMessageAt) }}</span>
                   </span>
                 </button>
               </div>
-              <p v-else class="agent-group__empty">暂无会话，点击「+」新建</p>
+              <p v-else class="agent-group__empty">
+                {{ __t('ui.workspace', '暂无会话，点击「+」新建') }}
+              </p>
             </section>
 
-            <p v-if="!isLoading && !groups.length" class="session-drawer__empty">还没有任何会话</p>
+            <p v-if="!isLoading && !groups.length" class="session-drawer__empty">
+              {{ __t('ui.workspace', '还没有任何会话') }}
+            </p>
           </div>
         </aside>
       </div>

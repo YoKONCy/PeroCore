@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { t as __t } from '../../../i18n/index'
+
 /**
- * UserSettingsTab — 用户设定 Tab (F1-3)
+ * UserSettingsTab — 系统设定 Tab (F1-3)
  *
  * 用户人设 (名称 + 人设描述)、外观 (主题/字体)、高级 (数据目录/日志)
  * F3: 已对接 configApi 读写。
@@ -9,6 +11,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import WeatherCard from '../../weather/WeatherCard.vue'
 import DesktopControlSettings from '../../desktop/DesktopControlSettings.vue'
 import CompletionAlertSettings from '../../notification/CompletionAlertSettings.vue'
+import WholesomeModeSettings from '../WholesomeModeSettings.vue'
 import { PixelIcon, PInput, PSelect, PSlider, PSwitch, PButton, PCard } from '../../pixel'
 import { configApi } from '../../../api/modules/configApi'
 import { useDashboardContext } from '../../../composables/dashboard'
@@ -22,14 +25,19 @@ import AppWallpaper from '../../layout/AppWallpaper.vue'
 import { uiSound } from '../../../services/ui/uiSound'
 import { logger } from '../../../lib/logger'
 import { useNotificationStore } from '../../../stores'
+import { appLocale, applyLanguage } from '../../../i18n'
+import { LANGUAGE_OPTIONS, normalizeLocale } from '@infos/shared/i18n'
 
 const ctx = useDashboardContext()
 const notif = useNotificationStore()
 
-// ── 用户设定 ──
+// ── 用户人设 ──
 const ownerName = ref('主人')
 const ownerPersona = ref('')
-const language = ref('zh-CN')
+const language = ref<string>(appLocale.value)
+watch(appLocale, (value, previous) => {
+  if (language.value === previous) language.value = value
+})
 
 // ── 外观 ──
 // 主题直接复用 app 侧边栏的 useMainNav 单例状态，不额外维护第二份偏好。
@@ -53,8 +61,18 @@ watch(backgroundPreview, () => {
   backgroundPreviewFailed.value = false
 })
 const backgroundFitOptions = [
-  { label: '铺满窗口', value: 'cover' },
-  { label: '完整显示', value: 'contain' },
+  {
+    get label() {
+      return __t('ui.settings', '铺满窗口')
+    },
+    value: 'cover',
+  },
+  {
+    get label() {
+      return __t('ui.settings', '完整显示')
+    },
+    value: 'contain',
+  },
 ]
 const motionBinding = computed({
   get: () => sensory.motionLevel.value,
@@ -76,22 +94,51 @@ const dataDir = ref('~/.infos')
 const logLevel = ref('info')
 const autoSave = ref(true)
 const isSaving = ref(false)
+const backgroundLocked = computed(
+  () =>
+    !appBackground.loaded.value ||
+    appBackground.busy.value ||
+    backgroundBusy.value ||
+    backgroundSaving.value ||
+    isSaving.value,
+)
 
-const languageOptions = [
-  { label: '简体中文', value: 'zh-CN' },
-  { label: 'English', value: 'en-US' },
-  { label: '日本語', value: 'ja-JP' },
-]
+const languageOptions = [...LANGUAGE_OPTIONS]
 
 const themeOptions = [
-  { label: '暗色模式', value: 'dark' },
-  { label: '亮色模式', value: 'light' },
+  {
+    get label() {
+      return __t('ui.settings', '暗色模式')
+    },
+    value: 'dark',
+  },
+  {
+    get label() {
+      return __t('ui.settings', '亮色模式')
+    },
+    value: 'light',
+  },
 ]
 
 const motionOptions: Array<{ label: string; value: MotionLevel }> = [
-  { label: '完整动效', value: 'full' },
-  { label: '轻量动效', value: 'reduced' },
-  { label: '关闭动效', value: 'off' },
+  {
+    get label() {
+      return __t('ui.settings', '完整动效')
+    },
+    value: 'full',
+  },
+  {
+    get label() {
+      return __t('ui.settings', '轻量动效')
+    },
+    value: 'reduced',
+  },
+  {
+    get label() {
+      return __t('ui.settings', '关闭动效')
+    },
+    value: 'off',
+  },
 ]
 
 const logOptions = [
@@ -122,7 +169,7 @@ async function loadSettings() {
     const d = res.data ?? {}
     if (d['owner.name']) ownerName.value = d['owner.name'] as string
     if (d['owner.persona']) ownerPersona.value = d['owner.persona'] as string
-    if (d['user.language']) language.value = d['user.language'] as string
+    if (d['user.language']) language.value = normalizeLocale(d['user.language'])
     if (d['ui.fontSize']) fontSize.value = Number(d['ui.fontSize'])
     const savedMotion = d['ui.motionLevel']
     if (savedMotion === 'full' || savedMotion === 'reduced' || savedMotion === 'off') {
@@ -144,50 +191,103 @@ async function handleBackgroundFile(event: Event): Promise<void> {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
   input.value = ''
-  if (!file) return
+  if (!file || backgroundLocked.value || appBackground.selectedPreset.value === 'default') return
   if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
-    notif.toast('仅支持 PNG、JPEG 或 WebP 图片', { type: 'warning', title: '应用背景' })
+    notif.toast(__t('ui.settings', '仅支持 PNG、JPEG 或 WebP 图片'), {
+      type: 'warning',
+      get title() {
+        return __t('ui.settings', '应用背景')
+      },
+    })
     return
   }
   if (file.size > 15 * 1024 * 1024) {
-    notif.toast('图片不能超过 15MB', { type: 'warning', title: '应用背景' })
+    notif.toast(__t('ui.settings', '图片不能超过 15MB'), {
+      type: 'warning',
+      get title() {
+        return __t('ui.settings', '应用背景')
+      },
+    })
     return
   }
   backgroundBusy.value = true
   try {
     await appBackground.upload(file)
-    notif.toast('应用背景已上传', { type: 'success', title: '外观设置' })
+    notif.toast(__t('ui.settings', '图片已保存到当前背景预设'), {
+      type: 'success',
+      get title() {
+        return __t('ui.settings', '外观设置')
+      },
+    })
   } catch (error) {
-    logger.error('UserSettings', '背景上传失败', error)
-    notif.toast('背景上传失败', { type: 'error', title: '外观设置' })
+    logger.error('UserSettings', __t('logs.frontend.settings', '背景上传失败'), error)
+    notif.toast(__t('ui.settings', '背景上传失败'), {
+      type: 'error',
+      get title() {
+        return __t('ui.settings', '外观设置')
+      },
+    })
   } finally {
     backgroundBusy.value = false
   }
 }
 
 async function saveBackgroundSettings(): Promise<void> {
+  if (backgroundLocked.value) return
   backgroundSaving.value = true
   try {
     await appBackground.save()
     void uiSound.play('action.confirmed')
-    notif.toast('应用背景设置已保存', { type: 'success', title: '外观设置' })
+    notif.toast(__t('ui.settings', '当前背景预设已保存'), {
+      type: 'success',
+      get title() {
+        return __t('ui.settings', '外观设置')
+      },
+    })
   } catch (error) {
-    logger.error('UserSettings', '背景设置保存失败', error)
-    notif.toast('背景设置保存失败', { type: 'error', title: '外观设置' })
+    logger.error('UserSettings', __t('logs.frontend.settings', '背景设置保存失败'), error)
+    notif.toast(__t('ui.settings', '背景设置保存失败'), {
+      type: 'error',
+      get title() {
+        return __t('ui.settings', '外观设置')
+      },
+    })
   } finally {
     backgroundSaving.value = false
   }
 }
 
 async function removeBackground(): Promise<void> {
+  if (backgroundLocked.value) return
   backgroundBusy.value = true
   try {
     await appBackground.remove()
   } catch (error) {
-    logger.error('UserSettings', '背景删除失败', error)
-    notif.toast('背景删除失败', { type: 'error', title: '外观设置' })
+    logger.error('UserSettings', __t('logs.frontend.settings', '背景删除失败'), error)
+    notif.toast(__t('ui.settings', '背景删除失败'), {
+      type: 'error',
+      get title() {
+        return __t('ui.settings', '外观设置')
+      },
+    })
   } finally {
     backgroundBusy.value = false
+  }
+}
+
+async function switchBackgroundPreset(id: string): Promise<void> {
+  if (backgroundLocked.value || id === appBackground.selectedPreset.value) return
+  try {
+    await appBackground.selectPreset(id)
+    void uiSound.play('action.confirmed')
+  } catch (error) {
+    logger.error('UserSettings', __t('logs.frontend.settings', '背景预设切换失败'), error)
+    notif.toast(__t('ui.settings', '背景预设切换失败，当前调整已保留，请稍后重试'), {
+      type: 'error',
+      get title() {
+        return __t('ui.settings', '外观设置')
+      },
+    })
   }
 }
 
@@ -208,11 +308,22 @@ async function handleSave() {
       ['system.autoSave', String(autoSave.value)],
     ]
     await Promise.all([...pairs.map(([k, v]) => configApi.set(k, v)), appBackground.save()])
+    applyLanguage(language.value)
     void uiSound.play('action.confirmed')
-    notif.toast('设置已保存', { type: 'success', title: '用户设置' })
+    notif.toast(__t('ui.settings', '设置已保存'), {
+      type: 'success',
+      get title() {
+        return __t('ui.settings', '系统设定')
+      },
+    })
   } catch (e) {
-    logger.error('UserSettings', '保存失败', e)
-    notif.toast('保存失败，请稍后重试', { type: 'error', title: '用户设置' })
+    logger.error('UserSettings', __t('logs.frontend.settings', '保存失败'), e)
+    notif.toast(__t('ui.settings', '保存失败，请稍后重试'), {
+      type: 'error',
+      get title() {
+        return __t('ui.settings', '系统设定')
+      },
+    })
   } finally {
     isSaving.value = false
   }
@@ -226,8 +337,13 @@ watch(
 
 onMounted(() => {
   void Promise.all([loadSettings(), appBackground.load()]).catch((error) => {
-    logger.warn('UserSettings', '应用背景配置加载失败', error)
-    notif.toast('背景配置加载失败，请稍后重试', { type: 'warning', title: '外观设置' })
+    logger.warn('UserSettings', __t('logs.frontend.settings', '应用背景配置加载失败'), error)
+    notif.toast(__t('ui.settings', '背景配置加载失败，请稍后重试'), {
+      type: 'warning',
+      get title() {
+        return __t('ui.settings', '外观设置')
+      },
+    })
   })
 })
 </script>
@@ -245,9 +361,9 @@ onMounted(() => {
         <span
           class="group-hover/header:scale-110 group-hover/header:-rotate-6 transition-transform duration-500"
         >
-          <PixelIcon name="user" size="md" />
+          <PixelIcon name="settings" size="md" />
         </span>
-        <span>用户设定</span>
+        <span>{{ __t('ui.settings', '系统设定') }}</span>
         <span class="opacity-0 group-hover/header:opacity-100 transition-opacity duration-500">
           <PixelIcon name="paw" size="xs" />
         </span>
@@ -255,41 +371,50 @@ onMounted(() => {
       <p
         class="text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400 mt-1 ml-9 font-pixel"
       >
-        USER PREFERENCES
+        SYSTEM SETTINGS
       </p>
     </div>
 
     <div class="flex flex-col gap-6 pr-1">
+      <WholesomeModeSettings />
       <!-- 用户人设 -->
       <PCard pixel padding="lg" overflow-visible>
         <h3
           class="flex items-center gap-2 text-sm font-black text-[var(--ui-text-primary)] font-pixel mb-5 pb-3 border-b border-[var(--ui-border-subtle)]"
         >
           <PixelIcon name="user" size="sm" />
-          用户人设
+          {{ __t('ui.settings', '用户人设') }}
         </h3>
         <div class="flex flex-col gap-4">
           <div class="grid grid-cols-2 gap-4">
             <div class="flex flex-col gap-1.5">
-              <label class="text-xs font-bold text-slate-500">你的名字</label>
-              <PInput v-model="ownerName" placeholder="你的名字" />
-              <p class="text-[10px] text-slate-400">助手会记住你的名字</p>
+              <label class="text-xs font-bold text-slate-500">
+                {{ __t('ui.settings', '你的名字') }}
+              </label>
+              <PInput v-model="ownerName" :placeholder="__t('ui.settings', '你的名字')" />
+              <p class="text-[10px] text-slate-400">
+                {{ __t('ui.settings', '助手会记住你的名字') }}
+              </p>
             </div>
             <div class="flex flex-col gap-1.5">
-              <label class="text-xs font-bold text-slate-500">语言</label>
+              <label class="text-xs font-bold text-slate-500">
+                {{ __t('ui.settings', '语言') }}
+              </label>
               <PSelect v-model="language" :options="languageOptions" />
             </div>
           </div>
           <div class="flex flex-col gap-1.5">
-            <label class="text-xs font-bold text-slate-500">人设描述</label>
+            <label class="text-xs font-bold text-slate-500">
+              {{ __t('ui.settings', '人设描述') }}
+            </label>
             <textarea
               v-model="ownerPersona"
               rows="5"
               class="w-full p-3 bg-[var(--dash-input-bg)] border-2 border-[var(--dash-input-border)] text-sm text-[var(--ui-text-secondary)] resize-y focus:border-[var(--ui-accent-sky)] focus:outline-none transition-colors"
-              placeholder="在这里描述你自己，助手会在对话时参考这些信息。&#10;&#10;例如：&#10;- 性别：男&#10;- 职业：程序员&#10;- 爱好：动漫、游戏&#10;- 与助手的关系：朋友与 AI 助手"
+              :placeholder="__t('ui.settings', '介绍你的称呼、兴趣和偏好…')"
             />
             <p class="text-[10px] text-slate-400">
-              这些信息会帮助助手更懂你，让每次对话都更自然、更贴心。
+              {{ __t('ui.settings', '助手会在对话中参考这些信息。') }}
             </p>
           </div>
         </div>
@@ -306,14 +431,16 @@ onMounted(() => {
           class="flex items-center gap-2 text-sm font-black text-slate-800 font-pixel mb-5 pb-3 border-b border-slate-100"
         >
           <PixelIcon name="eye" size="sm" />
-          外观设置
+          {{ __t('ui.settings', '外观设置') }}
         </h3>
         <div class="flex flex-col gap-4">
           <!-- 主题：与 app 侧边栏深色/浅色按钮实时联动 -->
           <div class="flex flex-col gap-1.5">
-            <label class="text-xs font-bold text-slate-500">主题</label>
+            <label class="text-xs font-bold text-slate-500">{{ __t('ui.settings', '主题') }}</label>
             <PSelect v-model="themeBinding" :options="themeOptions" />
-            <p class="text-[10px] text-slate-400">与侧边栏的深色/浅色切换按钮实时联动</p>
+            <p class="text-[10px] text-slate-400">
+              {{ __t('ui.settings', '与侧边栏的深色/浅色切换按钮实时联动') }}
+            </p>
           </div>
 
           <div
@@ -321,9 +448,11 @@ onMounted(() => {
           >
             <div class="app-background-heading flex items-center justify-between gap-4">
               <div>
-                <label class="text-xs font-bold text-[var(--ui-text-secondary)]">应用背景</label>
+                <label class="text-xs font-bold text-[var(--ui-text-secondary)]">
+                  {{ __t('ui.settings', '应用背景') }}
+                </label>
                 <p class="text-[10px] text-[var(--ui-text-tertiary)]">
-                  整个主应用窗口共用；PNG/JPEG/WebP，最大 15MB
+                  {{ __t('ui.settings', 'PNG / JPEG / WebP，最大 15MB') }}
                 </p>
               </div>
               <div class="app-background-actions">
@@ -335,36 +464,81 @@ onMounted(() => {
                   @change="handleBackgroundFile"
                 />
                 <PButton
-                  v-if="appBackground.hasImage.value"
+                  v-if="appBackground.selectedPreset.value !== 'default'"
                   size="sm"
                   variant="primary"
                   :loading="backgroundSaving"
-                  :disabled="backgroundBusy"
+                  :disabled="backgroundLocked"
                   @click="saveBackgroundSettings"
                 >
                   <PixelIcon name="save" size="xs" />
-                  保存设置
+                  {{ __t('ui.settings', '保存预设') }}
                 </PButton>
                 <PButton
+                  v-if="appBackground.selectedPreset.value !== 'default'"
                   size="sm"
                   variant="secondary"
                   :loading="backgroundBusy"
-                  :disabled="backgroundSaving"
+                  :disabled="backgroundLocked"
                   @click="backgroundInput?.click()"
                 >
-                  {{ appBackground.hasImage.value ? '更换图片' : '上传图片' }}
+                  {{
+                    appBackground.hasImage.value
+                      ? __t('ui.settings', '更换图片')
+                      : __t('ui.settings', '上传图片')
+                  }}
                 </PButton>
                 <PButton
                   v-if="appBackground.hasImage.value"
                   size="sm"
                   variant="ghost"
-                  :disabled="backgroundBusy || backgroundSaving"
+                  :disabled="backgroundLocked"
                   @click="removeBackground"
                 >
-                  删除
+                  {{ __t('ui.settings', '删除图片') }}
                 </PButton>
               </div>
             </div>
+            <div
+              class="app-background-slots"
+              role="group"
+              :aria-label="__t('ui.settings', '背景预设')"
+            >
+              <button
+                type="button"
+                class="app-background-slot"
+                :aria-pressed="appBackground.selectedPreset.value === 'default'"
+                :disabled="backgroundLocked"
+                @click="switchBackgroundPreset('default')"
+              >
+                <strong>{{ __t('ui.settings', 'infOS 默认') }}</strong>
+                <small>{{ __t('ui.settings', '使用默认页面材质') }}</small>
+              </button>
+              <button
+                v-for="preset in appBackground.presets.value"
+                :key="preset.id"
+                type="button"
+                class="app-background-slot"
+                :aria-pressed="appBackground.selectedPreset.value === preset.id"
+                :disabled="backgroundLocked"
+                @click="switchBackgroundPreset(preset.id)"
+              >
+                <strong>{{ preset.label }}</strong>
+                <small>
+                  {{
+                    preset.hasImage
+                      ? __t('ui.settings', '已设置图片')
+                      : __t('ui.settings', '可上传图片')
+                  }}
+                </small>
+              </button>
+            </div>
+            <p class="text-[10px] text-[var(--ui-text-tertiary)]">
+              {{ __t('ui.settings', '切换预设时自动保存当前调整。') }}
+              <template v-if="appBackground.selectedPreset.value === 'default'">
+                {{ __t('ui.settings', '选择预设 1、2 或 3 后即可上传图片。') }}
+              </template>
+            </p>
             <div
               v-if="backgroundPreview"
               class="app-background-preview"
@@ -393,10 +567,16 @@ onMounted(() => {
                   <span class="app-background-preview__line" />
                 </aside>
                 <div class="app-background-preview__conversation">
-                  <div class="app-background-preview__header">应用背景实时预览</div>
+                  <div class="app-background-preview__header">
+                    {{ __t('ui.settings', '应用背景实时预览') }}
+                  </div>
                   <div class="app-background-preview__messages">
-                    <div class="app-background-preview__bubble is-agent">背景连贯，文字清晰</div>
-                    <div class="app-background-preview__bubble is-user">就这样，刚刚好</div>
+                    <div class="app-background-preview__bubble is-agent">
+                      {{ __t('ui.settings', '背景连贯，文字清晰') }}
+                    </div>
+                    <div class="app-background-preview__bubble is-user">
+                      {{ __t('ui.settings', '就这样，刚刚好') }}
+                    </div>
                   </div>
                   <div class="app-background-preview__input">CHAR OPS...</div>
                 </div>
@@ -407,17 +587,25 @@ onMounted(() => {
               role="status"
               class="text-xs text-[var(--ui-text-secondary)]"
             >
-              背景暂时无法读取，请更换图片
+              {{ __t('ui.settings', '背景暂时无法读取，请更换图片') }}
             </p>
-            <div v-if="appBackground.hasImage.value" class="flex flex-col gap-4">
+            <div
+              v-if="appBackground.hasImage.value"
+              class="flex flex-col gap-4"
+              :inert="backgroundLocked"
+            >
               <label
                 class="flex items-center justify-between text-xs font-bold text-[var(--ui-text-secondary)]"
               >
-                启用背景
+                {{ __t('ui.settings', '启用背景') }}
                 <PSwitch v-model="appBackground.settings.value.enabled" />
               </label>
-              <div class="app-background-presets" role="group" aria-label="背景材质">
-                <span>材质</span>
+              <div
+                class="app-background-presets"
+                role="group"
+                :aria-label="__t('ui.settings', '背景材质')"
+              >
+                <span>{{ __t('ui.settings', '材质') }}</span>
                 <PButton
                   v-for="preset in APP_BACKGROUND_PRESETS"
                   :key="preset.id"
@@ -432,11 +620,11 @@ onMounted(() => {
                 </PButton>
               </div>
               <details class="app-background-details">
-                <summary>细调背景</summary>
+                <summary>{{ __t('ui.settings', '细调背景') }}</summary>
                 <div class="app-background-controls">
                   <div class="flex flex-col gap-1">
                     <label class="text-xs font-bold text-[var(--ui-text-secondary)]">
-                      图片可见度
+                      {{ __t('ui.settings', '图片可见度') }}
                     </label>
                     <PSlider
                       v-model="appBackground.settings.value.opacity"
@@ -447,7 +635,7 @@ onMounted(() => {
                   </div>
                   <div class="flex flex-col gap-1">
                     <label class="text-xs font-bold text-[var(--ui-text-secondary)]">
-                      图片模糊
+                      {{ __t('ui.settings', '图片模糊') }}
                     </label>
                     <PSlider
                       v-model="appBackground.settings.value.blur"
@@ -458,7 +646,7 @@ onMounted(() => {
                   </div>
                   <div class="flex flex-col gap-1">
                     <label class="text-xs font-bold text-[var(--ui-text-secondary)]">
-                      图片亮度
+                      {{ __t('ui.settings', '图片亮度') }}
                     </label>
                     <PSlider
                       v-model="appBackground.settings.value.brightness"
@@ -469,7 +657,7 @@ onMounted(() => {
                   </div>
                   <div class="flex flex-col gap-1">
                     <label class="text-xs font-bold text-[var(--ui-text-secondary)]">
-                      图片饱和度
+                      {{ __t('ui.settings', '图片饱和度') }}
                     </label>
                     <PSlider
                       v-model="appBackground.settings.value.saturation"
@@ -480,7 +668,7 @@ onMounted(() => {
                   </div>
                   <div class="flex flex-col gap-1">
                     <label class="text-xs font-bold text-[var(--ui-text-secondary)]">
-                      图片对比度
+                      {{ __t('ui.settings', '图片对比度') }}
                     </label>
                     <PSlider
                       v-model="appBackground.settings.value.contrast"
@@ -491,7 +679,7 @@ onMounted(() => {
                   </div>
                   <div class="flex flex-col gap-1">
                     <label class="text-xs font-bold text-[var(--ui-text-secondary)]">
-                      主题遮罩
+                      {{ __t('ui.settings', '主题遮罩') }}
                     </label>
                     <PSlider
                       v-model="appBackground.settings.value.overlayOpacity"
@@ -502,7 +690,7 @@ onMounted(() => {
                   </div>
                   <div class="flex flex-col gap-1">
                     <label class="text-xs font-bold text-[var(--ui-text-secondary)]">
-                      面板不透明度
+                      {{ __t('ui.settings', '面板不透明度') }}
                     </label>
                     <PSlider
                       v-model="appBackground.settings.value.surfaceOpacity"
@@ -513,7 +701,7 @@ onMounted(() => {
                   </div>
                   <div class="flex flex-col gap-1">
                     <label class="text-xs font-bold text-[var(--ui-text-secondary)]">
-                      面板毛玻璃
+                      {{ __t('ui.settings', '面板毛玻璃') }}
                     </label>
                     <PSlider
                       v-model="appBackground.settings.value.surfaceBlur"
@@ -524,7 +712,7 @@ onMounted(() => {
                   </div>
                   <div class="flex flex-col gap-1">
                     <label class="text-xs font-bold text-[var(--ui-text-secondary)]">
-                      图片填充
+                      {{ __t('ui.settings', '图片填充') }}
                     </label>
                     <PSelect
                       v-model="appBackground.settings.value.fit"
@@ -533,7 +721,7 @@ onMounted(() => {
                   </div>
                   <div class="flex flex-col gap-1">
                     <label class="text-xs font-bold text-[var(--ui-text-secondary)]">
-                      水平位置
+                      {{ __t('ui.settings', '水平位置') }}
                     </label>
                     <PSlider
                       v-model="appBackground.settings.value.positionX"
@@ -544,7 +732,7 @@ onMounted(() => {
                   </div>
                   <div class="flex flex-col gap-1">
                     <label class="text-xs font-bold text-[var(--ui-text-secondary)]">
-                      垂直位置
+                      {{ __t('ui.settings', '垂直位置') }}
                     </label>
                     <PSlider
                       v-model="appBackground.settings.value.positionY"
@@ -560,23 +748,27 @@ onMounted(() => {
 
           <div class="flex flex-col gap-4">
             <div class="flex flex-col gap-1.5 opacity-50 pointer-events-none">
-              <label class="text-xs font-bold text-slate-500">字体大小 ({{ fontSize }}px)</label>
+              <label class="text-xs font-bold text-slate-500">
+                {{ __t('ui.settings', '字体大小 (') }}{{ fontSize }}px)
+              </label>
               <PSlider v-model="fontSize" :min="12" :max="20" :step="1" />
             </div>
             <div class="flex flex-col gap-1.5">
-              <label class="text-xs font-bold text-[var(--ui-text-secondary)]">动态效果</label>
+              <label class="text-xs font-bold text-[var(--ui-text-secondary)]">
+                {{ __t('ui.settings', '动态效果') }}
+              </label>
               <PSelect v-model="motionBinding" :options="motionOptions" />
               <p class="text-[10px] text-[var(--ui-text-tertiary)]">
-                完整、轻量和关闭三档；首次默认完整动效，可在设置中调整
+                {{ __t('ui.settings', '选择界面动效强度') }}
               </p>
             </div>
             <div class="flex items-center justify-between">
               <div class="flex flex-col gap-0.5">
                 <label class="text-xs font-bold text-[var(--ui-text-secondary)]">
-                  关键事件音效
+                  {{ __t('ui.settings', '关键事件音效') }}
                 </label>
                 <p class="text-[10px] text-[var(--ui-text-tertiary)]">
-                  任务完成、失败、审批和重要确认使用客户端合成音
+                  {{ __t('ui.settings', '任务完成、失败、审批和重要确认使用客户端合成音') }}
                 </p>
               </div>
               <PSwitch v-model="soundEffectsBinding" />
@@ -591,22 +783,30 @@ onMounted(() => {
           class="flex items-center gap-2 text-sm font-black text-slate-800 font-pixel mb-5 pb-3 border-b border-slate-100"
         >
           <PixelIcon name="settings" size="sm" />
-          高级
+          {{ __t('ui.settings', '高级') }}
         </h3>
         <div class="flex flex-col gap-4">
           <div class="flex flex-col gap-1.5">
-            <label class="text-xs font-bold text-slate-500">数据目录</label>
+            <label class="text-xs font-bold text-slate-500">
+              {{ __t('ui.settings', '数据目录') }}
+            </label>
             <PInput v-model="dataDir" disabled />
-            <p class="text-[10px] text-slate-400">重启后生效</p>
+            <p class="text-[10px] text-slate-400">{{ __t('ui.settings', '重启后生效') }}</p>
           </div>
           <div class="flex flex-col gap-1.5">
-            <label class="text-xs font-bold text-slate-500">日志级别</label>
+            <label class="text-xs font-bold text-slate-500">
+              {{ __t('ui.settings', '日志级别') }}
+            </label>
             <PSelect v-model="logLevel" :options="logOptions" />
           </div>
           <div class="flex items-center justify-between">
             <div class="flex flex-col gap-0.5">
-              <label class="text-xs font-bold text-slate-500">自动保存</label>
-              <p class="text-[10px] text-slate-400">每次修改后自动保存配置</p>
+              <label class="text-xs font-bold text-slate-500">
+                {{ __t('ui.settings', '自动保存') }}
+              </label>
+              <p class="text-[10px] text-slate-400">
+                {{ __t('ui.settings', '每次修改后自动保存配置') }}
+              </p>
             </div>
             <PSwitch v-model="autoSave" />
           </div>
@@ -614,7 +814,14 @@ onMounted(() => {
       </PCard>
 
       <div class="pt-2 flex justify-end">
-        <PButton variant="primary" :loading="isSaving" @click="handleSave">保存设置</PButton>
+        <PButton
+          variant="primary"
+          :loading="isSaving"
+          :disabled="backgroundLocked"
+          @click="handleSave"
+        >
+          {{ __t('ui.settings', '保存设置') }}
+        </PButton>
       </div>
     </div>
   </div>

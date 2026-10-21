@@ -67,8 +67,13 @@ describe('transport singleton', () => {
 
     expect(result).toEqual({ code: 'OK', message: '成功', data: { id: 1 } })
     expect(fetchMock).toHaveBeenCalledWith('http://localhost:7359/api/agents', {
-      headers: { 'Content-Type': 'application/json', 'X-Test': '1' },
+      headers: expect.any(Headers),
+      signal: expect.any(AbortSignal),
+      credentials: 'include',
     })
+    const headers = new Headers(vi.mocked(fetch).mock.calls[0]?.[1]?.headers)
+    expect(headers.get('Content-Type')).toBe('application/json')
+    expect(headers.get('X-Test')).toBe('1')
   })
 
   it('应当在 Web 环境将 HTTP 错误 JSON 信封原样返回', async () => {
@@ -119,7 +124,7 @@ describe('transport singleton', () => {
     })
   })
 
-  it('应当在 Web 环境通过 HTTP 替代 IPC invoke', async () => {
+  it('Web 客户端不能把原生窗口调用映射成虚构的 HTTP 接口', async () => {
     const fetchMock = vi.fn(() =>
       Promise.resolve({
         json: () => Promise.resolve({ code: 'OK', data: { path: 'C:/Pero' } }),
@@ -131,14 +136,10 @@ describe('transport singleton', () => {
     })
 
     const { transport } = await importTransport()
-    const result = await transport.invoke('dialog:open', 'workspace')
-
-    expect(result).toEqual({ path: 'C:/Pero' })
-    expect(fetchMock).toHaveBeenCalledWith('http://localhost:7359/api/ipc/dialog:open', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(['workspace']),
-    })
+    await expect(transport.invoke('dialog:open', 'workspace')).rejects.toThrow(
+      '浏览器客户端不提供本机窗口接口',
+    )
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('应当在 Electron 环境请求 localhost API 并通过 IPC invoke', async () => {
@@ -163,8 +164,25 @@ describe('transport singleton', () => {
     await expect(transport.invoke('system:open-path', 'C:/Pero')).resolves.toBe('完成')
 
     expect(fetchMock).toHaveBeenCalledWith(`${ELECTRON_BACKEND_ORIGIN}/api/system/info`, {
-      headers: { 'Content-Type': 'application/json' },
+      headers: expect.any(Headers),
+      signal: expect.any(AbortSignal),
+      credentials: 'include',
     })
     expect(invoke).toHaveBeenCalledWith('system:open-path', 'C:/Pero')
+  })
+
+  it('读取请求默认有等待上限，调用方取消信号优先，写操作不套用读取时限', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ code: 'OK' }) }))
+    vi.stubGlobal('fetch', fetchMock)
+    setWindow({ location: { origin: 'http://infos.local' } })
+    const { transport } = await importTransport()
+    await transport.request('/chat/tasks')
+    expect(vi.mocked(fetch).mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal)
+    const controller = new AbortController()
+    await transport.request('/health', { signal: controller.signal })
+    expect(vi.mocked(fetch).mock.calls[1]?.[1]?.signal).toBe(controller.signal)
+    await transport.request('/chat', { method: 'POST', body: '{}' })
+    expect(vi.mocked(fetch).mock.calls[2]?.[1]?.signal).toBeUndefined()
+    expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 })

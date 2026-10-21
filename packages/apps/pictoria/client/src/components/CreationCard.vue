@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 import { computed, reactive, watch } from 'vue'
 import type { Asset, CanvasItem, CanvasEdge, FieldSchema } from '../types'
 import {
@@ -135,7 +137,7 @@ function structured(name: string, event: Event) {
     setValue(name, target.value.trim() ? JSON.parse(target.value) : undefined)
     target.setCustomValidity('')
   } catch {
-    target.setCustomValidity('请填写有效的 JSON')
+    target.setCustomValidity(__t('apps.pictoria.ui', '请填写有效的 JSON'))
     target.reportValidity()
   }
 }
@@ -169,7 +171,7 @@ function structured(name: string, event: Event) {
           {{ stepLabel(item.content.step, modelName) }}
         </strong>
       </div>
-      <span class="draft-label">待执行</span>
+      <span class="draft-label">{{ __t('apps.pictoria.ui', '待执行') }}</span>
     </header>
     <button
       v-for="[name, field] in ports"
@@ -180,8 +182,8 @@ function structured(name: string, event: Event) {
       :data-link-target="item.id"
       :data-link-field="name"
       data-link-port="top"
-      :title="`${field.title || name}输入`"
-      :aria-label="`${field.title || name}顶部连接点`"
+      :title="__t('apps.pictoria.ui', '{0}输入', [field.title || name])"
+      :aria-label="__t('apps.pictoria.ui', '{0}顶部连接点', [field.title || name])"
       @pointerdown.stop
     >
       <span class="port-caption">{{ field.title || name }}</span>
@@ -199,8 +201,8 @@ function structured(name: string, event: Event) {
           :class="{ linked: references(name).length }"
           :data-link-target="item.id"
           :data-link-field="name"
-          :title="`把素材或文字连到${field.title || name}`"
-          :aria-label="`${field.title || name}输入连接点`"
+          :title="__t('apps.pictoria.ui', '把素材或文字连到{0}', [field.title || name])"
+          :aria-label="__t('apps.pictoria.ui', '{0}输入连接点', [field.title || name])"
           @pointerdown.stop
         />
         <div class="draft-field-content">
@@ -227,7 +229,11 @@ function structured(name: string, event: Event) {
           <span v-else-if="references(name).length" class="draft-reference-list">
             <span v-for="edge in references(name)" :key="edge.id" class="draft-reference">
               <span>{{ sourceName(edge.source) }}</span>
-              <button title="断开引用" aria-label="断开引用" @click="emit('disconnect', edge.id)">
+              <button
+                :title="__t('apps.pictoria.ui', '断开引用')"
+                :aria-label="__t('apps.pictoria.ui', '断开引用')"
+                @click="emit('disconnect', edge.id)"
+              >
                 <Icon name="close" :size="11" />
               </button>
             </span>
@@ -292,7 +298,9 @@ function structured(name: string, event: Event) {
       </div>
     </div>
     <footer data-ui>
-      <button v-if="outdated" class="text-button" @click="emit('refresh')">更新配置</button>
+      <button v-if="outdated" class="text-button" @click="emit('refresh')">
+        {{ __t('apps.pictoria.ui', '更新配置') }}
+      </button>
       <button
         v-else-if="hasAdvanced"
         class="text-button"
@@ -300,12 +308,16 @@ function structured(name: string, event: Event) {
         @click="toggleAdvanced"
       >
         <Icon name="settings" :size="13" />
-        {{ item.content.showAdvanced ? '收起参数' : '参数' }}
+        {{
+          item.content.showAdvanced
+            ? __t('apps.pictoria.ui', '收起参数')
+            : __t('apps.pictoria.ui', '参数')
+        }}
       </button>
       <span v-else />
       <button class="create-button" :disabled="busy || !online || outdated" @click="emit('submit')">
         <Icon :name="busy ? 'refresh' : 'sparkle'" :size="15" />
-        {{ busy ? '提交中' : '生成' }}
+        {{ busy ? __t('apps.pictoria.ui', '提交中') : __t('apps.pictoria.ui', '生成') }}
       </button>
     </footer>
   </article>

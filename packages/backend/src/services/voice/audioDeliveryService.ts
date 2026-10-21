@@ -54,7 +54,7 @@ export class AudioDeliveryService {
     audio: TtsResult,
     context: KernelCallContext,
     targetNodeId?: KernelNodeId,
-    presentation?: { caption?: string; isCurrent?: () => boolean },
+    presentation?: { caption?: string; threadId?: string; isCurrent?: () => boolean },
   ): Promise<AudioPlaybackReceipt> {
     await this.cancel(context.principalId)
     mkdirSync(this.assetRoot, { recursive: true })
@@ -165,6 +165,8 @@ export class AudioDeliveryService {
         {
           playbackId,
           caption: presentation?.caption,
+          agentId: context.principalId,
+          threadId: presentation?.threadId,
           assetId: asset.assetId,
           mimeType: asset.mimeType,
           sha256: asset.sha256,

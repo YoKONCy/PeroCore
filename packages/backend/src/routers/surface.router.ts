@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * surface.router — HTTP 路由适配层
  *
@@ -150,7 +151,10 @@ export function createSurfaceRouter(ctx: AppContext) {
             signal: ctx.runtimeStateService.getAbortSignal(resolved.threadId),
           })
           .catch((error) => {
-            logger.error('收到迟到回答后继续会话失败', { threadId: resolved.threadId, error })
+            logger.error(__t('logs.routers', '收到迟到回答后继续会话失败'), {
+              threadId: resolved.threadId,
+              error,
+            })
           })
           .finally(() => {
             ctx.runtimeStateService.unregisterTask(resolved.threadId)

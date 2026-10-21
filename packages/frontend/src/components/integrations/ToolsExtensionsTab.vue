@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import { computed, ref } from 'vue'
 import { INTEGRATION_PROVIDERS, type IntegrationFeature } from '@infos/shared'
 import { PCard, PButton, PixelIcon } from '../pixel'
@@ -12,10 +14,30 @@ const { state, error } = useIntegrations()
 const tab = ref<'extensions' | 'features' | 'mcp' | 'skills'>('extensions')
 const page = ref<IntegrationFeature | null>(null)
 const tabs = [
-  { id: 'extensions', label: '扩展工具' },
-  { id: 'features', label: '拓展功能' },
-  { id: 'mcp', label: 'MCP 服务' },
-  { id: 'skills', label: '技能' },
+  {
+    id: 'extensions',
+    get label() {
+      return __t('ui.integrations', '扩展工具')
+    },
+  },
+  {
+    id: 'features',
+    get label() {
+      return __t('ui.integrations', '拓展功能')
+    },
+  },
+  {
+    id: 'mcp',
+    get label() {
+      return __t('ui.integrations', 'MCP 服务')
+    },
+  },
+  {
+    id: 'skills',
+    get label() {
+      return __t('ui.integrations', '技能')
+    },
+  },
 ] as const
 const searchLogo = computed(() => {
   const feature = state.value?.features.search
@@ -33,11 +55,11 @@ const pdfLogo = computed(() => {
     <header class="integration-heading">
       <PixelIcon name="terminal" size="lg" />
       <div>
-        <h1>工具与扩展</h1>
+        <h1>{{ __t('ui.integrations', '工具与扩展') }}</h1>
         <p>TOOLS & EXTENSIONS</p>
       </div>
     </header>
-    <nav class="integration-tabs" aria-label="工具与扩展分类">
+    <nav class="integration-tabs" :aria-label="__t('ui.integrations', '工具与扩展分类')">
       <button
         v-for="item in tabs"
         :key="item.id"
@@ -55,26 +77,36 @@ const pdfLogo = computed(() => {
       <template v-else-if="tab === 'features'">
         <FeatureSourcesPage v-if="page" :key="page" :kind="page" @back="page = null" />
         <section v-else>
-          <div class="integration-section-heading"><h2>拓展功能</h2></div>
+          <div class="integration-section-heading">
+            <h2>{{ __t('ui.integrations', '拓展功能') }}</h2>
+          </div>
           <div class="integration-grid">
             <PCard pixel padding="lg" class="integration-market-card">
               <div class="integration-card-heading">
                 <IntegrationBrand :brand="searchLogo" fallback="search" />
                 <div>
-                  <h3>联网搜索</h3>
-                  <span class="integration-publisher">搜索来源</span>
+                  <h3>{{ __t('ui.integrations', '联网搜索') }}</h3>
+                  <span class="integration-publisher">
+                    {{ __t('ui.integrations', '搜索来源') }}
+                  </span>
                 </div>
               </div>
-              <p class="integration-description">选择搜索服务，让助手查找网页与相关信息。</p>
+              <p class="integration-description">
+                {{ __t('ui.integrations', '选择搜索服务，让助手查找网页与相关信息。') }}
+              </p>
               <div class="integration-card-foot">
                 <span
                   class="integration-state"
                   :class="{ 'integration-state--ready': state?.features.search.ready }"
                 >
-                  {{ state?.features.search.ready ? '已启用' : '未启用' }}
+                  {{
+                    state?.features.search.ready
+                      ? __t('ui.integrations', '已启用')
+                      : __t('ui.integrations', '未启用')
+                  }}
                 </span>
                 <PButton type="button" variant="secondary" size="sm" @click="page = 'search'">
-                  管理来源
+                  {{ __t('ui.integrations', '管理来源') }}
                   <PixelIcon name="chevron-right" size="xs" />
                 </PButton>
               </div>
@@ -83,20 +115,28 @@ const pdfLogo = computed(() => {
               <div class="integration-card-heading">
                 <IntegrationBrand :brand="pdfLogo" fallback="file" />
                 <div>
-                  <h3>PDF 解析</h3>
-                  <span class="integration-publisher">附件输入</span>
+                  <h3>{{ __t('ui.integrations', 'PDF 解析') }}</h3>
+                  <span class="integration-publisher">
+                    {{ __t('ui.integrations', '附件输入') }}
+                  </span>
                 </div>
               </div>
-              <p class="integration-description">配置解析来源，上传 PDF 后自动提取文字。</p>
+              <p class="integration-description">
+                {{ __t('ui.integrations', '配置解析来源，上传 PDF 后自动提取文字。') }}
+              </p>
               <div class="integration-card-foot">
                 <span
                   class="integration-state"
                   :class="{ 'integration-state--ready': state?.features.pdf.ready }"
                 >
-                  {{ state?.features.pdf.ready ? '上传已开启' : '未启用' }}
+                  {{
+                    state?.features.pdf.ready
+                      ? __t('ui.integrations', '上传已开启')
+                      : __t('ui.integrations', '未启用')
+                  }}
                 </span>
                 <PButton type="button" variant="secondary" size="sm" @click="page = 'pdf'">
-                  管理来源
+                  {{ __t('ui.integrations', '管理来源') }}
                   <PixelIcon name="chevron-right" size="xs" />
                 </PButton>
               </div>

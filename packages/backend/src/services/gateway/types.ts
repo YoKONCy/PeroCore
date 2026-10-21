@@ -65,10 +65,14 @@ export type PushAction =
   | 'agent_changed' // Agent 切换
   | 'task_progress' // 任务进度
   | 'notification' // 通知
+  | 'notification_available' // 通知补收提示
   | 'system_error' // 系统错误
 
 /** Request 请求的 action 名 */
 export type RequestAction =
+  | 'gateway.notifications.pull'
+  | 'gateway.notifications.receipt'
+  | 'gateway.notifications.presence'
   | 'chat' // 发起对话
   | 'chat_stream' // 发起流式对话
   | 'stop_generation' // 停止生成

@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 import type { KernelEventEnvelope } from '@infos/shared'
 import { createLogger } from '../lib/logger'
 import type { KernelOutboxDispatcher } from './kernelOutboxDispatcher'
@@ -69,7 +70,7 @@ export class KernelOutboxPublisher {
         result.published > 0 ? (this.options.busyPollMs ?? 10) : (this.options.idlePollMs ?? 500),
       )
     } catch (error) {
-      logger.error(`Outbox 发布循环失败: ${error}`)
+      logger.error(__t('logs.kernel', 'Outbox 发布循环失败: {0}', [error]))
       this.schedule(this.options.idlePollMs ?? 500)
     } finally {
       this.running = false

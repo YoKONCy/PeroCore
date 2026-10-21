@@ -1,3 +1,4 @@
+import { t as __t } from '../i18n/index'
 /**
  * useThreadStore — Thread 状态管理
  *
@@ -272,8 +273,9 @@ export const useThreadStore = defineStore('thread', () => {
   async function loadThreadProjection(
     nextThreadId: string,
     currentAgentId: string,
+    signal?: AbortSignal,
   ): Promise<ThreadLoadResult> {
-    if (!nextThreadId) return { status: 'superseded' }
+    if (!nextThreadId || signal?.aborted) return { status: 'superseded' }
     const sameConversation = threadId.value === nextThreadId && agentId.value === currentAgentId
 
     const generation = ++loadGeneration
@@ -283,6 +285,14 @@ export const useThreadStore = defineStore('thread', () => {
         : null
     isLoadingHistory.value = true
     historyError.value = null
+    const abandon = () => {
+      if (generation !== loadGeneration) return
+      // 停止或替换恢复任务后，迟到的快照不能把界面重新改成执行中。
+      loadGeneration++
+      isLoadingHistory.value = false
+      navigationTarget.value = null
+    }
+    signal?.addEventListener('abort', abandon, { once: true })
     try {
       const [threadResponse, projectionResponse] = await Promise.all([
         threadsApi.get(nextThreadId, { page: 1, pageSize: 1 }),
@@ -302,7 +312,24 @@ export const useThreadStore = defineStore('thread', () => {
       channel.value = thread.channel
       interactionMode.value = thread.interactionMode
       executionMode.value = resolveExecutionMode(thread.executionMode, thread.autoExecuteTools)
+      // 持久历史不含尚未提交的回复；同步用户消息时保留同会话的实时画面。
+      compositor.flush()
+      const liveSurfaces = sameConversation
+        ? [...compositor.surfaces.values()].filter(
+            (surface) =>
+              surface.threadId === thread.id &&
+              surface.principalId === currentAgentId &&
+              surface.state === 'open',
+          )
+        : []
       compositor.replaceSnapshot(projection)
+      for (const surface of liveSurfaces) {
+        const committed = projection.surfaces.some(
+          (item) =>
+            item.executionId && item.executionId === surface.executionId && item.state !== 'open',
+        )
+        if (!committed) compositor.install(surface)
+      }
       historyCursor.value = projection.beforeCursor
       hasMoreHistory.value = projection.hasMoreBefore ?? false
       const existing = new Map<string, ChatMessage>(
@@ -318,9 +345,10 @@ export const useThreadStore = defineStore('thread', () => {
       if (generation !== loadGeneration) return { status: 'superseded' }
       const error = err instanceof Error ? err : new Error(String(err))
       historyError.value = error.message
-      logger.error('ThreadStore', 'Thread 消息加载失败', error)
+      logger.error('ThreadStore', __t('logs.frontend.useThreadStore', 'Thread 消息加载失败'), error)
       return { status: 'failed', error }
     } finally {
+      signal?.removeEventListener('abort', abandon)
       if (generation === loadGeneration) {
         isLoadingHistory.value = false
         navigationTarget.value = null
@@ -329,10 +357,14 @@ export const useThreadStore = defineStore('thread', () => {
   }
 
   /** 显式选择历史会话时，取消尚未完成的最近会话恢复。 */
-  async function loadThreadMessages(nextThreadId: string, currentAgentId: string) {
+  async function loadThreadMessages(
+    nextThreadId: string,
+    currentAgentId: string,
+    signal?: AbortSignal,
+  ) {
     if (!nextThreadId) return { status: 'superseded' } as const
     latestGeneration++
-    return loadThreadProjection(nextThreadId, currentAgentId)
+    return loadThreadProjection(nextThreadId, currentAgentId, signal)
   }
 
   async function loadOlderMessages(): Promise<number> {
@@ -357,7 +389,7 @@ export const useThreadStore = defineStore('thread', () => {
       hasMoreHistory.value = projection.hasMoreBefore ?? false
       return additions.length
     } catch (error) {
-      logger.error('ThreadStore', '更早历史加载失败', error)
+      logger.error('ThreadStore', __t('logs.frontend.useThreadStore', '更早历史加载失败'), error)
       return 0
     } finally {
       isLoadingOlderHistory.value = false
@@ -397,7 +429,11 @@ export const useThreadStore = defineStore('thread', () => {
         if (generation !== latestGeneration) return { status: 'superseded' }
         const error = err instanceof Error ? err : new Error(String(err))
         historyError.value = error.message
-        logger.error('ThreadStore', '最新 Thread 加载失败', error)
+        logger.error(
+          'ThreadStore',
+          __t('logs.frontend.useThreadStore', '最新 Thread 加载失败'),
+          error,
+        )
         return { status: 'failed', error }
       } finally {
         if (generation === latestGeneration) {
@@ -657,7 +693,7 @@ export const useThreadStore = defineStore('thread', () => {
     // 后端同步
     if (threadId.value && id) {
       chatApi.deleteMessage(threadId.value, id).catch((err) => {
-        logger.error('ThreadStore', '消息删除同步失败', err)
+        logger.error('ThreadStore', __t('logs.frontend.useThreadStore', '消息删除同步失败'), err)
       })
     }
   }
@@ -695,7 +731,10 @@ export const useThreadStore = defineStore('thread', () => {
         nextThread.executionMode,
         nextThread.autoExecuteTools,
       )
-      logger.info('ThreadStore', `新 Thread 已创建: ${nextThread.id}`)
+      logger.info(
+        'ThreadStore',
+        __t('logs.frontend.useThreadStore', '新 Thread 已创建: {0}', [nextThread.id]),
+      )
       return nextThread.id
     } finally {
       if (generation === latestGeneration) {
@@ -714,9 +753,17 @@ export const useThreadStore = defineStore('thread', () => {
   }
   if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     window.addEventListener('focus', syncOnForeground)
+    window.addEventListener('online', syncOnForeground)
+    window.addEventListener('pageshow', syncOnForeground)
+    window.addEventListener('infos:gateway-ready', syncOnForeground)
+    window.addEventListener('infos:gateway-snapshot-required', syncOnForeground)
     document.addEventListener('visibilitychange', syncOnForeground)
     onScopeDispose(() => {
       window.removeEventListener('focus', syncOnForeground)
+      window.removeEventListener('online', syncOnForeground)
+      window.removeEventListener('pageshow', syncOnForeground)
+      window.removeEventListener('infos:gateway-ready', syncOnForeground)
+      window.removeEventListener('infos:gateway-snapshot-required', syncOnForeground)
       document.removeEventListener('visibilitychange', syncOnForeground)
     })
   }

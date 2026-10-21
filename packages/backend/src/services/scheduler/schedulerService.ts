@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 import { randomUUID } from 'node:crypto'
 import type { DrizzleDb } from '../../database'
 import type { GatewayHub } from '../gateway/gatewayHub'
@@ -23,6 +24,7 @@ export interface CreateReminderParams {
   sourceExecutionId?: string
   planId?: string
   planStepId?: string
+  repeatIntervalMinutes?: number
 }
 export type ReminderDto = ScheduledWorkRow & { type: ScheduledTaskType }
 
@@ -30,6 +32,10 @@ export type ReminderDto = ScheduledWorkRow & { type: ScheduledTaskType }
 export class SchedulerService {
   private repo: ProactiveWorkRepository
   private dispatchTask?: (input: DispatchTaskInput) => Promise<BackgroundTaskInfo>
+  private taskRuntime?: {
+    inspect(id: string): Promise<{ status: string } | null>
+    cancel(id: string): Promise<unknown>
+  }
 
   constructor(
     db: DrizzleDb,
@@ -41,8 +47,12 @@ export class SchedulerService {
     this.repo = new ProactiveWorkRepository(db)
   }
 
-  setTaskDispatcher(dispatch: (input: DispatchTaskInput) => Promise<BackgroundTaskInfo>): void {
+  setTaskDispatcher(
+    dispatch: (input: DispatchTaskInput) => Promise<BackgroundTaskInfo>,
+    runtime?: SchedulerService['taskRuntime'],
+  ): void {
     this.dispatchTask = dispatch
+    this.taskRuntime = runtime
   }
 
   private async changed(agentId: string): Promise<void> {
@@ -52,7 +62,7 @@ export class SchedulerService {
         createEnvelope('push', { action: 'proactive_work_changed', agentId }),
       )
     } catch (error) {
-      logger.warn(`工作状态刷新通知失败: ${error}`)
+      logger.warn(__t('logs.scheduler', '工作状态刷新通知失败: {0}', [error]))
     }
   }
 
@@ -79,6 +89,16 @@ export class SchedulerService {
     const agentId = params.agentId ?? 'pero'
     const time = Date.parse(params.time)
     const content = params.content?.trim()
+    if (
+      params.repeatIntervalMinutes !== undefined &&
+      (!Number.isInteger(params.repeatIntervalMinutes) ||
+        params.repeatIntervalMinutes < 1 ||
+        params.repeatIntervalMinutes > 525600 ||
+        type === 'follow_up')
+    )
+      throw new AppError('INVALID_PARAMETER', {
+        message: '周期计划间隔须为 1 分钟至 1 年；一次性跟进不能设置周期',
+      })
     if (
       !['reminder', 'topic', 'reaction', 'agent_task', 'follow_up'].includes(type) ||
       !Number.isFinite(time) ||
@@ -116,6 +136,7 @@ export class SchedulerService {
           sourceExecutionId: params.sourceExecutionId,
           planId: params.planId,
           planStepId: params.planStepId,
+          repeatIntervalMinutes: params.repeatIntervalMinutes,
           createdAt: new Date().toISOString(),
         },
         type === 'follow_up',
@@ -134,9 +155,19 @@ export class SchedulerService {
   }
 
   async cancel(id: number, agentId: string): Promise<boolean> {
+    const row = this.repo.getSchedule(id, agentId)
     const result = this.repo.cancel(id, agentId)
+    if (result && row?.taskId) await this.cancelLinkedTask(row.taskId)
     if (result) await this.changed(agentId)
     return result
+  }
+
+  async pause(id: number, agentId: string, paused: boolean): Promise<boolean> {
+    const row = this.repo.pause(id, agentId, paused)
+    if (!row) return false
+    if (paused && row.taskId) await this.cancelLinkedTask(row.taskId)
+    await this.changed(agentId)
+    return true
   }
 
   async retry(id: number, agentId: string): Promise<boolean> {
@@ -151,6 +182,13 @@ export class SchedulerService {
     for (const row of this.repo.claimDue(new Date().toISOString())) {
       try {
         if (row.threadId) await this.validateThread?.(row.agentId, row.threadId)
+        if (row.repeatIntervalMinutes && row.taskId && this.taskRuntime) {
+          const previous = await this.taskRuntime.inspect(row.taskId)
+          if (previous && !['completed', 'failed', 'cancelled'].includes(previous.status)) {
+            this.repo.defer(row)
+            continue
+          }
+        }
         let taskId: string | undefined
         if (row.type === 'agent_task' || row.type === 'follow_up') {
           const task = await this.dispatchTask({
@@ -160,12 +198,17 @@ export class SchedulerService {
                 ? `【到期跟进】\n原因：${row.reason}\n来源对话：${row.threadId}\n需要检查：${row.content}\n请重新读取现状；如需修改、发送或执行命令，请提出行动建议等待用户采纳。`
                 : row.content,
             title:
-              `${row.type === 'follow_up' ? '跟进' : '定时任务'}：${row.reason || row.content}`.slice(
+              `${row.type === 'follow_up' ? __t('server.scheduler', '跟进') : __t('server.scheduler', '定时任务')}：${row.reason || row.content}`.slice(
                 0,
                 100,
               ),
             requestedBy: 'scheduler',
-            idempotencyKey: `schedule:${row.id}`,
+            idempotencyKey: row.repeatIntervalMinutes
+              ? `schedule:${row.id}:${row.time}`
+              : `schedule:${row.id}`,
+            ...(row.threadId
+              ? { targetThreadId: row.threadId, completionAction: 'send_to_chat' as const }
+              : {}),
             metadata: {
               trigger: row.type,
               scheduleId: row.id,
@@ -180,17 +223,35 @@ export class SchedulerService {
         } else {
           const owner = this.agentManager?.getOwnerAppellation(row.agentId) ?? '主人'
           await this.gatewayHub.pushNotification({
-            title: `${owner}，${row.type === 'reminder' ? '提醒' : row.type === 'topic' ? '话题' : '约定'}到时间啦`,
+            title: __t('server.scheduler', '{0}，{1}到时间啦', [
+              owner,
+              row.type === 'reminder' ? '提醒' : row.type === 'topic' ? '话题' : '约定',
+            ]),
             body: row.content,
             principalId: row.agentId,
             important: true,
-            notificationId: `schedule:${row.id}`,
+            target: {
+              kind: 'reminder',
+              agentId: row.agentId,
+              scheduleId: row.id,
+              threadId: row.threadId ?? undefined,
+            },
+            notificationId: row.repeatIntervalMinutes
+              ? `schedule:${row.id}:${row.time}`
+              : `schedule:${row.id}`,
           })
         }
-        this.repo.settle(row, taskId)
+        const settled = this.repo.settle(row, taskId)
+        if (!settled && taskId) {
+          const current = this.repo.getSchedule(row.id, row.agentId)
+          if (current?.status === 'cancelled' || current?.status === 'paused')
+            await this.cancelLinkedTask(taskId)
+        }
       } catch (error) {
         this.repo.settle(row, undefined, error instanceof Error ? error.message : String(error))
-        logger.warn(`计划派发失败，已保存重试状态: #${row.id}, ${error}`)
+        logger.warn(
+          __t('logs.scheduler', '计划派发失败，已保存重试状态: #{0}, {1}', [row.id, error]),
+        )
       }
       await this.changed(row.agentId)
     }
@@ -199,7 +260,9 @@ export class SchedulerService {
       try {
         await this.acceptSuggestion(suggestion.id, suggestion.agentId)
       } catch (error) {
-        logger.warn(`采纳建议派发失败，稍后重试: ${suggestion.id}, ${error}`)
+        logger.warn(
+          __t('logs.scheduler', '采纳建议派发失败，稍后重试: {0}, {1}', [suggestion.id, error]),
+        )
       }
     }
   }
@@ -302,5 +365,11 @@ export class SchedulerService {
 
   private toDto(row: ScheduledWorkRow): ReminderDto {
     return { ...row, type: row.type as ScheduledTaskType }
+  }
+
+  private async cancelLinkedTask(id: string): Promise<void> {
+    const task = await this.taskRuntime?.inspect(id)
+    if (task && !['completed', 'failed', 'cancelled'].includes(task.status))
+      await this.taskRuntime?.cancel(id)
   }
 }

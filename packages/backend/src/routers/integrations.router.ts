@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 import { Hono } from 'hono'
 import { z } from 'zod'
 import type { AppContext } from '../container'
@@ -9,7 +10,11 @@ export function createIntegrationsRouter(ctx: AppContext) {
   const extensionId = z.enum(['deepwiki', 'sciverse'])
   const featureId = z.enum(['search', 'pdf'])
   router.get('/', (c) =>
-    c.json({ code: 'OK', message: '获取成功', data: ctx.integrationService.view() }),
+    c.json({
+      code: 'OK',
+      message: __t('server.routers', '获取成功'),
+      data: ctx.integrationService.view(),
+    }),
   )
   router.put(
     '/extensions/:id',
@@ -30,7 +35,7 @@ export function createIntegrationsRouter(ctx: AppContext) {
         c.req.valid('param').id,
         c.req.valid('json'),
       )
-      return c.json({ code: 'OK', message: '扩展配置已保存', data })
+      return c.json({ code: 'OK', message: __t('server.routers', '扩展配置已保存'), data })
     },
   )
   router.put(
@@ -45,7 +50,7 @@ export function createIntegrationsRouter(ctx: AppContext) {
         c.req.valid('param').kind,
         c.req.valid('json'),
       )
-      return c.json({ code: 'OK', message: '功能配置已保存', data })
+      return c.json({ code: 'OK', message: __t('server.routers', '功能配置已保存'), data })
     },
   )
   router.post(
@@ -57,7 +62,7 @@ export function createIntegrationsRouter(ctx: AppContext) {
         c.req.valid('param').kind,
         c.req.valid('json'),
       )
-      return c.json({ code: 'OK', message: '来源已保存', data })
+      return c.json({ code: 'OK', message: __t('server.routers', '来源已保存'), data })
     },
   )
   router.delete(
@@ -66,7 +71,7 @@ export function createIntegrationsRouter(ctx: AppContext) {
     async (c) => {
       const { kind, id } = c.req.valid('param')
       const data = await ctx.integrationService.removeSource(kind, id)
-      return c.json({ code: 'OK', message: '来源已移除', data })
+      return c.json({ code: 'OK', message: __t('server.routers', '来源已移除'), data })
     },
   )
   return router

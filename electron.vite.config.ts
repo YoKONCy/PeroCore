@@ -68,10 +68,26 @@ export default defineConfig({
       },
     },
     server: {
+      host: '127.0.0.1',
       port: 7359,
+      strictPort: true,
+      hmr: { path: '/__infos_hmr' },
+      fs: {
+        allow: [
+          resolve(__dirname, 'packages/frontend'),
+          resolve(__dirname, 'packages/shared/src'),
+          resolve(__dirname, 'packages/avatar-assets/src'),
+          resolve(__dirname, 'packages/apps/arca/src'),
+          resolve(__dirname, 'node_modules'),
+          resolve(__dirname, 'public'),
+        ],
+      },
       proxy: {
-        '/api': { target: 'http://localhost:9120', changeOrigin: true },
-        '/ws': { target: 'ws://localhost:9120', ws: true },
+        '/api': {
+          target: `http://127.0.0.1:${process.env.PERO_PORT || 9120}`,
+          changeOrigin: false,
+        },
+        '/ws': { target: `ws://127.0.0.1:${process.env.PERO_PORT || 9120}`, ws: true },
       },
     },
     build: {

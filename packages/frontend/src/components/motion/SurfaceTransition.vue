@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import { computed, inject, provide, ref, shallowRef, toRef } from 'vue'
 import { useSurfaceMotion } from '../../composables/ui/useSurfaceMotion'
 
@@ -13,9 +15,10 @@ const props = withDefaults(
     active?: boolean
     independent?: boolean
   }>(),
-  { pending: false, direction: 1, variant: 'page', fill: false, label: '正在切换', active: true },
+  { pending: false, direction: 1, variant: 'page', fill: false, label: undefined, active: true },
 )
 const content = ref<HTMLElement | null>(null)
+const displayLabel = computed(() => props.label ?? __t('ui.motion', '正在切换'))
 const mainVisible = inject('infos:main-surface-visible', shallowRef(true))
 const material = inject('infos:app-background-active', shallowRef(false))
 const ancestorAnimating = inject('infos:surface-motion-active', shallowRef(false))
@@ -77,7 +80,7 @@ provide(
         </div>
       </div>
     </div>
-    <span v-if="pending" class="surface-transition__status" role="status">{{ label }}</span>
+    <span v-if="pending" class="surface-transition__status" role="status">{{ displayLabel }}</span>
   </div>
 </template>
 

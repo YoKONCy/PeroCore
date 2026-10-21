@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * Agent Router — 角色管理 API
  *
@@ -87,7 +88,7 @@ export function createAgentRouter(ctx: AppContext) {
       ...a,
       avatarUrl: ctx.agentManager.getAvatarUrl(a.id),
     }))
-    return c.json({ code: 'OK', message: '获取成功', data: agents })
+    return c.json({ code: 'OK', message: __t('server.routers', '获取成功'), data: agents })
   })
 
   // GET /api/agents/active — 获取后端权威的全局活跃 Agent
@@ -102,7 +103,7 @@ export function createAgentRouter(ctx: AppContext) {
     }
     return c.json({
       code: 'OK',
-      message: '获取成功',
+      message: __t('server.routers', '获取成功'),
       data: {
         agentId: agent.id,
         id: agent.id,
@@ -132,16 +133,16 @@ export function createAgentRouter(ctx: AppContext) {
         locked: isSystemProtocolTool(d.name),
         display: { ...d.display, label: resolveToolUserLabel(d.name, d.display?.label) },
       }))
-    return c.json({ code: 'OK', message: '获取成功', data: tools })
+    return c.json({ code: 'OK', message: __t('server.routers', '获取成功'), data: tools })
   })
 
-  // GET /api/agents/companion-states — 批量获取全部 Agent 的陪伴调度只读状态
+  // GET /api/agents/companion-states — 兼容入口，按全局陪伴策略投影各启用角色状态。
   // 必须注册在 /:id 路由之前，避免被参数路由吞掉。
   router.get('/companion-states', (c) => {
     const agentIds = ctx.agentManager.listAgents().map((agent) => agent.id)
     return c.json({
       code: 'OK',
-      message: '获取成功',
+      message: __t('server.routers', '获取成功'),
       data: ctx.companionSchedulerService.listStates(agentIds),
     })
   })
@@ -152,7 +153,7 @@ export function createAgentRouter(ctx: AppContext) {
     try {
       return c.json({
         code: 'OK',
-        message: '角色包已生成',
+        message: __t('server.routers', '角色包已生成'),
         data: ctx.agentManager.exportAgentPackage(id),
       })
     } catch (error) {
@@ -168,7 +169,7 @@ export function createAgentRouter(ctx: AppContext) {
     const agentId = c.req.param('id')
     const avatarData = ctx.agentManager.getAvatarData(agentId)
     if (!avatarData) {
-      return c.json({ code: 'NOT_FOUND', message: '该 Agent 没有头像' }, 404)
+      return c.json({ code: 'NOT_FOUND', message: __t('server.routers', '该 Agent 没有头像') }, 404)
     }
     c.header('Content-Type', avatarData.mime)
     c.header('Cache-Control', 'public, max-age=3600')
@@ -205,7 +206,7 @@ export function createAgentRouter(ctx: AppContext) {
     ctx.agentManager.saveAvatar(id, image)
     return c.json({
       code: 'OK',
-      message: '角色头像已更新',
+      message: __t('server.routers', '角色头像已更新'),
       data: { avatarUrl: `/agents/${id}/avatar` },
     })
   })
@@ -213,7 +214,7 @@ export function createAgentRouter(ctx: AppContext) {
   // AIOS: PUT /api/agents/active 已移除（setActiveAgent 方法已删除）
   // 不再允许运行时切换全局活跃 Agent，前端窗口级状态由 RuntimeStateService 管理。
 
-  // GET /api/agents/:id/companion — 获取该 Agent 的陪伴调度状态
+  // GET /api/agents/:id/companion — 兼容入口，查询全局陪伴策略对该角色的生效状态。
   router.get('/:id/companion', (c) => {
     const id = c.req.param('id')
     if (!ctx.agentManager.getAgent(id)) {
@@ -224,12 +225,12 @@ export function createAgentRouter(ctx: AppContext) {
     }
     return c.json({
       code: 'OK',
-      message: '获取成功',
+      message: __t('server.routers', '获取成功'),
       data: { agentId: id, enabled: ctx.companionSchedulerService.isRunning(id) },
     })
   })
 
-  // PUT /api/agents/:id/companion — 启用或停止该 Agent 的陪伴调度
+  // PUT /api/agents/:id/companion — 旧角色入口同样修改全局策略，不再创建独立开关。
   router.put(
     '/:id/companion',
     zValidator('json', z.object({ enabled: z.boolean() })),
@@ -243,13 +244,15 @@ export function createAgentRouter(ctx: AppContext) {
         })
       }
 
-      if (enabled) ctx.companionSchedulerService.start(id)
+      if (enabled) await ctx.companionSchedulerService.start(id)
       else await ctx.companionSchedulerService.stop(id)
 
       const running = ctx.companionSchedulerService.isRunning(id)
       return c.json({
         code: 'OK',
-        message: running ? '陪伴模式已启用' : '陪伴模式已关闭',
+        message: enabled
+          ? __t('server.routers', '全局智能陪伴已启用')
+          : __t('server.routers', '全局主动行为已关闭'),
         data: { agentId: id, enabled: running },
       })
     },
@@ -270,7 +273,7 @@ export function createAgentRouter(ctx: AppContext) {
     }
     return c.json({
       code: 'OK',
-      message: '获取成功',
+      message: __t('server.routers', '获取成功'),
       data: {
         ...detail,
         avatarPath: ctx.agentManager.getAgent(id)?.avatarPath ?? null,
@@ -297,7 +300,7 @@ export function createAgentRouter(ctx: AppContext) {
       return c.json(
         {
           code: 'CREATED',
-          message: `Agent "${profile.id}" 创建成功`,
+          message: __t('server.routers', 'Agent "{0}" 创建成功', [profile.id]),
           data: { id: profile.id, name: profile.name, description: profile.description },
         },
         201,
@@ -320,7 +323,7 @@ export function createAgentRouter(ctx: AppContext) {
       const profile = ctx.agentManager.updateAgent(id, body)
       return c.json({
         code: 'OK',
-        message: `Agent "${id}" 已更新`,
+        message: __t('server.routers', 'Agent "{0}" 已更新', [id]),
         data: { id: profile.id, name: profile.name, ownerAppellation: profile.ownerAppellation },
       })
     } catch (err) {
@@ -339,7 +342,7 @@ export function createAgentRouter(ctx: AppContext) {
     try {
       ctx.agentManager.deleteAgent(id)
       await disposeExecutionOwner({ agentId: id }, false, true)
-      return c.json({ code: 'OK', message: `Agent "${id}" 已删除` })
+      return c.json({ code: 'OK', message: __t('server.routers', 'Agent "{0}" 已删除', [id]) })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       if (msg.includes('不存在')) {
@@ -366,7 +369,7 @@ export function createAgentRouter(ctx: AppContext) {
       })
     }
     await ctx.strongholdService.ensureAgentLocation(id)
-    return c.json({ code: 'OK', message: `Agent ${id} 已启用` })
+    return c.json({ code: 'OK', message: __t('server.routers', 'Agent {0} 已启用', [id]) })
   })
 
   // POST /api/agents/:id/disable — 禁用 Agent
@@ -379,7 +382,7 @@ export function createAgentRouter(ctx: AppContext) {
         data: { agentId: id },
       })
     }
-    return c.json({ code: 'OK', message: `Agent ${id} 已禁用` })
+    return c.json({ code: 'OK', message: __t('server.routers', 'Agent {0} 已禁用', [id]) })
   })
 
   // GET /api/agents/:id/capabilities — 获取 Agent 能力配置 (结构化，供前端表单化编辑)
@@ -403,7 +406,7 @@ export function createAgentRouter(ctx: AppContext) {
 
     return c.json({
       code: 'OK',
-      message: '获取成功',
+      message: __t('server.routers', '获取成功'),
       data: { agentId: id, channels, skills },
     })
   })
@@ -427,7 +430,10 @@ export function createAgentRouter(ctx: AppContext) {
       ctx.capabilityGate.writeChannels(id, channels, writablePath)
       // 重新加载能力配置 + 角色配置，使新矩阵立即生效
       ctx.capabilityGate.reloadAll()
-      return c.json({ code: 'OK', message: `Agent "${id}" 能力矩阵已更新` })
+      return c.json({
+        code: 'OK',
+        message: __t('server.routers', 'Agent "{0}" 能力矩阵已更新', [id]),
+      })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       throw new AppError('UNPROCESSABLE', {
@@ -443,7 +449,7 @@ export function createAgentRouter(ctx: AppContext) {
     const agents = ctx.agentManager.listAgents()
     return c.json({
       code: 'OK',
-      message: `已重载，共 ${agents.length} 个 Agent`,
+      message: __t('server.routers', '已重载，共 {0} 个 Agent', [agents.length]),
       data: agents,
     })
   })
@@ -460,7 +466,7 @@ export function createAgentRouter(ctx: AppContext) {
     }
     return c.json({
       code: 'OK',
-      message: '获取成功',
+      message: __t('server.routers', '获取成功'),
       data: texts,
     })
   })
@@ -482,7 +488,7 @@ export function createAgentRouter(ctx: AppContext) {
     const hasActiveTexts = ctx.petStateService.hasActiveTemporaryTexts(state)
     return c.json({
       code: 'OK',
-      message: '获取成功',
+      message: __t('server.routers', '获取成功'),
       data: {
         agentId: id,
         threadId: threadId ?? null,

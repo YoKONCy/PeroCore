@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import './task-pixel.css'
 /**
  * TaskCard — 后台任务卡片（任务中心重构版）
@@ -68,13 +70,27 @@ const waitReason = computed(() => {
   const reason = props.task.execution?.waitReason
   if (!reason) return ''
   const labels: Record<string, string> = {
-    scheduler_capacity: '等待系统容量',
-    class_capacity: '等待后台任务容量',
-    resource_locked: '等待Agent资源',
-    backpressure: '系统负载保护',
-    io: '等待I/O',
-    approval: '等待批准',
-    paused: '已暂停',
+    get scheduler_capacity() {
+      return __t('ui.taskCenter', '等待系统容量')
+    },
+    get class_capacity() {
+      return __t('ui.taskCenter', '等待后台任务容量')
+    },
+    get resource_locked() {
+      return __t('ui.taskCenter', '等待Agent资源')
+    },
+    get backpressure() {
+      return __t('ui.taskCenter', '系统负载保护')
+    },
+    get io() {
+      return __t('ui.taskCenter', '等待I/O')
+    },
+    get approval() {
+      return __t('ui.taskCenter', '等待批准')
+    },
+    get paused() {
+      return __t('ui.taskCenter', '已暂停')
+    },
   }
   return labels[reason] ?? reason
 })
@@ -144,7 +160,9 @@ const canResumeInterrupted = computed(
         <span v-if="task.currentStage" class="task-card__stage">{{ task.currentStage }}</span>
         <span v-if="waitReason" class="task-card__stage">{{ waitReason }}</span>
         <span v-if="elapsed">{{ elapsed }}</span>
-        <span class="task-card__tools">工具 ×{{ task.toolCallCount }}</span>
+        <span class="task-card__tools">
+          {{ __t('ui.taskCenter', '工具 ×') }}{{ task.toolCallCount }}
+        </span>
       </p>
 
       <!-- 进度条 -->
@@ -167,7 +185,7 @@ const canResumeInterrupted = computed(
         v-if="canPause"
         type="button"
         class="task-card__action"
-        title="暂停"
+        :title="__t('ui.taskCenter', '暂停')"
         @click="emit('pause', task)"
       >
         <PixelIcon name="square" size="xs" />
@@ -176,7 +194,7 @@ const canResumeInterrupted = computed(
         v-if="canResume"
         type="button"
         class="task-card__action"
-        title="恢复"
+        :title="__t('ui.taskCenter', '恢复')"
         @click="emit('resume', task)"
       >
         <PixelIcon name="chevron-right" size="xs" />
@@ -185,7 +203,7 @@ const canResumeInterrupted = computed(
         v-if="canResumeInterrupted"
         type="button"
         class="task-card__action"
-        title="从断点续跑（因服务重启中断）"
+        :title="__t('ui.taskCenter', '从断点续跑（因服务重启中断）')"
         @click="emit('resumeInterrupted', task)"
       >
         <PixelIcon name="refresh" size="xs" />
@@ -196,7 +214,7 @@ const canResumeInterrupted = computed(
         "
         type="button"
         class="task-card__action"
-        title="重新派发"
+        :title="__t('ui.taskCenter', '重新派发')"
         @click="emit('retry', task)"
       >
         <PixelIcon name="refresh" size="xs" />
@@ -205,7 +223,7 @@ const canResumeInterrupted = computed(
         v-if="history && task.category !== 'resident'"
         type="button"
         class="task-card__action task-card__action--delete"
-        title="删除记录"
+        :title="__t('ui.taskCenter', '删除记录')"
         @click.stop="emit('delete', task)"
       >
         <PixelIcon name="trash" size="xs" />
@@ -214,7 +232,7 @@ const canResumeInterrupted = computed(
         v-if="canCancel"
         type="button"
         class="task-card__action task-card__action--danger"
-        title="取消"
+        :title="__t('ui.taskCenter', '取消')"
         @click="emit('cancel', task)"
       >
         <PixelIcon name="close" size="xs" />

@@ -1,0 +1,7 @@
+{
+  "Thread 消息加载失败": "Thread message loading failed",
+  "更早历史加载失败": "earlier history loading failed",
+  "最新 Thread 加载失败": "latest Thread failed to load",
+  "消息删除同步失败": "Message deletion synchronization failed",
+  "新 Thread 已创建: {0}": "New Thread Created: {0}"
+}

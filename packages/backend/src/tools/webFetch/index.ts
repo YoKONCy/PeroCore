@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * webFetch — 轻量级网页抓取工具
  *
@@ -75,7 +76,7 @@ export const webFetchTool: BuiltinTool = {
       url = 'https://' + url
     }
 
-    logger.info(`抓取网页: ${url}`)
+    logger.info(__t('logs.tools', '抓取网页: {0}', [url]))
 
     try {
       const controller = new AbortController()
@@ -118,7 +119,7 @@ export const webFetchTool: BuiltinTool = {
       const text = htmlToText(html)
       const truncated = text.slice(0, maxLength)
 
-      logger.info(`抓取完成: ${url} (${text.length} 字符)`)
+      logger.info(__t('logs.tools', '抓取完成: {0} ({1} 字符)', [url, text.length]))
 
       return JSON.stringify({
         success: true,
@@ -129,7 +130,7 @@ export const webFetchTool: BuiltinTool = {
       })
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err)
-      logger.error(`抓取失败: ${url} - ${errMsg}`)
+      logger.error(__t('logs.tools', '抓取失败: {0} - {1}', [url, errMsg]))
       return JSON.stringify({ error: `获取网页失败: ${errMsg}`, url })
     }
   },

@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { getDisplayLocale } from '../../i18n/index'
+
+import { t as __t } from '../../i18n/index'
+
 import './task-pixel.css'
 /**
  * TaskDetailModal — 任务详情弹窗（M05 §7.4）
@@ -34,9 +38,15 @@ const props = defineProps<{
 const compositor = useCompositorStore()
 const triggerLabel = computed(() => {
   const labels: Record<string, string> = {
-    follow_up: '到期跟进',
-    agent_task: '定时计划',
-    accepted_suggestion: '你采纳的建议',
+    get follow_up() {
+      return __t('ui.taskCenter', '到期跟进')
+    },
+    get agent_task() {
+      return __t('ui.taskCenter', '定时计划')
+    },
+    get accepted_suggestion() {
+      return __t('ui.taskCenter', '你采纳的建议')
+    },
   }
   return labels[String(props.task?.metadata?.trigger ?? '')] ?? ''
 })
@@ -84,13 +94,27 @@ const contentSurfaces = computed(() => partitionSurfaces(false))
 
 function waitReasonLabel(reason?: KernelExecutionWaitReason): string {
   const labels: Record<string, string> = {
-    scheduler_capacity: '等待系统执行容量',
-    class_capacity: '等待同类任务容量',
-    resource_locked: '等待Agent资源释放',
-    backpressure: '系统负载保护',
-    io: '等待I/O',
-    approval: '等待批准',
-    paused: '已暂停',
+    get scheduler_capacity() {
+      return __t('ui.taskCenter', '等待系统执行容量')
+    },
+    get class_capacity() {
+      return __t('ui.taskCenter', '等待同类任务容量')
+    },
+    get resource_locked() {
+      return __t('ui.taskCenter', '等待Agent资源释放')
+    },
+    get backpressure() {
+      return __t('ui.taskCenter', '系统负载保护')
+    },
+    get io() {
+      return __t('ui.taskCenter', '等待I/O')
+    },
+    get approval() {
+      return __t('ui.taskCenter', '等待批准')
+    },
+    get paused() {
+      return __t('ui.taskCenter', '已暂停')
+    },
   }
   return reason ? (labels[reason] ?? reason) : '—'
 }
@@ -99,7 +123,7 @@ function waitReasonLabel(reason?: KernelExecutionWaitReason): string {
 function fmt(iso: string | null | undefined): string {
   if (!iso) return '-'
   const d = new Date(iso.replace(' ', 'T'))
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${d.toLocaleTimeString(getDisplayLocale(), { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
 }
 
 watch(
@@ -134,10 +158,10 @@ watch(
   <PDialog
     v-if="task"
     :model-value="true"
-    title="任务详情"
+    :title="__t('ui.taskCenter', '任务详情')"
     width="min(600px, calc(100vw - 32px))"
     mode="confirm"
-    :confirm-text="'关闭'"
+    :confirm-text="__t('ui.taskCenter', '关闭')"
     @update:model-value="emit('close')"
     @confirm="emit('close')"
     @cancel="emit('close')"
@@ -149,11 +173,13 @@ watch(
         class="detail-projection-status"
         role="status"
       >
-        正在读取任务内容…
+        {{ __t('ui.taskCenter', '正在读取任务内容…') }}
       </p>
       <div v-if="projectionError" class="detail-projection-error" role="alert">
         <span>{{ projectionError }}</span>
-        <PButton variant="ghost" size="sm" @click="projectionRetry++">重试</PButton>
+        <PButton variant="ghost" size="sm" @click="projectionRetry++">
+          {{ __t('ui.taskCenter', '重试') }}
+        </PButton>
       </div>
       <!-- 待答与批准统一由 Surface 承载，放在详情顶部；下方正文不再重复渲染。 -->
       <div v-if="interactionSurfaces.length" class="detail-section task-surfaces">
@@ -164,37 +190,37 @@ watch(
         />
       </div>
       <p v-if="task.category === 'resident'" class="detail-projection-status">
-        系统常驻状态随服务自动维护，无需手动恢复或派发。
+        {{ __t('ui.taskCenter', '系统常驻状态随服务自动维护，无需手动恢复或派发。') }}
       </p>
       <TaskLifecyclePanel v-else :task="task" @updated="emit('updated')" />
       <!-- 基本信息 -->
       <div class="detail-section">
         <h4 class="detail-title">
           <PixelIcon name="book" size="xs" />
-          基本信息
+          {{ __t('ui.taskCenter', '基本信息') }}
         </h4>
         <div class="detail-row">
-          <span class="detail-label">标题</span>
+          <span class="detail-label">{{ __t('ui.taskCenter', '标题') }}</span>
           <span class="detail-value">{{ task.title }}</span>
         </div>
         <div class="detail-row">
-          <span class="detail-label">执行者</span>
+          <span class="detail-label">{{ __t('ui.taskCenter', '执行者') }}</span>
           <span class="detail-value">{{ agentName ?? task.agentId }}</span>
         </div>
         <div v-if="triggerLabel" class="detail-row">
-          <span class="detail-label">触发来源</span>
+          <span class="detail-label">{{ __t('ui.taskCenter', '触发来源') }}</span>
           <span class="detail-value">{{ triggerLabel }}</span>
         </div>
         <div v-if="triggerReason" class="detail-row">
-          <span class="detail-label">触发原因</span>
+          <span class="detail-label">{{ __t('ui.taskCenter', '触发原因') }}</span>
           <span class="detail-value">{{ triggerReason }}</span>
         </div>
         <div class="detail-row">
-          <span class="detail-label">状态</span>
+          <span class="detail-label">{{ __t('ui.taskCenter', '状态') }}</span>
           <span class="detail-value"><TaskStatusBadge :status="task.status" /></span>
         </div>
         <div class="detail-row">
-          <span class="detail-label">当前阶段</span>
+          <span class="detail-label">{{ __t('ui.taskCenter', '当前阶段') }}</span>
           <span class="detail-value">{{ task.currentStage ?? '—' }}</span>
         </div>
       </div>
@@ -212,22 +238,22 @@ watch(
       <div class="detail-section">
         <h4 class="detail-title">
           <PixelIcon name="clock" size="xs" />
-          时间
+          {{ __t('ui.taskCenter', '时间') }}
         </h4>
         <div class="detail-row">
-          <span class="detail-label">创建</span>
+          <span class="detail-label">{{ __t('ui.taskCenter', '创建') }}</span>
           <span class="detail-value">{{ fmt(task.createdAt) }}</span>
         </div>
         <div class="detail-row">
-          <span class="detail-label">开始</span>
+          <span class="detail-label">{{ __t('ui.taskCenter', '开始') }}</span>
           <span class="detail-value">{{ fmt(task.startedAt) }}</span>
         </div>
         <div class="detail-row">
-          <span class="detail-label">结束</span>
+          <span class="detail-label">{{ __t('ui.taskCenter', '结束') }}</span>
           <span class="detail-value">{{ fmt(task.completedAt) }}</span>
         </div>
         <div class="detail-row">
-          <span class="detail-label">更新</span>
+          <span class="detail-label">{{ __t('ui.taskCenter', '更新') }}</span>
           <span class="detail-value">{{ fmt(task.updatedAt) }}</span>
         </div>
       </div>
@@ -236,19 +262,19 @@ watch(
       <div class="detail-section">
         <h4 class="detail-title">
           <PixelIcon name="terminal" size="xs" />
-          执行统计
+          {{ __t('ui.taskCenter', '执行统计') }}
         </h4>
         <div class="detail-row">
-          <span class="detail-label">工具调用</span>
+          <span class="detail-label">{{ __t('ui.taskCenter', '工具调用') }}</span>
           <span class="detail-value">×{{ task.toolCallCount }}</span>
         </div>
         <template v-if="task.execution">
           <div class="detail-row">
-            <span class="detail-label">Execution状态</span>
+            <span class="detail-label">{{ __t('ui.taskCenter', 'Execution状态') }}</span>
             <span class="detail-value">{{ task.execution.state }}</span>
           </div>
           <div class="detail-row">
-            <span class="detail-label">等待原因</span>
+            <span class="detail-label">{{ __t('ui.taskCenter', '等待原因') }}</span>
             <span class="detail-value">{{ waitReasonLabel(task.execution.waitReason) }}</span>
           </div>
           <div class="detail-row">
@@ -258,7 +284,7 @@ watch(
             </span>
           </div>
           <div class="detail-row">
-            <span class="detail-label">Token输入 / 输出</span>
+            <span class="detail-label">{{ __t('ui.taskCenter', 'Token输入 / 输出') }}</span>
             <span class="detail-value">
               {{ task.execution.usage.inputTokens }} / {{ task.execution.usage.outputTokens }}
             </span>
@@ -281,7 +307,9 @@ watch(
 
     <!-- 底部操作 -->
     <template #footer>
-      <PButton variant="ghost" size="sm" @click="emit('close')">关闭</PButton>
+      <PButton variant="ghost" size="sm" @click="emit('close')">
+        {{ __t('ui.taskCenter', '关闭') }}
+      </PButton>
     </template>
   </PDialog>
 </template>

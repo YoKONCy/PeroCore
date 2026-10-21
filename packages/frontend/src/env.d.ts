@@ -10,6 +10,8 @@ declare const __APP_VERSION__: string
 
 interface Window {
   electron?: {
+    clientCredential?: () => string
+    backendOrigin?: () => string
     embedded?: boolean
     toastOverlay?: boolean
     invoke(channel: string, ...args: unknown[]): Promise<unknown>

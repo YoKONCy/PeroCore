@@ -1,3 +1,4 @@
+import { getClientCredential } from '../utils/clientCredential'
 import { createServer, type Server, type Socket } from 'node:net'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { tmpdir } from 'node:os'
@@ -100,7 +101,7 @@ export async function closeArcaDesktopGuard(): Promise<void> {
 
 export async function startDesktopArca(): Promise<unknown> {
   const value = await desktopGuard(),
-    token = process.env.INFOS_API_TOKEN
+    token = getClientCredential()
   const response = await fetch(
     `http://127.0.0.1:${Number(process.env.PERO_PORT ?? 9120)}/api/applications/arca/start`,
     {

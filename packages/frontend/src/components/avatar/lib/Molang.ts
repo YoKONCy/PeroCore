@@ -1,3 +1,4 @@
+import { t as __t } from '../../../i18n/index'
 /**
  * Molang 表达式解析器
  *
@@ -250,7 +251,7 @@ export class Molang {
       return func
     } catch (e) {
       // 编译失败时只警告一次，然后缓存返回 0 的函数
-      logger.warn('Molang', `编译失败，已静默: ${expression}`, e)
+      logger.warn('Molang', __t('logs.frontend.avatar', '编译失败，已静默: {0}', [expression]), e)
       const fallback: MolangFunc = () => 0
       this.cache.set(key, fallback)
       return fallback

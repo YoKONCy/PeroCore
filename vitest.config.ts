@@ -14,9 +14,12 @@ export default defineConfig({
 
     // 默认测试环境（后端用 node，前端各包覆盖为 happy-dom）
     environment: 'node',
-    env: { INFOS_TEST_TEMP_ROOT: resolve(__dirname, 'TEMP') },
+    env: { INFOS_TEST_TEMP_ROOT: resolve(__dirname, 'TEMP'), INFOS_LANGUAGE: 'zh-CN' },
     // 持久工具原件等测试数据必须隔离，清理测试夹具不能触碰真实用户目录。
-    setupFiles: [resolve(__dirname, 'packages/backend/tests/runtimeDataSetup.ts')],
+    setupFiles: [
+      resolve(__dirname, 'packages/backend/tests/runtimeDataSetup.ts'),
+      resolve(__dirname, 'packages/shared/tests/localeSetup.ts'),
+    ],
 
     // 文件匹配（除 tests/ 目录外，也支持源码内的 __tests__ 同位目录）
     include: [

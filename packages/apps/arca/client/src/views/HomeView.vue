@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { DocumentSnapshot, SemanticDocument } from '@infos/document-engine'
@@ -39,11 +41,41 @@ const menuElement = ref<HTMLElement>()
 let menuTrigger: HTMLElement | undefined
 let disposed = false
 const categories = [
-  { id: 'recent', label: '最近', icon: 'clock' },
-  { id: 'all', label: '全部', icon: 'file' },
-  { id: 'favorites', label: '收藏', icon: 'star' },
-  { id: 'archive', label: '归档', icon: 'archive' },
-  { id: 'trash', label: '回收站', icon: 'trash' },
+  {
+    id: 'recent',
+    get label() {
+      return __t('apps.arca.ui', '最近')
+    },
+    icon: 'clock',
+  },
+  {
+    id: 'all',
+    get label() {
+      return __t('apps.arca.ui', '全部')
+    },
+    icon: 'file',
+  },
+  {
+    id: 'favorites',
+    get label() {
+      return __t('apps.arca.ui', '收藏')
+    },
+    icon: 'star',
+  },
+  {
+    id: 'archive',
+    get label() {
+      return __t('apps.arca.ui', '归档')
+    },
+    icon: 'archive',
+  },
+  {
+    id: 'trash',
+    get label() {
+      return __t('apps.arca.ui', '回收站')
+    },
+    icon: 'trash',
+  },
 ] as const
 const documents = computed(() => {
   const status =
@@ -62,7 +94,8 @@ const documents = computed(() => {
   return indexMode.value === 'recent' ? list.slice(0, 20) : list
 })
 const title = computed(
-  () => categories.find((item) => item.id === indexMode.value)?.label ?? '文稿',
+  () =>
+    categories.find((item) => item.id === indexMode.value)?.label ?? __t('apps.arca.ui', '文稿'),
 )
 const visibleDocuments = computed(() => documents.value.slice(0, visibleLimit.value))
 const singleWork = computed(() =>
@@ -270,7 +303,11 @@ onBeforeUnmount(() => {
   <main class="library">
     <section class="library-main" :aria-busy="busy">
       <header class="library-heading">
-        <h1>{{ indexMode === 'archive' || indexMode === 'trash' ? title : '文稿库' }}</h1>
+        <h1>
+          {{
+            indexMode === 'archive' || indexMode === 'trash' ? title : __t('apps.arca.ui', '文稿库')
+          }}
+        </h1>
         <div class="library-heading-actions">
           <button
             type="button"
@@ -278,7 +315,7 @@ onBeforeUnmount(() => {
             @click="packageInput?.click()"
           >
             <ArcaIcon name="folder" :size="16" />
-            打开
+            {{ __t('apps.arca.ui', '打开') }}
           </button>
           <button
             class="primary-button"
@@ -287,11 +324,11 @@ onBeforeUnmount(() => {
             @click="showCreate"
           >
             <ArcaIcon name="plus" :size="16" />
-            新建文稿
+            {{ __t('apps.arca.ui', '新建文稿') }}
           </button>
         </div>
       </header>
-      <nav ref="filterBar" class="library-filters" aria-label="文稿分类">
+      <nav ref="filterBar" class="library-filters" :aria-label="__t('apps.arca.ui', '文稿分类')">
         <button
           v-for="item in categories.slice(0, 3)"
           :key="item.id"
@@ -304,20 +341,24 @@ onBeforeUnmount(() => {
         <span class="active-indicator" aria-hidden="true" />
         <span class="toolbar-spacer" />
         <details class="library-display-menu editor-file-menu">
-          <summary aria-label="显示选项">
+          <summary :aria-label="__t('apps.arca.ui', '显示选项')">
             <ArcaIcon :name="grid ? 'grid' : 'outline'" :size="16" />
           </summary>
           <div class="context-menu">
-            <button type="button" :aria-pressed="grid" @click="view(true)">纸页视图</button>
-            <button type="button" :aria-pressed="!grid" @click="view(false)">列表视图</button>
+            <button type="button" :aria-pressed="grid" @click="view(true)">
+              {{ __t('apps.arca.ui', '纸页视图') }}
+            </button>
+            <button type="button" :aria-pressed="!grid" @click="view(false)">
+              {{ __t('apps.arca.ui', '列表视图') }}
+            </button>
             <label>
-              排序
+              {{ __t('apps.arca.ui', '排序') }}
               <ArcaSelect
                 v-model="sort"
-                aria-label="排序方式"
+                :aria-label="__t('apps.arca.ui', '排序方式')"
                 :options="[
-                  { value: 'updated', label: '最近修改' },
-                  { value: 'title', label: '名称' },
+                  { value: 'updated', label: __t('apps.arca.ui', '最近修改') },
+                  { value: 'title', label: __t('apps.arca.ui', '名称') },
                 ]"
               />
             </label>
@@ -325,7 +366,12 @@ onBeforeUnmount(() => {
         </details>
         <label class="search-field">
           <ArcaIcon name="search" :size="16" />
-          <input v-model="query" type="search" aria-label="查找文稿" placeholder="查找文稿" />
+          <input
+            v-model="query"
+            type="search"
+            :aria-label="__t('apps.arca.ui', '查找文稿')"
+            :placeholder="__t('apps.arca.ui', '查找文稿')"
+          />
         </label>
       </nav>
       <div
@@ -335,8 +381,8 @@ onBeforeUnmount(() => {
       >
         <div class="document-collection" :class="{ grid }">
           <div v-if="!grid" class="document-list-head">
-            <span>名称</span>
-            <span>修改时间</span>
+            <span>{{ __t('apps.arca.ui', '名称') }}</span>
+            <span>{{ __t('apps.arca.ui', '修改时间') }}</span>
             <span />
           </div>
           <article
@@ -357,7 +403,7 @@ onBeforeUnmount(() => {
                 <ArcaIcon name="file" :size="20" />
                 <span class="document-card-title">
                   <strong>{{ item.title }}</strong>
-                  <small>文稿</small>
+                  <small>{{ __t('apps.arca.ui', '文稿') }}</small>
                 </span>
               </template>
             </button>
@@ -373,22 +419,26 @@ onBeforeUnmount(() => {
                 <small>
                   {{
                     store.officeDirty && store.activeDocumentId === item.documentId
-                      ? '有本地草稿'
-                      : formatTime(item.updatedAt) + ' · 文稿'
+                      ? __t('apps.arca.ui', '有本地草稿')
+                      : formatTime(item.updatedAt) + __t('apps.arca.ui', ' · 文稿')
                   }}
                 </small>
               </button>
               <span v-else class="document-caption-note">
                 {{
                   store.officeDirty && store.activeDocumentId === item.documentId
-                    ? '有本地草稿'
+                    ? __t('apps.arca.ui', '有本地草稿')
                     : ''
                 }}
               </span>
               <button
                 class="icon-button bookmark-button"
                 type="button"
-                :aria-label="favorites.includes(item.documentId) ? '取消收藏' : '收藏'"
+                :aria-label="
+                  favorites.includes(item.documentId)
+                    ? __t('apps.arca.ui', '取消收藏')
+                    : __t('apps.arca.ui', '收藏')
+                "
                 :aria-pressed="favorites.includes(item.documentId)"
                 @click="toggleFavorite(item)"
               >
@@ -398,7 +448,7 @@ onBeforeUnmount(() => {
                 class="icon-button document-more"
                 type="button"
                 :disabled="busy"
-                :aria-label="item.title + '的更多操作'"
+                :aria-label="item.title + __t('apps.arca.ui', '的更多操作')"
                 aria-haspopup="menu"
                 @click.stop="showMenu(item, $event)"
               >
@@ -411,7 +461,7 @@ onBeforeUnmount(() => {
                 class="icon-button document-more"
                 type="button"
                 :disabled="busy"
-                :aria-label="item.title + '的更多操作'"
+                :aria-label="item.title + __t('apps.arca.ui', '的更多操作')"
                 aria-haspopup="menu"
                 @click.stop="showMenu(item, $event)"
               >
@@ -425,10 +475,10 @@ onBeforeUnmount(() => {
             <ArcaIcon name="file" :size="14" />
             {{
               singleWork.status === 'active'
-                ? '继续上次的工作'
+                ? __t('apps.arca.ui', '继续上次的工作')
                 : singleWork.status === 'archived'
-                  ? '已归档'
-                  : '回收站'
+                  ? __t('apps.arca.ui', '已归档')
+                  : __t('apps.arca.ui', '回收站')
             }}
           </span>
           <h2>{{ singleWork.title }}</h2>
@@ -441,21 +491,31 @@ onBeforeUnmount(() => {
             :disabled="busy"
             @click="open(singleWork.documentId)"
           >
-            {{ singleWork.status === 'active' ? '继续编辑' : '查看文稿' }}
+            {{
+              singleWork.status === 'active'
+                ? __t('apps.arca.ui', '继续编辑')
+                : __t('apps.arca.ui', '查看文稿')
+            }}
             <ArcaIcon name="arrow" :size="16" />
           </button>
           <dl class="document-facts">
-            <dt>修改</dt>
+            <dt>{{ __t('apps.arca.ui', '修改') }}</dt>
             <dd>{{ formatTime(singleWork.updatedAt) }}</dd>
             <template v-if="singleSnapshot">
-              <dt>字数</dt>
-              <dd>{{ singleWordCount.toLocaleString('zh-CN') }} 字</dd>
+              <dt>{{ __t('apps.arca.ui', '字数') }}</dt>
+              <dd>{{ singleWordCount.toLocaleString('zh-CN') }} {{ __t('apps.arca.ui', '字') }}</dd>
             </template>
-            <dt>语言</dt>
-            <dd>{{ singleWork.language.startsWith('zh') ? '中文' : singleWork.language }}</dd>
+            <dt>{{ __t('apps.arca.ui', '语言') }}</dt>
+            <dd>
+              {{
+                singleWork.language.startsWith('zh')
+                  ? __t('apps.arca.ui', '中文')
+                  : singleWork.language
+              }}
+            </dd>
           </dl>
           <section v-if="singleOutline.length" class="document-outline-preview">
-            <h3>文稿大纲</h3>
+            <h3>{{ __t('apps.arca.ui', '文稿大纲') }}</h3>
             <button
               v-for="(node, index) in singleOutline"
               :key="node.nodeId"
@@ -464,7 +524,7 @@ onBeforeUnmount(() => {
               @click="open(singleWork.documentId, node.nodeId)"
             >
               <span>{{ String(index + 1).padStart(2, '0') }}</span>
-              {{ nodeText(node) || '未命名章节' }}
+              {{ nodeText(node) || __t('apps.arca.ui', '未命名章节') }}
             </button>
           </section>
         </aside>
@@ -474,13 +534,19 @@ onBeforeUnmount(() => {
           type="button"
           @click="visibleLimit += 24"
         >
-          显示更多
+          {{ __t('apps.arca.ui', '显示更多') }}
         </button>
       </div>
       <div v-else class="surface-empty">
         <ArcaIcon :name="indexMode === 'trash' ? 'trash' : 'file'" :size="32" />
         <strong>
-          {{ query ? '没有匹配的文稿' : store.connection !== 'ready' ? '尚未连接' : '暂无文稿' }}
+          {{
+            query
+              ? __t('apps.arca.ui', '没有匹配的文稿')
+              : store.connection !== 'ready'
+                ? __t('apps.arca.ui', '尚未连接')
+                : __t('apps.arca.ui', '暂无文稿')
+          }}
         </strong>
         <button
           v-if="store.connection !== 'ready'"
@@ -488,7 +554,7 @@ onBeforeUnmount(() => {
           class="primary-button"
           @click="router.push({ name: 'settings', query: { section: 'integration' } })"
         >
-          连接应用
+          {{ __t('apps.arca.ui', '连接应用') }}
         </button>
         <button
           v-else-if="indexMode === 'recent' || indexMode === 'all'"
@@ -496,18 +562,18 @@ onBeforeUnmount(() => {
           class="primary-button"
           @click="showCreate"
         >
-          新建文稿
+          {{ __t('apps.arca.ui', '新建文稿') }}
         </button>
       </div>
       <footer class="library-footer">
-        <span>{{ documents.length }} 份文稿</span>
+        <span>{{ documents.length }} {{ __t('apps.arca.ui', '份文稿') }}</span>
         <div>
           <button
             type="button"
             :class="{ active: indexMode === 'archive' }"
             @click="indexMode = 'archive'"
           >
-            归档
+            {{ __t('apps.arca.ui', '归档') }}
           </button>
           <span>·</span>
           <button
@@ -515,7 +581,7 @@ onBeforeUnmount(() => {
             :class="{ active: indexMode === 'trash' }"
             @click="indexMode = 'trash'"
           >
-            回收站
+            {{ __t('apps.arca.ui', '回收站') }}
           </button>
         </div>
         <ConnectionBadge />
@@ -548,24 +614,28 @@ onBeforeUnmount(() => {
             }
           "
         >
-          打开
+          {{ __t('apps.arca.ui', '打开') }}
         </button>
         <button role="menuitem" @click="toggleFavorite(menu.document)">
-          {{ favorites.includes(menu.document.documentId) ? '取消收藏' : '收藏' }}
+          {{
+            favorites.includes(menu.document.documentId)
+              ? __t('apps.arca.ui', '取消收藏')
+              : __t('apps.arca.ui', '收藏')
+          }}
         </button>
         <button
           role="menuitem"
           :disabled="store.connection !== 'ready'"
           @click="showRename(menu.document)"
         >
-          重命名
+          {{ __t('apps.arca.ui', '重命名') }}
         </button>
         <button
           role="menuitem"
           :disabled="store.connection !== 'ready'"
           @click="manage(menu.document, 'copy')"
         >
-          创建副本
+          {{ __t('apps.arca.ui', '创建副本') }}
         </button>
         <button
           v-if="menu.document.status === 'active'"
@@ -573,7 +643,7 @@ onBeforeUnmount(() => {
           :disabled="store.connection !== 'ready'"
           @click="manage(menu.document, 'archived')"
         >
-          归档
+          {{ __t('apps.arca.ui', '归档') }}
         </button>
         <button
           v-if="menu.document.status !== 'active'"
@@ -581,7 +651,7 @@ onBeforeUnmount(() => {
           :disabled="store.connection !== 'ready'"
           @click="manage(menu.document, 'active')"
         >
-          恢复
+          {{ __t('apps.arca.ui', '恢复') }}
         </button>
         <button
           v-if="menu.document.status !== 'deleted'"
@@ -590,52 +660,66 @@ onBeforeUnmount(() => {
           :disabled="store.connection !== 'ready'"
           @click="manage(menu.document, 'deleted')"
         >
-          移入回收站
+          {{ __t('apps.arca.ui', '移入回收站') }}
         </button>
       </div>
     </Teleport>
-    <ArcaDialog :open="createOpen" title="新建文稿" :busy="busy" @close="createOpen = false">
+    <ArcaDialog
+      :open="createOpen"
+      :title="__t('apps.arca.ui', '新建文稿')"
+      :busy="busy"
+      @close="createOpen = false"
+    >
       <form id="arca-create-document" class="form-stack" @submit.prevent="create">
         <label>
-          名称
-          <input v-model="newTitle" maxlength="120" placeholder="未命名文稿" required />
+          {{ __t('apps.arca.ui', '名称') }}
+          <input
+            v-model="newTitle"
+            maxlength="120"
+            :placeholder="__t('apps.arca.ui', '未命名文稿')"
+            required
+          />
         </label>
         <p v-if="dialogError" class="form-error" role="alert">{{ dialogError }}</p>
       </form>
       <template #footer>
-        <button type="button" :disabled="busy" @click="createOpen = false">取消</button>
+        <button type="button" :disabled="busy" @click="createOpen = false">
+          {{ __t('apps.arca.ui', '取消') }}
+        </button>
         <button
           class="primary-button"
           type="submit"
           form="arca-create-document"
           :disabled="busy || !newTitle.trim()"
         >
-          {{ busy ? '创建中…' : '创建' }}
+          {{ busy ? __t('apps.arca.ui', '创建中…') : __t('apps.arca.ui', '创建') }}
         </button>
       </template>
     </ArcaDialog>
     <ArcaDialog
       :open="Boolean(renameTarget)"
-      title="重命名"
+      :title="__t('apps.arca.ui', '重命名')"
       :busy="busy"
       @close="renameTarget = undefined"
     >
       <form id="library-rename" class="form-stack" @submit.prevent="rename">
         <label>
-          名称
+          {{ __t('apps.arca.ui', '名称') }}
           <input v-model="renameTitle" maxlength="120" required />
         </label>
         <p v-if="renameError" class="form-error" role="alert">{{ renameError }}</p>
       </form>
       <template #footer>
-        <button :disabled="busy" @click="renameTarget = undefined">取消</button>
+        <button :disabled="busy" @click="renameTarget = undefined">
+          {{ __t('apps.arca.ui', '取消') }}
+        </button>
         <button
           class="primary-button"
           type="submit"
           form="library-rename"
           :disabled="busy || !renameTitle.trim()"
         >
-          保存
+          {{ __t('apps.arca.ui', '保存') }}
         </button>
       </template>
     </ArcaDialog>

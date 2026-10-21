@@ -1,3 +1,4 @@
+import { t as __t } from './i18n'
 /**
  * 日志工具
  *
@@ -44,7 +45,7 @@ export function initLogFile(config?: Partial<LogFileConfig>): void {
   })
 
   // 用 console.log 而不是 logger 避免循环
-  console.log(`[infOS] 日志文件已启用: ${fileTransport.getLogPath()}`)
+  console.log(__t('logs.lib', '[infOS] 日志文件已启用: {0}', [fileTransport.getLogPath()]))
 }
 
 /** 获取文件 Transport (给外部查询日志路径用) */

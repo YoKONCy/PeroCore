@@ -11,7 +11,8 @@ import type {
   SurfaceProjectionSnapshot,
   StatusCardDesign,
   StatusCardImage,
-  SocialTurnRecord,
+  SocialTurnListItem,
+  SocialBotMark,
 } from '@infos/shared'
 import { apiClient } from '../client'
 import { configApi } from './configApi'
@@ -44,6 +45,17 @@ export interface SocialModeConfig {
   groupBlacklist: string[]
   userBlacklist: string[]
   ownerPrivateOnlyAgentIds: string[]
+  loopGuard: {
+    knownBotIds: string[]
+    trustedHumanIds: string[]
+    botMarks?: SocialBotMark[]
+    maxBotTurns: number
+    maxTurnsPerWindow: number
+    windowSeconds: number
+    maxModelRequests: number
+    maxSends: number
+    cooldownSeconds: number
+  }
 }
 
 /** 社交配置（存储在 configs 表的 'social' key，JSON 字符串） */
@@ -93,6 +105,8 @@ export interface SocialStickerPage {
 export const socialApi = {
   acknowledgeTurn: (id: string) =>
     apiClient.post<void>(`/social/turns/${encodeURIComponent(id)}/acknowledge`),
+  acknowledgeTurns: (agentId: string, ids: string[]) =>
+    apiClient.post<void>(`/social/turns/${encodeURIComponent(agentId)}/acknowledge-all`, { ids }),
   getStickerAccounts: () => apiClient.get<{ accounts: string[] }>('/social/stickers/accounts'),
   getStickers: (accountId: string, query: string, offset = 0, refresh = false) =>
     apiClient.get<SocialStickerPage>(
@@ -126,11 +140,14 @@ export const socialApi = {
 
   getModeConfig: () => apiClient.get<SocialModeConfig>('/social/mode-config'),
   turns: (agentId: string) =>
-    apiClient.get<Array<Omit<SocialTurnRecord, 'checkpoint'>>>(
-      `/social/turns/${encodeURIComponent(agentId)}`,
-    ),
+    apiClient.get<SocialTurnListItem[]>(`/social/turns/${encodeURIComponent(agentId)}`),
   cancelTurn: (id: string) =>
     apiClient.post<void>(`/social/turns/${encodeURIComponent(id)}/cancel`),
+  allowLimitedConversation: (
+    accountId: string,
+    channelType: 'private' | 'group',
+    channelId: string,
+  ) => apiClient.post('/social/loop-guard/allow', { accountId, channelType, channelId }),
   saveModeConfig: (config: SocialModeConfig) =>
     apiClient.put<SocialModeConfig>('/social/mode-config', config),
 

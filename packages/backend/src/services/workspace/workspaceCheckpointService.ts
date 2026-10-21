@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * workspaceCheckpointService — 领域服务
  *
@@ -119,7 +120,11 @@ export class WorkspaceCheckpointService {
     if (!context.threadId || !context.pairId || !context.callId || context.taskId) {
       if (!context.taskId) {
         logger.warn(
-          `跳过文件快照：缺少轮次上下文 (thread=${context.threadId ?? '-'}, pair=${context.pairId ?? '-'}, call=${context.callId ?? '-'})`,
+          __t('logs.workspace', '跳过文件快照：缺少轮次上下文 (thread={0}, pair={1}, call={2})', [
+            context.threadId ?? '-',
+            context.pairId ?? '-',
+            context.callId ?? '-',
+          ]),
         )
       }
       return null
@@ -156,7 +161,7 @@ export class WorkspaceCheckpointService {
   /** 写入成功后持久化快照；失败的工具调用不产生记录。 */
   async commit(
     captured: Awaited<ReturnType<WorkspaceCheckpointService['captureBefore']>>,
-    finalContent: string,
+    finalContent: string | Buffer,
     historyContinuous = true,
   ): Promise<void> {
     if (!captured) return
@@ -390,14 +395,16 @@ export class WorkspaceCheckpointService {
       }
       if (unrecovered.length) {
         const recoveryPath = await this.saveRecovery(agentId, preview.threadId, unrecovered)
-        logger.error(`回滚未完成，恢复材料已保留：${recoveryPath}`)
+        logger.error(__t('logs.workspace', '回滚未完成，恢复材料已保留：{0}', [recoveryPath]))
         throw new AppError('CONFLICT', {
           message: '回滚未完成；部分文件再次变化，已保留当前内容及撤回前备份',
           data: { recoveryPath },
         })
       }
       logger.warn(
-        `回滚未完成，已恢复本次修改的文件：${cause instanceof Error ? cause.message : String(cause)}`,
+        __t('logs.workspace', '回滚未完成，已恢复本次修改的文件：{0}', [
+          cause instanceof Error ? cause.message : String(cause),
+        ]),
       )
       throw new AppError('CONFLICT', { message: '回滚未完成，已恢复本次修改的文件，请稍后重试' })
     }

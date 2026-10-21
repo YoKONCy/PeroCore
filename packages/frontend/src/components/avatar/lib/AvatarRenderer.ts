@@ -1,3 +1,4 @@
+import { t as __t } from '../../../i18n/index'
 /**
  * 虚拟人渲染器
  *
@@ -62,6 +63,8 @@ export class AvatarRenderer {
   textureWidth: number = 64
   /** 纹理图集高度（像素） */
   textureHeight: number = 64
+  /** 零厚度双面贴片共用单面材质，避免正反两张共面三角形重复争夺深度。 */
+  private readonly planarMaterials = new WeakMap<THREE.Material, THREE.Material>()
 
   /**
    * 从 Provider 构建完整的 3D 场景
@@ -133,7 +136,11 @@ export class AvatarRenderer {
         try {
           boneData.cubes = JSON.parse(boneData.cubesJson)
         } catch (e) {
-          logger.error('AvatarRenderer', `解析骨骼 ${boneData.name} 的 cubesJson 失败`, e)
+          logger.error(
+            'AvatarRenderer',
+            __t('logs.frontend.avatar', '解析骨骼 {0} 的 cubesJson 失败', [boneData.name]),
+            e,
+          )
         }
       }
 
@@ -207,7 +214,10 @@ export class AvatarRenderer {
       if (parentGroup) {
         parentGroup.add(boneGroup)
       } else {
-        logger.warn('AvatarRenderer', `未找到父骨骼 ${boneData.parent}，挂载到根节点`)
+        logger.warn(
+          'AvatarRenderer',
+          __t('logs.frontend.avatar', '未找到父骨骼 {0}，挂载到根节点', [boneData.parent]),
+        )
         rootGroup.add(boneGroup)
       }
     } else {
@@ -274,18 +284,26 @@ export class AvatarRenderer {
       mesh.receiveShadow = true
       mesh.name = `${boneData.name}_Mesh`
 
-      logger.debug('AvatarRenderer', `为骨骼 ${boneData.name} 添加了 Native Mesh`, {
-        vertexCount: boneData.vertices.length / 3,
-      })
+      logger.debug(
+        'AvatarRenderer',
+        __t('logs.frontend.avatar', '为骨骼 {0} 添加了 Native Mesh', [boneData.name]),
+        {
+          vertexCount: boneData.vertices.length / 3,
+        },
+      )
 
       // Native geometry 已经在 Bone Local Space 中 (相对于 Pivot)
       // 所以直接添加到 Bone Group，位置为 (0,0,0)
       boneGroup.add(mesh)
     } else if (boneData.cubes && boneData.cubes.length > 0) {
       // 回退：使用 JS 侧 Cube 解析 (低性能路径)
-      logger.debug('AvatarRenderer', `为骨骼 ${boneData.name} 添加了 Cubes`, {
-        cubeCount: boneData.cubes.length,
-      })
+      logger.debug(
+        'AvatarRenderer',
+        __t('logs.frontend.avatar', '为骨骼 {0} 添加了 Cubes', [boneData.name]),
+        {
+          cubeCount: boneData.cubes.length,
+        },
+      )
       const cubes = boneData.cubes as BedrockCube[]
       cubes.forEach((cubeData) => {
         this.addCubeToBone(boneGroup, cubeData, boneData.pivot, material)
@@ -474,7 +492,30 @@ export class AvatarRenderer {
       this.applyBedrockUV(geometry, cubeData.uv, size, mirror)
     }
 
-    const mesh = new THREE.Mesh(geometry, material)
+    // 只处理真实零厚度、且正反两面均存在的贴片；单面装饰仍保留原有双面可见性。
+    // inflate 后已有厚度的外层衣物也继续沿用原材质。
+    const facePairs = [
+      ['east', 'west'],
+      ['up', 'down'],
+      ['south', 'north'],
+    ] as const
+    const hasCoincidentFaces = size.some((length, axis) => {
+      if (length + inflate * 2 !== 0) return false
+      if (!cubeData.uv || Array.isArray(cubeData.uv)) return true
+      const [front, back] = facePairs[axis]!
+      return cubeData.uv[front] !== undefined && cubeData.uv[back] !== undefined
+    })
+    let surfaceMaterial = material
+    if (hasCoincidentFaces) {
+      let planarMaterial = this.planarMaterials.get(material)
+      if (!planarMaterial) {
+        planarMaterial = material.clone()
+        planarMaterial.side = THREE.FrontSide
+        this.planarMaterials.set(material, planarMaterial)
+      }
+      surfaceMaterial = planarMaterial
+    }
+    const mesh = new THREE.Mesh(geometry, surfaceMaterial)
     // 亚像素薄片（最小边 < 1 单位，如发卡/丝带这类被缩小的装饰 cube）不参与阴影：
     // 它们在 shadow map 里只有几个纹素宽，投射/接收阴影必然产生随摆动抽搐的噪点，
     // 且体积极小，关闭阴影对画面几乎没有影响。
@@ -671,13 +712,26 @@ export class AvatarRenderer {
     } else {
       // 逐面 UV
       // 对象格式: { up: { uv: [u, v], uv_size: [w, h] }, ... }
+      const visibleFaces = new Set<number>()
       for (const [faceName, faceData] of Object.entries(uvData)) {
         const faceIndex = FACE_INDEX_MAP[faceName]
         if (faceIndex === undefined) continue
 
         const perFace = faceData as PerFaceUV
         setFaceUV(faceIndex, perFace.uv[0], perFace.uv[1], perFace.uv_size[0], perFace.uv_size[1])
+        visibleFaces.add(faceIndex)
       }
+      // 未声明的面不能拿图集左上角的默认 UV 补画，否则会出现额外遮挡和共面闪烁。
+      // 保留原顶点编号，确保正反两面的独立 UV 和镜像映射不受影响。
+      const sourceIndex = geometry.getIndex()!
+      const visibleIndices: number[] = []
+      for (let face = 0; face < 6; face++) {
+        if (!visibleFaces.has(face)) continue
+        for (let offset = 0; offset < 6; offset++) {
+          visibleIndices.push(sourceIndex.getX(face * 6 + offset))
+        }
+      }
+      geometry.setIndex(visibleIndices)
     }
 
     uvAttribute!.needsUpdate = true

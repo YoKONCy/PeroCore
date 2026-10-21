@@ -70,5 +70,7 @@ describe('独立口语答复', () => {
     expect(
       cleanTextForTts('[结果](https://example.com)\n```js\nsecret()\n```<think>内部推理</think>✨'),
     ).toBe('结果')
+    expect(cleanTextForTts('结果<selfMinding>碎碎念</selfMinding>完成')).toBe('结果完成')
+    expect(cleanTextForTts('结果<selfMinding>未闭合碎碎念')).toBe('结果')
   })
 })

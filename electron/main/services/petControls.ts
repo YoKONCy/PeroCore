@@ -1,3 +1,4 @@
+import { t as __t } from '../utils/i18n'
 import { app, BrowserWindow, globalShortcut, powerMonitor } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -41,7 +42,10 @@ class PetControls {
         ) => number
       } catch (error) {
         this.error = '全局按住说话不可用，请检查桌面输入组件'
-        logger.warn('PetControls', `Windows 输入组件加载失败：${String(error)}`)
+        logger.warn(
+          'PetControls',
+          __t('electron.logs.petControls', 'Windows 输入组件加载失败：{0}', [String(error)]),
+        )
       }
     }
     powerMonitor.on('lock-screen', this.onSuspend)

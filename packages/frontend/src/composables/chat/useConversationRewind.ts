@@ -1,3 +1,4 @@
+import { t as __t } from '../../i18n/index'
 import { ref } from 'vue'
 import { chatApi, type RewindPreview, type RewindResult } from '../../api/modules/chatApi'
 import { useNotificationStore } from '../../stores'
@@ -91,10 +92,10 @@ export function useConversationRewind() {
     } catch (cause) {
       notifications.toast(
         completed
-          ? `${action}已完成，界面同步失败，请刷新页面`
+          ? __t('ui.chat', '{0}已完成，界面同步失败，请刷新页面', [action])
           : cause instanceof Error
             ? cause.message
-            : `${action}失败，请稍后重试`,
+            : __t('ui.chat', '{0}失败，请稍后重试', [action]),
         { type: 'error' },
       )
       return null

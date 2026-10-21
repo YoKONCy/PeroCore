@@ -61,11 +61,49 @@ export interface SocialTurnRecord {
   deadline: string
   attempts: number
   error?: string
+  /** 只保留轮次与工具名、动作、状态，不保存参数、正文或图片。 */
+  generationSummary?: {
+    modelResponses: number
+    toolRounds: number
+    continuations: number
+    closingReason?: string
+    toolCalls: number
+    tools: Array<{
+      round: number
+      name: string
+      action?: string
+      status: 'completed' | 'error' | 'unknown' | 'blocked'
+      durationMs: number
+    }>
+  }
   updatedAt: string
   checkpoint: Record<string, unknown>
   sourceMessageIds?: string[]
-  outcome?: 'reply' | 'pass' | 'wait' | 'defer'
+  /** 保留触发消息标识，终态清空检查点后仍能准确定位任务来源。 */
+  triggerMessageId?: string
+  outcome?: 'reply' | 'pass' | 'wait' | 'defer' | 'orchestration'
+  /** 不包含正文的编排进度，供前端显示托管与部分失败状态。 */
+  orchestrationSummary?: {
+    plans: number
+    stepsCompleted: number
+    stepsFailed: number
+    stepsUncertain: number
+    stepsSkipped: number
+    businessCalls: number
+    sends: number
+    waitingFor?: string
+    wakeAt?: number
+    expiresAt?: number
+  }
   acknowledgedAt?: string
+}
+
+/** 展示摘要按原消息读取，不把聊天正文复制到恢复记录中。 */
+export type SocialTurnListItem = Omit<SocialTurnRecord, 'checkpoint'> & {
+  sourcePreview?: { senderName: string; content: string }
+  sourceCount: number
+  /** 仅控制终态记录的默认展示，不影响恢复期限和聊天记录。 */
+  displayExpiresAt?: string
 }
 
 export interface SocialStoragePort {
@@ -95,6 +133,8 @@ export interface SocialStoragePort {
     timestamp?: string
     queueForReply?: boolean
     turnId?: string
+    /** 仅补存检查点中已确认送达的原消息，存储层须在事务内核验。 */
+    confirmedDeliveryKey?: string
   }): Promise<void>
   getRecent(
     agentId: string,

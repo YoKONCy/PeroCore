@@ -1,0 +1,10 @@
+{
+  "任务注册: {0} ({1}, 间隔={2}s)": "task registration: {0} ({1}, interval={2}s)",
+  "调度器已启动 (tick={0}ms, 任务数={1})": "scheduler has started (tick={0}ms, number of tasks={1})",
+  "调度器已停止": "scheduler has stopped",
+  "任务 {0} 正在运行中，跳过手动触发": "task {0} is running, skipping manual triggering",
+  "任务 {0} ({1}) 执行失败: {2}": "task {0} ({1}) failed to execute: {2}",
+  "工作状态刷新通知失败: {0}": "Work status refresh notification failed: {0}",
+  "计划派发失败，已保存重试状态: #{0}, {1}": "planned distribution failed, retry status saved: #{0}, {1}",
+  "采纳建议派发失败，稍后重试: {0}, {1}": "adopted the suggestion and failed to distribute, try again later: {0}, {1}"
+}

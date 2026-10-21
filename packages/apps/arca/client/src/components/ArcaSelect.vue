@@ -1,4 +1,6 @@
 <script setup lang="ts" generic="T extends string | number | null">
+import { t as __t } from '../i18n'
+
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { openDialogs } from '../services/dialogState'
 import ArcaIcon from './ArcaIcon.vue'
@@ -19,10 +21,11 @@ const props = withDefaults(
     ariaLabel?: string
     placeholder?: string
   }>(),
-  { modelValue: undefined, ariaLabel: undefined, placeholder: '请选择' },
+  { modelValue: undefined, ariaLabel: undefined, placeholder: undefined },
 )
 const emit = defineEmits<{ 'update:modelValue': [value: T]; change: [value: T] }>()
 const id = useId()
+const displayPlaceholder = computed(() => props.placeholder ?? __t('apps.arca.ui', '请选择'))
 const trigger = ref<HTMLButtonElement>(),
   popup = ref<HTMLElement>()
 const open = ref(false),
@@ -227,7 +230,9 @@ onBeforeUnmount(() => {
       @keydown="keys"
     >
       <ArcaAvatar v-if="selected?.agentId" :agent-id="selected.agentId" :name="selected.label" />
-      <span :class="{ 'select-placeholder': !selected }">{{ selected?.label ?? placeholder }}</span>
+      <span :class="{ 'select-placeholder': !selected }">
+        {{ selected?.label ?? displayPlaceholder }}
+      </span>
       <ArcaIcon name="chevronDown" :size="13" />
     </button>
     <Teleport to="body">

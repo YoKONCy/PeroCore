@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * NIT Runtime — 执行引擎
  *
@@ -100,8 +101,10 @@ export class NitRuntime {
 
         // 彩蛋: pero_awakening 觉醒仪式
         if (node.name === 'pero_awakening' && value === true) {
-          console.log('\n🐾 [System] 喵！我感觉到我的代码正在发光... 谢谢你唤醒我！')
-          logger.info('Agent 已在语义星云中觉醒。')
+          console.log(
+            __t('logs.nit', '\n🐾 [System] 喵！我感觉到我的代码正在发光... 谢谢你唤醒我！'),
+          )
+          logger.info(__t('logs.nit', 'Agent 已在语义星云中觉醒。'))
         }
 
         return value
@@ -168,7 +171,7 @@ export class NitRuntime {
           // 父任务停止不能被脚本 catch 吞掉后继续写文件或启动进程。
           signal?.throwIfAborted()
           if (err instanceof ReturnSignal) throw err
-          logger.debug(`NIT try/catch 捕获: ${err}`)
+          logger.debug(__t('logs.nit', 'NIT try/catch 捕获: {0}', [err]))
           return this.execBlock(node.catchBlock, signal)
         }
       }
@@ -274,7 +277,9 @@ export class NitRuntime {
       args._positional = positional
     }
 
-    logger.debug(`NIT 工具调用: ${name}(${JSON.stringify(args).slice(0, 100)})`)
+    logger.debug(
+      __t('logs.nit', 'NIT 工具调用: {0}({1})', [name, JSON.stringify(args).slice(0, 100)]),
+    )
     const operation = signal ? this.toolExecutor(name, args, signal) : this.toolExecutor(name, args)
     const result = await waitWithSignal(operation, signal)
     signal?.throwIfAborted()

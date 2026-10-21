@@ -1,3 +1,4 @@
+import { t as __t } from './i18n'
 /**
  * @file 运行环境与路径检测
  * @description— 路径永远不能硬编码
@@ -33,14 +34,14 @@ function resolveUserData(): string {
   if (isPortable) {
     // 便携模式：用户根位于 exe 同级，业务数据写入其 data/ 子目录。
     const dir = path.dirname(app.getPath('exe'))
-    console.log(`[Env] 便携模式，用户根目录: ${dir}`)
+    console.log(__t('electron.logs.utils', '[Env] 便携模式，用户根目录: {0}', [dir]))
     return dir
   }
 
   if (isDev) {
     // 开发模式：Electron 与独立 Daemon 统一使用 ~/.infos。
     const devDir = path.join(app.getPath('home'), '.infos')
-    console.log(`[Env] 开发模式，数据目录: ${devDir}`)
+    console.log(__t('electron.logs.utils', '[Env] 开发模式，数据目录: {0}', [devDir]))
     return devDir
   }
 

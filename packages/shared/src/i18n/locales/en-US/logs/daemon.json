@@ -1,0 +1,10 @@
+{
+  "业务 HTTP 已就绪 → http://{0}:{1}": "business HTTP is ready → http://{0}:{1}",
+  "Daemon 启动失败: {0}": "Daemon failed to start: {0}",
+  "🚀 infOS Daemon (独立进程模式)": "🚀 infOS Daemon (independent process mode)",
+  "📅 时间: {0}": "📅 Time: {0}",
+  "📂 数据目录: {0}": "📂 Data directory: {0}",
+  "💻 平台: {0} / Node {1}": "💻 Platform: {0} / Node {1}",
+  "🔌 业务端口: {0}": "🔌 Business port: {0}",
+  "🛠  能力通道端口: {0}": "🛠 Capability channel port: {0}"
+}

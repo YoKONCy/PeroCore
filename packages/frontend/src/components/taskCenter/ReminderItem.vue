@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { getDisplayLocale } from '../../i18n/index'
+
+import { t as __t } from '../../i18n/index'
+
 import './task-pixel.css'
 /**
  * ReminderItem — 用户提醒条目
@@ -19,13 +23,14 @@ const props = defineProps<{
 const emit = defineEmits<{ changed: [] }>()
 const busy = ref(false)
 const error = ref('')
-async function act(action: 'cancel' | 'retry') {
+async function act(action: 'cancel' | 'retry' | 'pause' | 'resume') {
   if (busy.value) return
   busy.value = true
   error.value = ''
   try {
     if (action === 'cancel') await schedulerApi.cancelReminder(props.item.id, props.item.agentId)
-    else await schedulerApi.retryReminder(props.item.id, props.item.agentId)
+    else if (action === 'retry') await schedulerApi.retryReminder(props.item.id, props.item.agentId)
+    else await schedulerApi.pauseReminder(props.item.id, props.item.agentId, action === 'pause')
     emit('changed')
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '操作失败，请重试'
@@ -36,11 +41,41 @@ async function act(action: 'cancel' | 'retry') {
 
 /** 类型元数据：标签 / 图标 / 修饰色类名 */
 const TYPE_META: Record<string, { label: string; icon: string; mod: string }> = {
-  reminder: { label: '提醒', icon: 'bell', mod: 'reminder' },
-  topic: { label: '话题', icon: 'chat', mod: 'topic' },
-  reaction: { label: '反应', icon: 'flash', mod: 'reaction' },
-  follow_up: { label: '跟进', icon: 'clock', mod: 'topic' },
-  agent_task: { label: '定时任务', icon: 'clock', mod: 'reaction' },
+  reminder: {
+    get label() {
+      return __t('ui.taskCenter', '提醒')
+    },
+    icon: 'bell',
+    mod: 'reminder',
+  },
+  topic: {
+    get label() {
+      return __t('ui.taskCenter', '话题')
+    },
+    icon: 'chat',
+    mod: 'topic',
+  },
+  reaction: {
+    get label() {
+      return __t('ui.taskCenter', '反应')
+    },
+    icon: 'flash',
+    mod: 'reaction',
+  },
+  follow_up: {
+    get label() {
+      return __t('ui.taskCenter', '跟进')
+    },
+    icon: 'clock',
+    mod: 'topic',
+  },
+  agent_task: {
+    get label() {
+      return __t('ui.taskCenter', '定时任务')
+    },
+    icon: 'clock',
+    mod: 'reaction',
+  },
 }
 
 const meta = computed(
@@ -51,15 +86,17 @@ const meta = computed(
 function formatTime(iso: string): string {
   const d = new Date(iso)
   const diffMs = d.getTime() - Date.now()
-  const dateStr = d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
-  const timeStr = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  const dateStr = d.toLocaleDateString(getDisplayLocale(), { month: 'short', day: 'numeric' })
+  const timeStr = d.toLocaleTimeString(getDisplayLocale(), { hour: '2-digit', minute: '2-digit' })
 
-  if (diffMs < 0) return `${dateStr} ${timeStr} · 等待处理`
+  if (diffMs < 0) return __t('ui.taskCenter', '{0} {1} · 等待处理', [dateStr, timeStr])
   const hours = Math.floor(diffMs / 3600_000)
   const mins = Math.floor((diffMs % 3600_000) / 60_000)
-  if (hours >= 24) return `${dateStr} ${timeStr} · ${Math.floor(hours / 24)}天后`
-  if (hours > 0) return `${dateStr} ${timeStr} · ${hours}小时${mins}分后`
-  return `${timeStr} · ${mins}分钟后`
+  if (hours >= 24)
+    return __t('ui.taskCenter', '{0} {1} · {2}天后', [dateStr, timeStr, Math.floor(hours / 24)])
+  if (hours > 0)
+    return __t('ui.taskCenter', '{0} {1} · {2}小时{3}分后', [dateStr, timeStr, hours, mins])
+  return __t('ui.taskCenter', '{0} · {1}分钟后', [timeStr, mins])
 }
 
 const timeText = computed(() => formatTime(props.item.time))
@@ -86,28 +123,47 @@ const isExpired = computed(() => new Date(props.item.time).getTime() < Date.now(
           <PixelIcon name="clock" size="xs" />
           {{ timeText }}
         </span>
-        <span v-if="item.status === 'failed'" class="reminder-item__failed">未能派发</span>
+        <span v-if="item.status === 'failed'" class="reminder-item__failed">
+          {{ __t('ui.taskCenter', '未能派发') }}
+        </span>
+        <span v-if="item.repeatIntervalMinutes">
+          {{ __t('ui.taskCenter', '每') }} {{ item.repeatIntervalMinutes }}
+          {{ __t('ui.taskCenter', '分钟 ·') }}
+          {{
+            item.status === 'paused'
+              ? __t('ui.taskCenter', '已暂停')
+              : __t('ui.taskCenter', '周期计划')
+          }}
+        </span>
       </div>
     </div>
     <div class="reminder-actions">
+      <button
+        v-if="item.repeatIntervalMinutes"
+        type="button"
+        :disabled="busy"
+        @click="act(item.status === 'paused' ? 'resume' : 'pause')"
+      >
+        {{ item.status === 'paused' ? __t('ui.taskCenter', '恢复') : __t('ui.taskCenter', '暂停') }}
+      </button>
       <button
         v-if="item.status === 'failed'"
         type="button"
         class="reminder-actions__retry"
         :disabled="busy"
-        title="重试派发"
+        :title="__t('ui.taskCenter', '重试派发')"
         @click="act('retry')"
       >
         <PixelIcon name="refresh" size="xs" />
-        重试
+        {{ __t('ui.taskCenter', '重试') }}
       </button>
-      <span v-if="item.status === 'dispatching'">派发中</span>
+      <span v-if="item.status === 'dispatching'">{{ __t('ui.taskCenter', '派发中') }}</span>
       <button
         v-else
         type="button"
         :disabled="busy"
-        title="取消这项计划"
-        aria-label="取消这项计划"
+        :title="__t('ui.taskCenter', '取消这项计划')"
+        :aria-label="__t('ui.taskCenter', '取消这项计划')"
         @click="act('cancel')"
       >
         <PixelIcon name="close" size="xs" />

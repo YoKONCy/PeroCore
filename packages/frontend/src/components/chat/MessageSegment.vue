@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /**
  * MessageSegment — 消息段落渲染器
  *
@@ -58,7 +60,7 @@ function toggleCollapse() {
     <div class="segment-header segment-thinking-header" @click="toggleCollapse">
       <div class="segment-title">
         <PixelIcon name="brain" size="xs" />
-        <span>碎碎念</span>
+        <span>{{ __t('ui.chat', '碎碎念') }}</span>
       </div>
       <span :class="['segment-chevron', { 'rotate-180': !isCollapsed }]">▼</span>
     </div>
@@ -75,7 +77,7 @@ function toggleCollapse() {
     <div class="segment-header segment-monologue-header" @click="toggleCollapse">
       <div class="segment-title">
         <PixelIcon name="quote" size="xs" />
-        <span>内心独白</span>
+        <span>{{ __t('ui.chat', '内心独白') }}</span>
       </div>
       <span :class="['segment-chevron', { 'rotate-180': !isCollapsed }]">▼</span>
     </div>

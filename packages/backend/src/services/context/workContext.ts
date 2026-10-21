@@ -13,6 +13,7 @@ export interface WorkContextRecord {
   pairId: string
   taskId?: string
   inputHash: string
+  inputKind?: 'proactive'
   replyHash?: string
   modelKey?: string
   historyRevisions?: Array<[number, number]>
@@ -249,15 +250,15 @@ export function projectWorkHistory(
     if (
       stale ||
       message.revision > 1 ||
-      !user ||
-      record.inputHash !== promptFingerprint(user.content) ||
+      (!user && !(record.inputKind === 'proactive' && record.input)) ||
+      record.inputHash !== promptFingerprint(user?.content ?? record.input?.content) ||
       record.replyHash !== promptFingerprint(message.content)
     ) {
       changed = true
       continue
     }
     records.set(message.id, record)
-    if (record.input) inputRecords.set(user.id, record)
+    if (record.input && user) inputRecords.set(user.id, record)
   }
   return compiled.flatMap<ChatMessage>((message) => {
     const cacheControl = message.cacheControl
@@ -277,7 +278,11 @@ export function projectWorkHistory(
       ]
     const record = records.get(id)
     if (!record?.messages.length) return [message]
-    const restored: ChatMessage[] = closeWorkToolGroups(record.messages).map((item, index) => ({
+    const items =
+      record.inputKind === 'proactive' && record.input
+        ? [record.input, ...record.messages]
+        : record.messages
+    const restored: ChatMessage[] = closeWorkToolGroups(items).map((item, index) => ({
       ...structuredClone(item),
       ...(record.modelKey && record.modelKey === scope.modelKey
         ? {}

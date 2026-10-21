@@ -1,0 +1,10 @@
+{
+  "工作表名称不能重复": "工作表名稱不能重複",
+  "单次最多导出 50000 个单元格": "單次最多導出 50000 個單元格",
+  "工作表名称不能以单引号开头或结尾": "工作表名稱不能以單引號開頭或結尾",
+  "请提供 source": "請提供 source",
+  "请提供导出格式": "請提供導出格式",
+  "source、content 和 workbook 必须且只能提供一个": "source、content 和 workbook 必須且只能提供一個",
+  "workbook 仅用于 XLSX 导出": "workbook 僅用於 XLSX 導出",
+  "Chromium 仅用于 PDF 导出": "Chromium 僅用於 PDF 導出"
+}

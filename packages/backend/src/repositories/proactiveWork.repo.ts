@@ -42,7 +42,7 @@ export class ProactiveWorkRepository {
       .where(
         and(
           agentId ? eq(scheduledTasks.agentId, agentId) : undefined,
-          inArray(scheduledTasks.status, ['pending', 'dispatching', 'failed']),
+          inArray(scheduledTasks.status, ['pending', 'dispatching', 'failed', 'paused']),
         ),
       )
       .orderBy(asc(scheduledTasks.time))
@@ -107,6 +107,14 @@ export class ProactiveWorkRepository {
 
   settle(row: ScheduledWorkRow, taskId?: string, error?: string) {
     const now = new Date().toISOString()
+    const interval = (row.repeatIntervalMinutes ?? 0) * 60_000
+    const recurring = !error && interval > 0
+    const next = recurring
+      ? new Date(
+          Date.parse(row.time) +
+            Math.max(1, Math.floor((Date.now() - Date.parse(row.time)) / interval) + 1) * interval,
+        ).toISOString()
+      : row.time
     return this.db
       .update(scheduledTasks)
       .set({
@@ -114,18 +122,22 @@ export class ProactiveWorkRepository {
           ? row.attempts >= 3
             ? 'failed'
             : 'pending'
-          : taskId
-            ? 'dispatched'
-            : 'completed',
-        isTriggered: !error || row.attempts >= 3,
-        taskId: taskId ?? null,
+          : recurring
+            ? 'pending'
+            : taskId
+              ? 'dispatched'
+              : 'completed',
+        isTriggered: recurring ? false : !error || row.attempts >= 3,
+        time: next,
+        ...(recurring ? { attempts: 0 } : {}),
+        taskId: taskId ?? row.taskId ?? null,
         lastError: error?.slice(0, 1000) ?? null,
         nextAttemptAt: error
           ? new Date(Date.now() + 30_000 * 2 ** (row.attempts - 1)).toISOString()
           : null,
         claimToken: null,
         leaseUntil: null,
-        settledAt: error && row.attempts < 3 ? null : now,
+        settledAt: recurring || (error && row.attempts < 3) ? null : now,
       })
       .where(
         and(
@@ -138,15 +150,80 @@ export class ProactiveWorkRepository {
       .get()
   }
 
-  cancel(id: number, agentId: string) {
-    return !!this.db
+  /** 上次周期任务未结束时延后领取，不能重叠派发，也不消耗失败重试次数。 */
+  defer(row: ScheduledWorkRow) {
+    return this.db
       .update(scheduledTasks)
-      .set({ status: 'cancelled', isTriggered: true, settledAt: new Date().toISOString() })
+      .set({
+        status: 'pending',
+        claimToken: null,
+        leaseUntil: null,
+        nextAttemptAt: new Date(Date.now() + 60_000).toISOString(),
+        attempts: Math.max(0, row.attempts - 1),
+      })
+      .where(and(eq(scheduledTasks.id, row.id), eq(scheduledTasks.claimToken, row.claimToken!)))
+      .run()
+  }
+
+  getSchedule(id: number, agentId: string) {
+    return this.db
+      .select()
+      .from(scheduledTasks)
+      .where(and(eq(scheduledTasks.id, id), eq(scheduledTasks.agentId, agentId)))
+      .get()
+  }
+
+  pause(id: number, agentId: string, paused: boolean) {
+    const row = this.getSchedule(id, agentId)
+    if (!row?.repeatIntervalMinutes) return undefined
+    const interval = row.repeatIntervalMinutes * 60_000
+    const next =
+      Date.parse(row.time) > Date.now()
+        ? row.time
+        : new Date(
+            Date.parse(row.time) +
+              Math.max(1, Math.floor((Date.now() - Date.parse(row.time)) / interval) + 1) *
+                interval,
+          ).toISOString()
+    return this.db
+      .update(scheduledTasks)
+      .set({
+        status: paused ? 'paused' : 'pending',
+        claimToken: null,
+        leaseUntil: null,
+        nextAttemptAt: null,
+        attempts: 0,
+        ...(paused ? {} : { time: next, taskId: null }),
+      })
       .where(
         and(
           eq(scheduledTasks.id, id),
           eq(scheduledTasks.agentId, agentId),
-          inArray(scheduledTasks.status, ['pending', 'failed']),
+          inArray(
+            scheduledTasks.status,
+            paused ? ['pending', 'dispatching', 'failed'] : ['paused'],
+          ),
+        ),
+      )
+      .returning()
+      .get()
+  }
+
+  cancel(id: number, agentId: string) {
+    return !!this.db
+      .update(scheduledTasks)
+      .set({
+        status: 'cancelled',
+        isTriggered: true,
+        claimToken: null,
+        leaseUntil: null,
+        settledAt: new Date().toISOString(),
+      })
+      .where(
+        and(
+          eq(scheduledTasks.id, id),
+          eq(scheduledTasks.agentId, agentId),
+          inArray(scheduledTasks.status, ['pending', 'dispatching', 'failed', 'paused']),
         ),
       )
       .returning()

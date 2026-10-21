@@ -1,3 +1,4 @@
+import { t as __t } from '../utils/i18n'
 /**
  * NapCat QQ 机器人进程管理 (v2)
  *
@@ -169,7 +170,10 @@ function readQuickLoginAccount(): string | undefined {
 function saveQuickLoginAccount(account: string): void {
   if (!/^\d{5,12}$/.test(account) || account === readQuickLoginAccount()) return
   fs.writeFileSync(getQuickLoginAccountPath(), account, 'utf-8')
-  logger.info('NapCat', `已记录 QQ ${account}，下次启动将自动使用快速登录`)
+  logger.info(
+    'NapCat',
+    __t('electron.logs.napcat', '已记录 QQ {0}，下次启动将自动使用快速登录', [account]),
+  )
   broadcastNapCatLog(`[系统] 已为 QQ ${account} 启用下次启动快速登录`)
 }
 
@@ -300,11 +304,14 @@ export async function resolveEntryPoint(
       broadcastNapCatLog(`[提示] ${installation.runtimeRepairWarning}`)
     }
     if (installation.repaired) {
-      logger.info('NapCat', `已校正 QQ 版本信息：${installation.version}`)
+      logger.info(
+        'NapCat',
+        __t('electron.logs.napcat', '已校正 QQ 版本信息：{0}', [installation.version]),
+      )
       broadcastNapCatLog(`[系统] 已校正 QQ 版本信息：${installation.version}`)
     }
     if (installation.runtimeRepaired) {
-      logger.info('NapCat', '已应用 NapCat 运行兼容修复')
+      logger.info('NapCat', __t('electron.logs.napcat', '已应用 NapCat 运行兼容修复'))
       broadcastNapCatLog('[系统] 已应用 NapCat 运行兼容修复')
     }
     env.NAPCAT_WRAPPER_PATH = path.join(napCatDir, 'wrapper.node')
@@ -374,7 +381,7 @@ export function syncNapCatConfig(): NapCatConfigSyncResult {
       ...fs.readdirSync(configDir).filter((f) => /^onebot11_\d+\.json$/.test(f)),
     ]
   } catch {
-    logger.warn('NapCat', '读取配置目录失败')
+    logger.warn('NapCat', __t('electron.logs.napcat', '读取配置目录失败'))
     return result()
   }
 
@@ -430,13 +437,19 @@ export function syncNapCatConfig(): NapCatConfigSyncResult {
         if (!isDefault) changedAccounts.push(qqNumber)
         logger.info(
           'NapCat',
-          `已同步${isDefault ? '新账号默认' : ` QQ ${qqNumber} 的`}反向 WS 配置 → ${REVERSE_WS_URL}`,
+          __t('electron.logs.napcat', '已同步{0}反向 WS 配置 → {1}', [
+            isDefault ? '新账号默认' : ` QQ ${qqNumber} 的`,
+            REVERSE_WS_URL,
+          ]),
         )
       }
 
       if (!isDefault) configuredAccounts.push(qqNumber)
     } catch (err) {
-      logger.warn('NapCat', `处理配置文件 ${filename} 失败: ${err}`)
+      logger.warn(
+        'NapCat',
+        __t('electron.logs.napcat', '处理配置文件 {0} 失败: {1}', [filename, err]),
+      )
     }
   }
 
@@ -470,7 +483,7 @@ async function launchNapCat(generation: number): Promise<void> {
     throw new Error('NapCat 安装或更新失败，请完成更新后再启动')
   if (generation !== launchGeneration) throw new Error('NapCat 启动已取消')
   if (napCatProcess) {
-    logger.warn('NapCat', 'NapCat 进程已在运行')
+    logger.warn('NapCat', __t('electron.logs.napcat', 'NapCat 进程已在运行'))
     return
   }
 
@@ -496,7 +509,10 @@ async function launchNapCat(generation: number): Promise<void> {
   } else {
     broadcastNapCatLog('[系统] 首次登录成功后将自动启用快速登录')
   }
-  logger.info('NapCat', `启动: ${cmd} ${args.join(' ')} (cwd: ${napCatDir})`)
+  logger.info(
+    'NapCat',
+    __t('electron.logs.napcat', '启动: {0} {1} (cwd: {2})', [cmd, args.join(' '), napCatDir]),
+  )
   broadcastNapCatLog('[系统] 正在启动 NapCat...')
 
   const child = spawn(cmd, args, {
@@ -535,7 +551,7 @@ async function launchNapCat(generation: number): Promise<void> {
   child.on('exit', (code) => {
     if (napCatProcess !== child) return
     stopAccountDiscovery()
-    logger.info('NapCat', `NapCat 进程退出: code=${code}`)
+    logger.info('NapCat', __t('electron.logs.napcat', 'NapCat 进程退出: code={0}', [code]))
     broadcastNapCatLog(`[系统] NapCat 已退出 (code=${code})`)
     napCatProcess = null
     broadcastNapCatState()
@@ -544,7 +560,7 @@ async function launchNapCat(generation: number): Promise<void> {
   child.on('error', (err) => {
     if (napCatProcess !== child) return
     stopAccountDiscovery()
-    logger.error('NapCat', `NapCat 启动失败: ${err.message}`)
+    logger.error('NapCat', __t('electron.logs.napcat', 'NapCat 启动失败: {0}', [err.message]))
     broadcastNapCatLog(`[错误] NapCat 启动失败: ${err.message}`)
     napCatProcess = null
     broadcastNapCatState()
@@ -569,7 +585,7 @@ export function stopNapCat(): Promise<void> {
       return
     }
 
-    logger.info('NapCat', '正在停止 NapCat...')
+    logger.info('NapCat', __t('electron.logs.napcat', '正在停止 NapCat...'))
     let treeStopped: Promise<void> | undefined
 
     child.once('close', () => {
@@ -622,7 +638,7 @@ export function clearNapCatLogs(): void {
 /** 发送命令到 NapCat 进程 stdin */
 export function sendNapCatCommand(command: string): void {
   if (!napCatProcess?.stdin) {
-    logger.warn('NapCat', '无法发送命令: NapCat 未运行')
+    logger.warn('NapCat', __t('electron.logs.napcat', '无法发送命令: NapCat 未运行'))
     return
   }
   napCatProcess.stdin.write(command + '\n')

@@ -26,7 +26,7 @@ const advancedConfigSchema = z.object({
   enableFeedback: z.boolean(),
 })
 
-/** 总览页可管理的主 Agent 记忆运行配置。Social 应用配置不属于此合同。 */
+/** 核心记忆中管理的主 Agent 记忆运行配置。Social 应用配置不属于此合同。 */
 export const memoryRuntimeConfigSchema = z
   .object({
     channels: z.object({

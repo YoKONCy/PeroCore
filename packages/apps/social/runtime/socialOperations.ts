@@ -1,4 +1,6 @@
+import { t as __t } from './i18n'
 import { createHash } from 'node:crypto'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { readFile, stat } from 'node:fs/promises'
 import {
   SOCIAL_ACTIONS,
@@ -11,6 +13,17 @@ import {
 import type { NapcatAdapter } from '../adapters/napcat'
 import { QzoneClient } from '../adapters/napcat/qzoneClient'
 import type { SocialStoragePort } from '@infos/shared'
+import type { OutboundMessage } from './types'
+import { currentSocialRecovery, socialFailure } from './socialRecovery'
+import { NativeEmojiService } from './nativeEmoji'
+import {
+  cleanCQCodes,
+  segmentsToCQString,
+  type OneBotSegment,
+} from '../adapters/napcat/napcatParser'
+import { createLogger, safeModelDiagnostic } from '@infos/backend/applicationHostAbi'
+
+const logger = createLogger('SocialOperations')
 
 export interface SocialOperationScope {
   agentId: string
@@ -36,6 +49,7 @@ interface JournalEntry {
   status: 'pending' | 'done' | 'failed' | 'uncertain'
   createdAt: string
   result?: unknown
+  error?: { code?: string; message: string; stage?: string }
 }
 interface PublishedPost {
   tid: string
@@ -51,6 +65,15 @@ interface Dependencies {
   config: ConfigPort
   storage: SocialStoragePort
   prepareImage(source: string, scope: SocialOperationScope): Promise<string>
+  send?(scope: SocialOperationScope, message: OutboundMessage): Promise<unknown>
+  markBot?(
+    scope: SocialOperationScope & { accountId: string },
+    input: {
+      userId: string
+      messageId?: string
+      reason: string
+    },
+  ): Promise<unknown>
 }
 const object = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value)
@@ -165,6 +188,7 @@ const NATIVE: Record<string, string> = {
 }
 
 export class SocialOperations {
+  private writes = new AsyncLocalStorage<{ submitted: boolean }>()
   private qzone = new QzoneClient()
   private caps = new Map<string, { expires: number; packet: boolean; qzone: boolean }>()
   private queues = new Map<string, Promise<unknown>>()
@@ -215,8 +239,13 @@ export class SocialOperations {
     input: Record<string, unknown>,
     timeout = 15_000,
   ) {
+    const adapter = this.adapter(scope, accountId)
+    const writing =
+      SOCIAL_ACTIONS.some((item) => item.mutation && NATIVE[item.action] === action) ||
+      ['mark_group_msg_as_read', 'mark_private_msg_as_read'].includes(action)
+    if (writing && this.writes.getStore()) this.writes.getStore()!.submitted = true
     return unwrapNapcatResponse(
-      await this.adapter(scope, accountId).callApi(action, input, timeout, accountId, scope.signal),
+      await adapter.callApi(action, input, timeout, accountId, scope.signal),
     )
   }
 
@@ -376,17 +405,21 @@ export class SocialOperations {
           })),
         )
       : []
-    const permittedGroups = (required: 'admin' | 'owner') => [
-      ...new Set(
-        groupRoles.flatMap(({ roles }) =>
-          [...roles].filter(([, role]) => roleLevel[role] >= roleLevel[required]).map(([id]) => id),
+    const permittedGroups = (required: 'admin' | 'owner') =>
+      [
+        ...new Set(
+          groupRoles.flatMap(({ roles }) =>
+            [...roles]
+              .filter(([, role]) => roleLevel[role] >= roleLevel[required])
+              .map(([id]) => id),
+          ),
         ),
-      ),
-    ]
+      ].sort()
     return SOCIAL_BUSINESS_TOOLS.flatMap((tool) => {
       const available = SOCIAL_ACTIONS.filter(
         (item) =>
           item.tool === tool &&
+          (item.action !== 'contact_mark_bot' || (!scope.host && !!this.deps.markBot)) &&
           (scope.enableVision !== false || !['image_read', 'sticker_read'].includes(item.action)) &&
           (!item.ownerOnly || scope.owner) &&
           (!item.groupRole || permittedGroups(item.groupRole).length > 0) &&
@@ -450,7 +483,7 @@ export class SocialOperations {
             ),
         )
         definition.description += hints.length
-          ? `\n可管理范围：${hints.join('；')}。执行时会重新校验权限。`
+          ? `\n可管理范围：${hints.sort().join('；')}。执行时会重新校验权限。`
           : '\n当前没有已确认的群管理权限；仅开放普通群操作。'
       }
       if (scope.host) {
@@ -473,6 +506,10 @@ export class SocialOperations {
     if (scope.enableVision === false && ['image_read', 'sticker_read'].includes(definition.action))
       throw new Error('当前角色模型未开启视觉能力，无法查看图片内容')
     if (definition.ownerOnly && !scope.owner) throw new Error('此操作仅对主人开放')
+    if (definition.action === 'contact_mark_bot') {
+      if (scope.host || !this.deps.markBot) throw new Error('机器人标记仅在社交会话内开放')
+      if (!String(input.reason).trim()) throw new Error('机器人标记的判断依据不能为空')
+    }
     if (!scope.owner) {
       if (['contacts_list', 'list'].includes(definition.action))
         throw new Error('仅主人可以查看完整联系人或群列表')
@@ -554,6 +591,7 @@ export class SocialOperations {
       )
         throw new Error('当前 NapCat 版本或底层能力不支持此操作')
       const run = async () => {
+        scope.signal?.throwIfAborted()
         await this.authorizeGroup(definition, input, scope, accountId)
         try {
           return await this.dispatch(definition, input, { ...scope, accountId }, legacy)
@@ -578,16 +616,45 @@ export class SocialOperations {
         ...(data.success !== undefined || Array.isArray(data.images) ? data : { data: result }),
       })
     } catch (error) {
-      const detail = error as { uncertain?: boolean; operationId?: string; code?: string }
+      const detail = error as {
+        uncertain?: boolean
+        operationId?: string
+        code?: string
+        rejected?: boolean
+        stage?: string
+      }
+      const input = object(args.input)
+      const source = Object.fromEntries(
+        ['message_id', 'image_index', 'sticker_id', 'reference', 'user_id']
+          .filter((key) => input[key] !== undefined)
+          .map((key) => [
+            key,
+            typeof input[key] === 'string' ? String(input[key]).slice(0, 200) : input[key],
+          ]),
+      )
+      logger.warn(__t('apps.social.logs', '社交业务操作未完成'), {
+        action: args.action,
+        accountId: scope.accountId,
+        channelId: scope.channelId,
+        code: detail.code,
+        stage: detail.stage,
+        uncertain: detail.uncertain === true,
+        source,
+        reason: safeModelDiagnostic(error instanceof Error ? error.message : String(error), 500),
+      })
       return JSON.stringify({
         success: false,
         error: error instanceof Error ? error.message : String(error),
-        ...(detail.code?.startsWith('GROUP_PERMISSION_') ? { code: detail.code } : {}),
+        retryable: socialFailure(error).retryable,
+        code: detail.code,
+        rejected: detail.rejected === true || !detail.uncertain,
+        stage: detail.stage,
+        source,
         ...(detail.uncertain
           ? {
               uncertain: true,
               operation_id: detail.operationId,
-              hint: '先查询实际结果，确认前不要重复提交',
+              hint: __t('apps.social.ui', '先查询实际结果，确认前不要重复提交'),
             }
           : {}),
       })
@@ -656,6 +723,10 @@ export class SocialOperations {
               'nickname',
               'remark',
               'visibility',
+              'message_id',
+              'image_index',
+              'sticker_id',
+              'reference',
             ].includes(key),
           )
           .map(([key, value]) => [key, typeof value === 'string' ? value.slice(0, 200) : value]),
@@ -677,26 +748,44 @@ export class SocialOperations {
       if (updated.length > 1000)
         throw Object.assign(new Error('待核验操作过多，请先处理操作记录'), { rejected: true })
       await this.deps.config.set(key, JSON.stringify(updated))
+      const progress = { submitted: false }
       try {
-        const result = await run()
+        const result = await this.writes.run(progress, run)
         if (object(result).success === false || object(result).error)
           throw Object.assign(new Error(String(object(result).error ?? '社交操作失败')), {
             rejected: true,
           })
         entry.status = 'done'
+        progress.submitted = true
         // 不把图片正文和凭据写入操作日志。
         entry.result = object(result).images ? { delivered: true } : result
         await this.deps.config.set(key, JSON.stringify(updated))
         return result
       } catch (error) {
-        const failure = error as { rejected?: boolean; code?: string }
+        const failure = error as {
+          rejected?: boolean
+          code?: string
+          stage?: string
+          uncertain?: boolean
+        }
         entry.status =
-          failure.rejected || failure.code === 'DELIVERY_NOT_SENT' ? 'failed' : 'uncertain'
+          failure.rejected ||
+          (!progress.submitted && failure.uncertain !== true) ||
+          ['DELIVERY_NOT_SENT', 'DELIVERY_REJECTED'].includes(failure.code ?? '')
+            ? 'failed'
+            : 'uncertain'
+        entry.error = {
+          code: failure.code,
+          stage: failure.stage,
+          message: platformError(error instanceof Error ? error.message : String(error)),
+        }
         await this.deps.config.set(key, JSON.stringify(updated)).catch(() => {})
         if (entry.status === 'uncertain')
-          throw Object.assign(new Error('操作可能已完成，请先核对实际结果'), {
+          throw Object.assign(new Error(`操作结果尚未确认：${entry.error.message}`), {
             uncertain: true,
             operationId: id,
+            code: failure.code ?? 'SOCIAL_WRITE_UNCERTAIN',
+            stage: failure.stage,
           })
         throw error
       }
@@ -714,6 +803,55 @@ export class SocialOperations {
     const input = { ...params }
     const invoke = (name: string, data: Record<string, unknown>, timeout?: number) =>
       this.invoke(scope, accountId, name, data, timeout)
+    if (action === 'contact_mark_bot') {
+      if (!this.deps.markBot) throw new Error('机器人标记服务尚未就绪')
+      const markScope = { ...scope, accountId }
+      if (input.message_id !== undefined) {
+        // 佐证允许跨会话、跨接入账号读取，但不能借用其他角色或其他人的消息。
+        const row =
+          (await this.deps.storage.getByMsgId(
+            scope.agentId,
+            String(input.message_id),
+            accountId,
+          )) ?? (await this.deps.storage.getByMsgId(scope.agentId, String(input.message_id)))
+        if (
+          !row ||
+          row.agentId !== scope.agentId ||
+          row.platform !== 'qq' ||
+          row.msgId !== input.message_id ||
+          row.senderId !== input.user_id ||
+          !['private', 'group'].includes(row.channelType)
+        )
+          throw new Error(
+            '可选佐证消息不存在、不属于该角色，或不是目标账号发出的；也可省略消息 ID 并说明判断依据',
+          )
+        markScope.accountId = row.accountId
+        markScope.channelId = row.channelId
+        markScope.channelType = row.channelType as 'private' | 'group'
+      }
+      return this.deps.markBot(markScope, {
+        userId: String(input.user_id),
+        messageId: input.message_id as string | undefined,
+        reason: String(input.reason),
+      })
+    }
+    if (action === 'emoji_list' || action === 'emoji_remember') {
+      const service = new NativeEmojiService(this.deps.storage, this.deps.config)
+      const emojiScope = { ...scope, accountId }
+      return action === 'emoji_list'
+        ? {
+            success: true,
+            ...(await service.list(emojiScope, input.message_ids as string[] | undefined)),
+          }
+        : {
+            success: true,
+            ...(await service.remember(
+              emojiScope,
+              String(input.reference),
+              input.description as string | undefined,
+            )),
+          }
+    }
     if (action === 'requests' || action === 'request_handle') {
       const result = object(await invoke('get_group_system_msg', { count: 100 }))
       const requests = Object.fromEntries(
@@ -768,10 +906,14 @@ export class SocialOperations {
       if (action.startsWith('sticker_')) input.action = action.slice(8)
       if (action.startsWith('diary_')) input.action = action.slice(6)
       if (action.startsWith('status_card_')) input.action = action.slice(12)
+      if (definition.mutation && this.writes.getStore()) this.writes.getStore()!.submitted = true
       const result: unknown = JSON.parse(await legacy(definition.legacy, input))
       if (object(result).error || object(result).success === false)
         throw Object.assign(new Error(String(object(result).error ?? '社交操作失败')), {
-          rejected: !definition.mutation,
+          rejected: !definition.mutation || object(result).rejected === true,
+          code: object(result).code,
+          uncertain: object(result).uncertain,
+          stage: object(result).stage,
         })
       return result
     }
@@ -781,18 +923,22 @@ export class SocialOperations {
           .slice(-Number(input.limit ?? 20))
           .reverse(),
       }
-    if (action.startsWith('qzone_') && !['qzone_publish', 'qzone_delete'].includes(action))
+    if (action.startsWith('qzone_') && !['qzone_publish', 'qzone_delete'].includes(action)) {
+      if (definition.mutation && this.writes.getStore()) this.writes.getStore()!.submitted = true
       return this.qzone.execute(accountId, action, input, invoke, scope.signal)
+    }
     if (action === 'message_send') {
-      await this.adapter(scope, accountId).sendMessage(
-        {
-          accountId,
-          channelId: String(input.channel_id),
-          channelType: input.channel_type as 'private' | 'group',
-          content: String(input.content),
-        },
-        scope.signal,
-      )
+      const message: OutboundMessage = {
+        accountId,
+        channelId: String(input.channel_id),
+        channelType: input.channel_type as 'private' | 'group',
+        content: String(input.content),
+      }
+      const receipt = this.deps.send
+        ? await this.deps.send(scope, message)
+        : await this.adapter(scope, accountId).sendMessage(message, scope.signal)
+      if (this.deps.send && currentSocialRecovery()?.record.checkpoint.orchestration)
+        return { sent: true, receipt }
       try {
         await this.deps.storage.insert({
           msgId: `agent_tool_${crypto.randomUUID()}`,
@@ -820,7 +966,7 @@ export class SocialOperations {
           : group
             ? 'mark_group_msg_as_read'
             : 'mark_private_msg_as_read'
-      return invoke(name, {
+      const result = await invoke(name, {
         [group ? 'group_id' : 'user_id']: input.channel_id,
         ...(action === 'history_get'
           ? {
@@ -829,6 +975,52 @@ export class SocialOperations {
             }
           : {}),
       })
+      if (action !== 'history_get') return result
+      const data = object(result)
+      // 平台历史中的商城密钥、内部结构和图片正文不直接进入模型观察。
+      return {
+        ...Object.fromEntries(
+          Object.entries(data).filter(
+            ([key]) => key !== 'messages' && !/key|token|secret|cookie|authorization/i.test(key),
+          ),
+        ),
+        messages: (Array.isArray(data.messages) ? data.messages : []).map((raw) => {
+          const message = object(raw)
+          const segments = (Array.isArray(message.message) ? message.message : []).filter(
+            (item): item is OneBotSegment =>
+              typeof object(item).type === 'string' && Boolean(object(item).data),
+          )
+          const sender = object(message.sender)
+          return {
+            message_id: message.message_id,
+            message_seq: message.message_seq,
+            time: message.time,
+            sender: {
+              user_id: message.user_id ?? sender.user_id,
+              nickname: sender.nickname,
+              card: sender.card,
+            },
+            content: cleanCQCodes(
+              segments.length
+                ? segmentsToCQString(segments)
+                : typeof message.raw_message === 'string'
+                  ? message.raw_message
+                  : '',
+            ),
+            image_count: segments.filter((item) => item.type === 'image').length,
+            native_emoji_count: segments.filter(
+              (item) =>
+                item.type === 'face' ||
+                item.type === 'mface' ||
+                (item.type === 'image' && item.data.emoji_id),
+            ).length,
+          }
+        }),
+        hint: __t(
+          'apps.social.ui',
+          '这里只是历史文字与媒体占位。查看画面请用 image_read；复用本地已收到的原生表情请用 emoji_list。',
+        ),
+      }
     }
     if (action === 'files')
       return invoke(input.folder_id ? 'get_group_files_by_folder' : 'get_group_root_files', {

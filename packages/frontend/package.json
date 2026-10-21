@@ -1,6 +1,6 @@
 {
   "name": "@infos/frontend",
-  "version": "0.9.4",
+  "version": "0.9.5",
   "private": true,
   "type": "module",
   "scripts": {
@@ -14,6 +14,7 @@
     "@infos/arca": "workspace:*",
     "@infos/avatar-assets": "workspace:*",
     "@infos/shared": "workspace:*",
+    "@noble/hashes": "1.8.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "dompurify": "^3.4.0",
@@ -24,6 +25,7 @@
     "mermaid": "^11.16.1",
     "pdfjs-dist": "6.4.299",
     "pinia": "^3.0.0",
+    "qrcode-generator": "2.0.4",
     "three": "^0.184.0",
     "vue": "^3.5.24",
     "vue-echarts": "^8.0.1",

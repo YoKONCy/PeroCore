@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 /**
  * OutlineTree.vue — 界面组件
  *
@@ -28,7 +30,7 @@ defineEmits<{ select: [nodeId: string] }>()
         <span v-if="node.level === firstLevel" class="outline-index">
           {{ String(index + 1).padStart(2, '0') }}
         </span>
-        <span>{{ node.text || '未命名章节' }}</span>
+        <span>{{ node.text || __t('apps.arca.ui', '未命名章节') }}</span>
       </button>
       <OutlineTree
         v-if="node.children.length"

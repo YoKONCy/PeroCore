@@ -1,3 +1,5 @@
+import { t as __t } from '../../i18n/index'
+import { createClientUuid } from '../../lib/clientPlatform'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type {
   PromptAssignment,
@@ -102,15 +104,29 @@ export function usePromptWorkspace() {
           promptFormat(item as PromptFramework) === formatFilter.value),
     )
   })
+  function displayBuiltinName(item?: { id: string; name: string; builtin?: boolean }): string {
+    if (!item) return ''
+    const original =
+      view.value?.defaults.documents.find((entry) => entry.id === item.id) ??
+      view.value?.defaults.frameworks.find((entry) => entry.id === item.id)
+    return item.builtin !== false && original?.name === item.name
+      ? __t('common.prompts', item.name)
+      : item.name
+  }
   const frameworkOptions = computed(() =>
     bundle.value.frameworks.map((f) => ({
-      label: `${f.name} · ${PROMPT_FORMATS.find((format) => format.value === promptFormat(f))?.label}`,
+      label: `${displayBuiltinName(f)} · ${__t('common.interface', PROMPT_FORMATS.find((format) => format.value === promptFormat(f))?.label ?? '')}`,
       value: f.id,
     })),
   )
   const sourceOptions = computed(() => [
-    { label: '内联模板', value: '' },
-    ...bundle.value.documents.map((d) => ({ label: d.name, value: d.id })),
+    {
+      get label() {
+        return __t('ui.settings', '内联模板')
+      },
+      value: '',
+    },
+    ...bundle.value.documents.map((d) => ({ label: displayBuiltinName(d), value: d.id })),
   ])
   const currentAssignment = computed(() =>
     bundle.value.assignments.find(
@@ -220,7 +236,7 @@ export function usePromptWorkspace() {
         issues.value = e.data.map((item) => ({
           level: 'error',
           source: item.source ?? item.path?.join('.') ?? 'config',
-          message: item.message ?? '配置格式无效',
+          message: item.message ?? __t('ui.settings', '配置格式无效'),
         }))
     } finally {
       busy.value = false
@@ -276,12 +292,19 @@ export function usePromptWorkspace() {
           }
           if (value.revision === view.value?.revision) {
             restore()
-            notify.toast('已恢复本地草稿', 'info')
+            notify.toast(__t('ui.settings', '已恢复本地草稿'), 'info')
           } else {
             // 并发版本冲突不自动覆盖；保留原始草稿供用户导出。
             pendingDialog.value = {
-              title: '发现本地草稿',
-              message: '服务端已有更新。是否保留本地编辑到当前草稿？发布前请比较版本。',
+              get title() {
+                return __t('ui.settings', '发现本地草稿')
+              },
+              get message() {
+                return __t(
+                  'ui.settings',
+                  '服务端已有更新。是否保留本地编辑到当前草稿？发布前请比较版本。',
+                )
+              },
               action: restore,
             }
           }
@@ -293,7 +316,7 @@ export function usePromptWorkspace() {
   }
   function create(copyCurrent = false) {
     if (!applySource()) return
-    const suffix = crypto.randomUUID().slice(0, 8)
+    const suffix = createClientUuid().slice(0, 8)
     if (section.value === 'framework') {
       const item: PromptFramework =
         copyCurrent && framework.value
@@ -337,7 +360,7 @@ export function usePromptWorkspace() {
   }): boolean {
     if (!applySource() || !options.name.trim()) return false
     const item: PromptFramework = {
-      id: `custom.framework.${crypto.randomUUID().slice(0, 8)}`,
+      id: `custom.framework.${createClientUuid().slice(0, 8)}`,
       name: options.name.trim(),
       builtin: false,
       format: options.format ?? 'custom',
@@ -378,7 +401,9 @@ export function usePromptWorkspace() {
     }
     addFramework(item, options)
     notify.toast(
-      options.scope === 'later' ? '已创建框架草稿' : '已创建并指派，发布后生效',
+      options.scope === 'later'
+        ? __t('ui.settings', '已创建框架草稿')
+        : __t('ui.settings', '已创建并指派，发布后生效'),
       'success',
     )
     return true
@@ -437,33 +462,41 @@ export function usePromptWorkspace() {
   function remove() {
     const item = record.value
     if (!item) return
-    confirm('删除模板', `删除“${item.name}”？已有引用需要同步调整。`, () => {
-      if (framework.value)
-        bundle.value.frameworks = bundle.value.frameworks.filter((f) => f.id !== item.id)
-      else bundle.value.documents = bundle.value.documents.filter((d) => d.id !== item.id)
-      setSection(section.value)
-    })
+    confirm(
+      __t('ui.settings', '删除模板'),
+      __t('ui.settings', '删除“{0}”？已有引用需要同步调整。', [item.name]),
+      () => {
+        if (framework.value)
+          bundle.value.frameworks = bundle.value.frameworks.filter((f) => f.id !== item.id)
+        else bundle.value.documents = bundle.value.documents.filter((d) => d.id !== item.id)
+        setSection(section.value)
+      },
+    )
   }
   function reset() {
     const original =
       view.value?.defaults.frameworks.find((f) => f.id === selectedId.value) ??
       view.value?.defaults.documents.find((d) => d.id === selectedId.value)
     if (!original) return
-    confirm('恢复内置', '当前条目将恢复到内置内容，发布后生效。', () => {
-      if (framework.value)
-        bundle.value.frameworks.splice(
-          bundle.value.frameworks.indexOf(framework.value),
-          1,
-          clone(original as PromptFramework),
-        )
-      else if (document.value)
-        bundle.value.documents.splice(
-          bundle.value.documents.indexOf(document.value),
-          1,
-          clone(original as PromptDocument),
-        )
-      refreshSource()
-    })
+    confirm(
+      __t('ui.settings', '恢复内置'),
+      __t('ui.settings', '当前条目将恢复到内置内容，发布后生效。'),
+      () => {
+        if (framework.value)
+          bundle.value.frameworks.splice(
+            bundle.value.frameworks.indexOf(framework.value),
+            1,
+            clone(original as PromptFramework),
+          )
+        else if (document.value)
+          bundle.value.documents.splice(
+            bundle.value.documents.indexOf(document.value),
+            1,
+            clone(original as PromptDocument),
+          )
+        refreshSource()
+      },
+    )
   }
   function addBlock() {
     const blocks = framework.value?.blocks
@@ -471,7 +504,7 @@ export function usePromptWorkspace() {
     const conversation = blocks.findIndex(
       (block) => block.kind === 'history' || block.role !== 'system',
     )
-    const blockId = `block.${crypto.randomUUID().slice(0, 8)}`
+    const blockId = `block.${createClientUuid().slice(0, 8)}`
     blocks.splice(conversation < 0 ? blocks.length : conversation, 0, {
       id: blockId,
       name: '新区块',
@@ -521,14 +554,17 @@ export function usePromptWorkspace() {
         const result = await promptApi.publish(view.value!.revision, '')
         if (result.data) accept(result.data)
       }
-      notify.toast(publish ? '已发布，下轮生效' : '草稿已保存', 'success')
+      notify.toast(
+        publish ? __t('ui.settings', '已发布，下轮生效') : __t('ui.settings', '草稿已保存'),
+        'success',
+      )
     })
   }
   async function validate() {
     if (!applySource()) return
     await action(async () => {
       issues.value = (await promptApi.validate(bundle.value)).data ?? []
-      if (!issues.value.length) notify.toast('校验通过', 'success')
+      if (!issues.value.length) notify.toast(__t('ui.settings', '校验通过'), 'success')
     })
   }
   async function renderPreview() {
@@ -558,20 +594,28 @@ export function usePromptWorkspace() {
   }
   function restoreVersion() {
     if (!historical.value) return
-    confirm('恢复版本', '将这个版本恢复到草稿，发布后生效。', () => {
-      bundle.value = clone(historical.value!)
-      mode.value = 'visual'
-      refreshSource()
-      notify.toast('已恢复到草稿', 'success')
-    })
+    confirm(
+      __t('ui.settings', '恢复版本'),
+      __t('ui.settings', '将这个版本恢复到草稿，发布后生效。'),
+      () => {
+        bundle.value = clone(historical.value!)
+        mode.value = 'visual'
+        refreshSource()
+        notify.toast(__t('ui.settings', '已恢复到草稿'), 'success')
+      },
+    )
   }
   function restoreDefaults() {
     if (!view.value) return
-    confirm('恢复内置预设', '用内置配置替换当前草稿，发布后生效。', () => {
-      bundle.value = clone(view.value!.defaults)
-      mode.value = 'visual'
-      setSection('framework')
-    })
+    confirm(
+      __t('ui.settings', '恢复内置预设'),
+      __t('ui.settings', '用内置配置替换当前草稿，发布后生效。'),
+      () => {
+        bundle.value = clone(view.value!.defaults)
+        mode.value = 'visual'
+        setSection('framework')
+      },
+    )
   }
   function exportBundle() {
     if (!applySource()) return
@@ -607,13 +651,13 @@ export function usePromptWorkspace() {
   }) {
     if (!stImport.value || !applySource()) return false
     const item = clone(stImport.value.framework)
-    item.id = `custom.st.${crypto.randomUUID()}`
+    item.id = `custom.st.${createClientUuid()}`
     addFramework(item, options)
     issues.value = stImport.value.issues
     stImportOpen.value = false
     stImport.value = null
     stImportInput = undefined
-    notify.toast('已导入草稿，发布后生效', 'success')
+    notify.toast(__t('ui.settings', '已导入草稿，发布后生效'), 'success')
     return true
   }
   async function exportStPreset() {
@@ -655,11 +699,15 @@ export function usePromptWorkspace() {
       if (!isPromptBundle(candidate)) throw new Error('不是有效的提示词配置')
       const result = await promptApi.validate(candidate)
       issues.value = result.data ?? []
-      confirm('导入配置', '替换当前草稿，发布后生效。', () => {
-        bundle.value = candidate
-        mode.value = 'visual'
-        setSection('framework')
-      })
+      confirm(
+        __t('ui.settings', '导入配置'),
+        __t('ui.settings', '替换当前草稿，发布后生效。'),
+        () => {
+          bundle.value = candidate
+          mode.value = 'visual'
+          setSection('framework')
+        },
+      )
     })
   }
   function stash() {
@@ -752,6 +800,7 @@ export function usePromptWorkspace() {
     resources,
     frameworkOptions,
     sourceOptions,
+    displayBuiltinName,
     currentAssignment,
     setSection,
     select,

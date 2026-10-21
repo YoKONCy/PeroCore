@@ -1,0 +1,14 @@
+{
+  "回答唤醒失败: ": "answered wake-up failed:",
+  "任务事件订阅者异常 ({0}): {1}": "Task event subscriber exception ({0}): {1}",
+  "后台任务已派发: id={0}, agent={1}, title=\"{2}\"": "background task has been dispatched: id={0}, agent={1}, title=\"{2}\"",
+  "后台任务提交Kernel Scheduler失败: id={0}, 原因={1}": "Failed to submit background task to Kernel Scheduler: id={0}, reason={1}",
+  "后台任务 {0} 从 checkpoint 恢复：{1} 条消息，{2} 次工具调用": "background task {0} resumed from checkpoint: {1} messages, {2} tool calls",
+  "后台任务 checkpoint 解析失败，从头开始: {0}": "background task checkpoint parsing failed, start from scratch: {0}",
+  "后台任务 {0} 在首个工具检查点前中断，将无法半程续跑": "background task {0} is interrupted before the first tool checkpoint and will not be able to continue running halfway.",
+  "后台任务执行中断: ": "Background task execution interrupted:",
+  "后台任务执行会话清理失败: id={0}, 原因={1}": "background task execution session cleanup failed: id={0}, reason={1}",
+  "后台任务已删除: id={0}": "background task deleted: id={0}",
+  "任务结果投递失败: {0}, {1}": "task result delivery failed: {0}, {1}",
+  "计划已保存，刷新通知失败: {0}": "Plan has been saved, refresh notification failed: {0}"
+}

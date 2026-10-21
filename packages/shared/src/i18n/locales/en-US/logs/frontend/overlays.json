@@ -1,0 +1,7 @@
+{
+  "打开文件失败": "Failed to open file",
+  "立绘预加载成功: {0}": "vertical painting preloaded successfully: {0}",
+  "立绘预加载失败: {0}": "vertical painting preloading failed: {0}",
+  "任务控制失败": "mission control failed",
+  "指令注入失败": "instruction injection failed\nFiles found by"
+}

@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
+import { copyClientText } from '../../lib/clientPlatform'
+
 import { nextTick, onBeforeUnmount, onDeactivated, ref, watch } from 'vue'
 import PixelIcon from '../pixel/PixelIcon.vue'
 import { useNotificationStore } from '../../stores/useNotificationStore'
@@ -36,10 +40,10 @@ async function contextMenu(event: MouseEvent) {
 async function copy() {
   close()
   try {
-    await navigator.clipboard.writeText(selection.value)
-    notifications.toast('已复制', 'success')
+    await copyClientText(selection.value)
+    notifications.toast(__t('ui.chat', '已复制'), 'success')
   } catch {
-    notifications.toast('复制失败，请重试', 'error')
+    notifications.toast(__t('ui.chat', '复制失败，请重试'), 'error')
   }
 }
 async function read() {
@@ -48,7 +52,10 @@ async function read() {
     await speech.speak(selection.value)
   } catch (error) {
     if ((error as Error).name !== 'AbortError')
-      notifications.toast(error instanceof Error ? error.message : '朗读失败', 'error')
+      notifications.toast(
+        error instanceof Error ? error.message : __t('ui.chat', '朗读失败'),
+        'error',
+      )
   }
 }
 function outside(event: PointerEvent) {
@@ -111,7 +118,7 @@ onDeactivated(close)
     <slot />
     <button v-if="speech.busy.value" type="button" class="selection-stop" @click="speech.stop">
       <PixelIcon name="square" size="xs" />
-      停止朗读
+      {{ __t('ui.chat', '停止朗读') }}
     </button>
     <Teleport to="body">
       <Transition name="reply-menu">
@@ -121,18 +128,18 @@ onDeactivated(close)
           class="reply-selection-menu"
           :style="position"
           role="menu"
-          aria-label="选中文字"
+          :aria-label="__t('ui.chat', '选中文字')"
           tabindex="-1"
           @pointerdown.prevent
           @keydown="key"
         >
           <button type="button" role="menuitem" @click="copy">
             <PixelIcon name="copy" size="xs" />
-            复制
+            {{ __t('ui.chat', '复制') }}
           </button>
           <button type="button" role="menuitem" @click="read">
             <PixelIcon name="volume-2" size="xs" />
-            朗读
+            {{ __t('ui.chat', '朗读') }}
           </button>
         </div>
       </Transition>

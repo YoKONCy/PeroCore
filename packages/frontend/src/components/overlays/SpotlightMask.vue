@@ -27,36 +27,50 @@ interface SpotRect {
 }
 
 const rect = ref<SpotRect | null>(null)
+let timer: ReturnType<typeof setTimeout> | undefined
+let resizeObserver: ResizeObserver | undefined
+let observed: Element | null = null
 
 /** 计算目标元素位置 */
 function updateRect() {
   if (!props.selector) {
     rect.value = null
+    resizeObserver?.disconnect()
+    observed = null
     return
   }
   const el = document.querySelector(props.selector)
   if (el) {
+    if (el !== observed) {
+      resizeObserver?.disconnect()
+      resizeObserver?.observe(el)
+      observed = el
+    }
     const r = el.getBoundingClientRect()
-    rect.value = { x: r.x, y: r.y, width: r.width, height: r.height }
+    rect.value = r.width && r.height ? { x: r.x, y: r.y, width: r.width, height: r.height } : null
   } else {
     rect.value = null
   }
 }
 
 function handleLayoutChange() {
+  clearTimeout(timer)
   void nextTick(updateRect)
-  window.setTimeout(updateRect, 80)
+  timer = setTimeout(updateRect, 80)
 }
 
 watch(() => props.selector, handleLayoutChange)
 
 onMounted(() => {
+  if (typeof ResizeObserver !== 'undefined') resizeObserver = new ResizeObserver(updateRect)
   updateRect()
   window.addEventListener('resize', updateRect)
   window.addEventListener('scroll', updateRect, true)
   window.addEventListener('onboarding-layout-change', handleLayoutChange)
 })
 onUnmounted(() => {
+  clearTimeout(timer)
+  resizeObserver?.disconnect()
   window.removeEventListener('resize', updateRect)
   window.removeEventListener('scroll', updateRect, true)
   window.removeEventListener('onboarding-layout-change', handleLayoutChange)

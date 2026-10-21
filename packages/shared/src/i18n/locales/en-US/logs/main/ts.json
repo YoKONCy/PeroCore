@@ -1,0 +1,8 @@
+{
+  "infOS 后端已就绪 → http://{0}:{1}": "infOS backend is ready → http://{0}:{1}",
+  "启动失败: {0}": "startup failed: {0}",
+  "🚀 萌动链接：PeroperoChat!": "🚀 Adorable link: PeroperoChat!",
+  "📅 时间: {0}": "📅 Time: {0}",
+  "📂 数据目录: {0}": "📂 Data directory: {0}",
+  "💻 平台: {0} / Node {1}": "💻 Platform: {0} / Node {1}"
+}

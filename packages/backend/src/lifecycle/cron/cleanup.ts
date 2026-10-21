@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * cleanup — TTS 临时文件 + 过期临时文件清理
  *
@@ -39,7 +40,7 @@ export async function runCleanup(tempDir: string, maxAgeMs = MAX_AGE_MS): Promis
     } catch (err) {
       // 目录不存在等情况，静默跳过
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-        logger.warn(`清理目录失败: ${dir} — ${err}`)
+        logger.warn(__t('logs.lifecycle', '清理目录失败: {0} — {1}', [dir, err]))
         result.errors++
       }
     }
@@ -48,7 +49,11 @@ export async function runCleanup(tempDir: string, maxAgeMs = MAX_AGE_MS): Promis
   if (result.deleted > 0) {
     const mbFreed = (result.freedBytes / 1024 / 1024).toFixed(1)
     logger.info(
-      `临时文件清理完成: 删除 ${result.deleted}/${result.scanned} 文件, 释放 ${mbFreed}MB`,
+      __t('logs.lifecycle', '临时文件清理完成: 删除 {0}/{1} 文件, 释放 {2}MB', [
+        result.deleted,
+        result.scanned,
+        mbFreed,
+      ]),
     )
   }
 
@@ -73,7 +78,7 @@ async function cleanDirectory(dir: string, cutoff: number, result: CleanupResult
         result.freedBytes += stat.size
       }
     } catch (err) {
-      logger.debug(`文件清理失败: ${filePath} — ${err}`)
+      logger.debug(__t('logs.lifecycle', '文件清理失败: {0} — {1}', [filePath, err]))
       result.errors++
     }
   }

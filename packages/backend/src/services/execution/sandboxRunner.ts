@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * sandboxRunner — 领域服务
  *
@@ -315,7 +316,9 @@ export class LocalPolicyRunner implements SandboxRunner {
     const abort = () => {
       const cleanup = this.terminateProcess(id, true)
       trackCancellationCleanup(signal, cleanup)
-      void cleanup.catch((error) => logger.error(`取消后回收进程失败: ${id}，${String(error)}`))
+      void cleanup.catch((error) =>
+        logger.error(__t('logs.execution', '取消后回收进程失败: {0}，{1}', [id, String(error)])),
+      )
     }
     const entry = this.processes.get(id)
     if (entry) entry.disposeAbort = () => signal.removeEventListener('abort', abort)

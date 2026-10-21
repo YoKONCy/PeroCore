@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import type { PlanStep, TaskPlan, UpdatePlanInput } from '@infos/shared'
@@ -268,7 +269,7 @@ export class TaskPlanService {
     try {
       await this.notify(agentId, threadId)
     } catch (error) {
-      logger.warn(`计划已保存，刷新通知失败: ${error}`)
+      logger.warn(__t('logs.task', '计划已保存，刷新通知失败: {0}', [error]))
     }
   }
 }

@@ -192,6 +192,7 @@ export type {
   SocialMessageRecord,
   SocialStoragePort,
   SocialTurnRecord,
+  SocialTurnListItem,
   SocialSyncCursorRecord,
 } from './types'
 
@@ -393,14 +394,18 @@ export * from './types/integrations.types'
 export * from './agentInput'
 export * from './types/desktopAutomation'
 export * from './resources'
+export * from './documents'
 export * from './taskPlan'
 export * from './workspacePreview'
 export * from './tokenUsage'
+export * from './proactive'
 export * from './fileMutationPreview'
 export * from './executionMode'
 export * from './completionAlerts'
+export * from './notifications'
 export * from './memorySettings'
 export * from './reactLimits'
+export * from './modelReasoning'
 export * from './electronEnvironment'
 export * from './types/promptWorkspace.types'
 export * from './promptFormats'
@@ -419,3 +424,9 @@ export type {
   DesktopToastSnapshot,
   DesktopToastAction,
 } from './types/desktopToasts'
+export type {
+  QueuedConversationInput,
+  ConversationQueueItem,
+  ConversationQueueSnapshot,
+} from './conversationQueue'
+export { WHOLESOME_MODE_KEY } from './contentMode'

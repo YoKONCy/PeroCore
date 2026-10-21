@@ -1,0 +1,8 @@
+{
+  "正在注册 IPC 通道...": "is registering IPC channel...",
+  "IPC 通道注册完成": "IPC channel registration completed",
+  "resize-pet-window 失败: {0}": "resize-pet-window failed: {0}",
+  "start-backend 已废弃：Daemon 独立运行，无需 Electron 启动": "start-backend Deprecated: Daemon runs independently without Electron startup",
+  "stop-backend 已废弃：Daemon 生命周期由自身管理": "stop-backend Deprecated: Daemon life cycle is managed by itself",
+  "管理页入口初始化失败": "Management page entrance failed to initialize"
+}

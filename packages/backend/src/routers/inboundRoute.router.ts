@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * InboundRoute Router — 入站路由表管理 API
  *
@@ -68,7 +69,7 @@ export function createInboundRouteRouter(ctx: AppContext) {
   // GET /api/inbound-routes — 列出所有路由
   router.get('/', async (c) => {
     const routes = await ctx.inboundRouteService.list()
-    return c.json({ code: 'OK', message: '获取成功', data: routes })
+    return c.json({ code: 'OK', message: __t('server.routers', '获取成功'), data: routes })
   })
 
   // GET /api/inbound-routes/resolve — 按 (source, identifier) 查询路由
@@ -82,7 +83,7 @@ export function createInboundRouteRouter(ctx: AppContext) {
       })
     }
     const resolved = await ctx.inboundRouteService.resolve(source, identifier)
-    return c.json({ code: 'OK', message: '路由命中', data: resolved })
+    return c.json({ code: 'OK', message: __t('server.routers', '路由命中'), data: resolved })
   })
 
   // POST /api/inbound-routes — 创建路由
@@ -96,7 +97,10 @@ export function createInboundRouteRouter(ctx: AppContext) {
       threadId: body.threadId ?? null,
       config: body.config,
     })
-    return c.json({ code: 'CREATED', message: '路由创建成功', data: route }, 201)
+    return c.json(
+      { code: 'CREATED', message: __t('server.routers', '路由创建成功'), data: route },
+      201,
+    )
   })
 
   // PUT /api/inbound-routes/:id — 更新路由
@@ -104,14 +108,14 @@ export function createInboundRouteRouter(ctx: AppContext) {
     const id = c.req.param('id')
     const body = c.req.valid('json')
     const updated = await ctx.inboundRouteService.update(id, body)
-    return c.json({ code: 'OK', message: '路由更新成功', data: updated })
+    return c.json({ code: 'OK', message: __t('server.routers', '路由更新成功'), data: updated })
   })
 
   // DELETE /api/inbound-routes/:id — 删除路由
   router.delete('/:id', async (c) => {
     const id = c.req.param('id')
     await ctx.inboundRouteService.delete(id)
-    return c.json({ code: 'OK', message: `路由 "${id}" 已删除` })
+    return c.json({ code: 'OK', message: __t('server.routers', '路由 "{0}" 已删除', [id]) })
   })
 
   return router

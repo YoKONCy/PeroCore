@@ -1,4 +1,10 @@
 <script setup lang="ts">
+import { getDisplayLocale } from '../../i18n/index'
+
+import { t as __t } from '../../i18n/index'
+
+import { copyClientText } from '../../lib/clientPlatform'
+
 /**
  * MessageBubble — 单条消息气泡
  *
@@ -96,9 +102,8 @@ const generationHint = computed(() => {
   const stats = generationStats.value
   if (!stats) return ''
   return (
-    `累计 ${stats.modelCalls} 次主模型调用，包含正文和工具参数，不含已上报的思考 Token。` +
-    '平均速率按模型请求累计耗时计算，包含首字等待与思考，不计工具执行和用户确认等待。' +
-    (stats.estimated ? '部分调用未回传用量，使用本地估算。' : '')
+    __t('ui.chat', '{0} 次模型调用；速率按模型耗时计算。', [stats.modelCalls]) +
+    (stats.estimated ? __t('ui.chat', '含估算用量。') : '')
   )
 })
 const previewImageUrl = ref<string | null>(null)
@@ -124,7 +129,7 @@ const thinkingSections = computed(() =>
 
 async function copyThinking() {
   if (!props.message.thinkingContent) return
-  await navigator.clipboard.writeText(props.message.thinkingContent)
+  await copyClientText(props.message.thinkingContent)
 }
 
 function formatTime(ts?: number): string {
@@ -156,10 +161,14 @@ function formatTime(ts?: number): string {
       </header>
       <div class="msg-narration-content">
         <ConversationSurface v-if="message.surface" :surface="message.surface" />
-        <span v-else>消息 Surface 不可用</span>
+        <span v-else>{{ __t('ui.chat', '消息 Surface 不可用') }}</span>
       </div>
       <div class="msg-narration-actions">
-        <button class="msg-action-btn" title="复制" @click="emit('copy', message.content)">
+        <button
+          class="msg-action-btn"
+          :title="__t('ui.chat', '复制')"
+          @click="emit('copy', message.content)"
+        >
           <PixelIcon name="copy" size="xs" />
         </button>
         <button
@@ -183,9 +192,9 @@ function formatTime(ts?: number): string {
   >
     <div :class="['msg-system-pill', { 'msg-image-transcription': message.imageTranscription }]">
       <PixelIcon :name="message.imageTranscription ? 'image' : 'bot'" size="xs" />
-      <strong>{{ message.imageTranscription ? '图片理解记录' : agentName }}</strong>
+      <strong>{{ message.imageTranscription ? __t('ui.chat', '图片理解记录') : agentName }}</strong>
       <ConversationSurface v-if="message.surface" :surface="message.surface" />
-      <span v-else>消息 Surface 不可用</span>
+      <span v-else>{{ __t('ui.chat', '消息 Surface 不可用') }}</span>
     </div>
   </div>
 
@@ -204,22 +213,26 @@ function formatTime(ts?: number): string {
           :surface="message.surface"
           display-mode="content"
         />
-        <span v-else>消息 Surface 不可用</span>
+        <span v-else>{{ __t('ui.chat', '消息 Surface 不可用') }}</span>
         <span v-if="message.timestamp" class="msg-user-time">
           {{ formatTime(message.timestamp) }}
         </span>
       </div>
-      <div v-if="userImages.length" class="msg-user-images" aria-label="图片附件">
+      <div
+        v-if="userImages.length"
+        class="msg-user-images"
+        :aria-label="__t('ui.chat', '图片附件')"
+      >
         <button
           v-for="(image, index) in userImages"
           :key="image.id"
           type="button"
           class="msg-user-image-note"
           :class="`msg-user-image-note--${index % 4}`"
-          aria-label="查看原图"
+          :aria-label="__t('ui.chat', '查看原图')"
           @click="previewImageUrl = attachmentsApi.contentUrl(image.id)"
         >
-          <img :src="attachmentsApi.contentUrl(image.id)" alt="用户发送的图片" />
+          <img :src="attachmentsApi.contentUrl(image.id)" :alt="__t('ui.chat', '用户发送的图片')" />
         </button>
       </div>
       <span v-if="message.timestamp && !userHasBubbleContent" class="msg-user-image-time">
@@ -231,19 +244,27 @@ function formatTime(ts?: number): string {
           class="msg-image-preview"
           role="dialog"
           aria-modal="true"
-          aria-label="图片预览"
+          :aria-label="__t('ui.chat', '图片预览')"
           @click.self="previewImageUrl = null"
         >
-          <button type="button" aria-label="关闭图片预览" @click="previewImageUrl = null">
+          <button
+            type="button"
+            :aria-label="__t('ui.chat', '关闭图片预览')"
+            @click="previewImageUrl = null"
+          >
             <PixelIcon name="close" size="sm" />
           </button>
-          <img :src="previewImageUrl" alt="用户发送的图片原图" />
+          <img :src="previewImageUrl" :alt="__t('ui.chat', '用户发送的图片原图')" />
         </div>
       </Teleport>
 
       <!-- 悬浮操作：hover 时浮在气泡右下，不占布局高度 -->
       <div class="msg-actions msg-user-actions">
-        <button class="msg-action-btn" title="复制" @click="emit('copy', message.content)">
+        <button
+          class="msg-action-btn"
+          :title="__t('ui.chat', '复制')"
+          @click="emit('copy', message.content)"
+        >
           <PixelIcon name="copy" size="xs" />
         </button>
         <button
@@ -295,7 +316,11 @@ function formatTime(ts?: number): string {
             v-if="message.role === 'assistant' && message.spokenReply && !isStreaming"
             class="msg-action-btn"
             :class="{ 'msg-action-btn-active': props.playingMsgId === message.id }"
-            :title="props.playingMsgId === message.id ? '停止播放' : '播放口语答复'"
+            :title="
+              props.playingMsgId === message.id
+                ? __t('ui.chat', '停止播放')
+                : __t('ui.chat', '播放口语答复')
+            "
             @click="emit('ttsPlay', message)"
           >
             <PixelIcon
@@ -312,7 +337,11 @@ function formatTime(ts?: number): string {
               "
             />
           </button>
-          <button class="msg-action-btn" title="复制" @click="emit('copy', message.content)">
+          <button
+            class="msg-action-btn"
+            :title="__t('ui.chat', '复制')"
+            @click="emit('copy', message.content)"
+          >
             <PixelIcon name="copy" size="xs" />
           </button>
           <button
@@ -338,11 +367,11 @@ function formatTime(ts?: number): string {
         v-if="message.thinkingContent"
         class="msg-thinking-toggle"
         :class="{ 'msg-thinking-toggle--active': isThinkingExpanded }"
-        :title="isThinkingExpanded ? '收起碎碎念' : '展开碎碎念'"
+        :title="isThinkingExpanded ? __t('ui.chat', '收起碎碎念') : __t('ui.chat', '展开碎碎念')"
         @click="isThinkingExpanded = !isThinkingExpanded"
       >
         <PixelIcon name="brain" size="xs" />
-        <span>碎碎念</span>
+        <span>{{ __t('ui.chat', '碎碎念') }}</span>
         <PixelIcon :name="isThinkingExpanded ? 'chevron-up' : 'chevron-down'" size="xs" />
       </button>
 
@@ -353,9 +382,9 @@ function formatTime(ts?: number): string {
             <span>THINK TRACE</span>
             <small>LOCAL ONLY</small>
           </div>
-          <button type="button" title="复制碎碎念" @click="copyThinking">
+          <button type="button" :title="__t('ui.chat', '复制碎碎念')" @click="copyThinking">
             <PixelIcon name="copy" size="xs" />
-            复制
+            {{ __t('ui.chat', '复制') }}
           </button>
         </div>
         <div class="msg-thinking-timeline">
@@ -389,19 +418,19 @@ function formatTime(ts?: number): string {
         <!-- Conversation Surface 是助手消息唯一的可见内容来源。 -->
         <ConversationSurface v-if="message.surface" :surface="message.surface" />
         <ThinkingIndicator v-else-if="isStreaming" :name="agentName" :label="progressLabel" />
-        <div v-else class="msg-surface-missing">消息 Surface 不可用</div>
+        <div v-else class="msg-surface-missing">{{ __t('ui.chat', '消息 Surface 不可用') }}</div>
       </ReplySelection>
       <Transition name="generation-stats">
         <div
           v-if="!isStreaming && message.surface?.state === 'committed' && generationStats"
           class="msg-generation-stats"
           :title="generationHint"
-          aria-label="本次对话输出统计"
+          :aria-label="__t('ui.chat', '本次对话输出统计')"
         >
           <span class="msg-generation-stats__marker" aria-hidden="true" />
           <span>
-            {{ generationStats.estimated ? '约 ' : ''
-            }}{{ generationStats.outputTokens.toLocaleString('zh-CN') }}
+            {{ generationStats.estimated ? __t('ui.chat', '约 ') : ''
+            }}{{ generationStats.outputTokens.toLocaleString(getDisplayLocale()) }}
             <small>Token</small>
           </span>
           <span class="msg-generation-stats__divider" aria-hidden="true">·</span>

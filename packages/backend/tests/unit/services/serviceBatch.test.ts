@@ -58,7 +58,10 @@ function createModelService(models = [createModel()]) {
       }),
     ),
   }
-  const registry = { invalidateCache: vi.fn() }
+  const registry = {
+    invalidateCache: vi.fn(),
+    getById: vi.fn((id: number) => Promise.resolve(store.get(id) ?? null)),
+  }
   return {
     service: new ModelService(repo as never, llmService as never, registry as never),
     repo,
@@ -74,7 +77,7 @@ describe('NapCat 消息解析器', () => {
 
     const result = cleanCQCodes(content)
 
-    expect(result).toBe('你好[猫猫][文件: 报告.pdf][表情]@主人')
+    expect(result).toBe('你好[猫猫][文件: 报告.pdf][QQ表情:1]@主人')
   })
 
   it('应当提取附件并判断是否提到了机器人', () => {
@@ -102,7 +105,7 @@ describe('NapCat 消息解析器', () => {
       { type: 'text', data: { text: '你好' } },
       {
         type: 'image',
-        data: { file: 'file:///C:/sticker/开心.png', subType: 1, summary: '[表情]' },
+        data: { file: 'file:///C:/sticker/开心.png', sub_type: 1, summary: '[表情]' },
       },
       { type: 'image', data: { file: 'https://example.com/a.jpg' } },
     ])
@@ -157,7 +160,7 @@ describe('ModelService', () => {
   })
 
   it('应当列出远程模型并测试模型连通性', async () => {
-    const { service, llmService } = createModelService()
+    const { service, llmService, registry } = createModelService()
 
     await expect(
       service.listRemoteModels({ provider: 'openai', apiKey: 'key', apiBase: 'base' }),
@@ -174,12 +177,12 @@ describe('ModelService', () => {
       expect.objectContaining({
         provider: 'openai',
         modelId: 'gpt-4o',
-        temperature: 0,
-        maxTokens: 10,
+        fallbackModels: [],
       }),
       [expect.objectContaining({ role: 'user', content: expect.any(String) })],
     )
     expect(result).toMatchObject({ success: true })
+    expect(registry.getById).toHaveBeenCalledWith(1)
   })
 })
 

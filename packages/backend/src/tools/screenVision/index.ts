@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * screenVision — 屏幕截图工具
  *
@@ -66,7 +67,7 @@ export const takeScreenshotTool: BuiltinTool = {
         if (capture) {
           screenshots.push(capture)
         } else {
-          logger.warn(`第 ${i + 1} 张截图获取失败`)
+          logger.warn(__t('logs.tools', '第 {0} 张截图获取失败', [i + 1]))
         }
 
         // 多张截图之间间隔 500ms (捕捉动态变化)
@@ -79,7 +80,7 @@ export const takeScreenshotTool: BuiltinTool = {
         return JSON.stringify({ error: '截图获取失败，请稍后重试' })
       }
 
-      logger.info(`已获取 ${screenshots.length} 张截图`)
+      logger.info(__t('logs.tools', '已获取 {0} 张截图', [screenshots.length]))
 
       return JSON.stringify({
         success: true,
@@ -88,11 +89,11 @@ export const takeScreenshotTool: BuiltinTool = {
           dataUri: `data:image/png;base64,${capture.base64}`,
           ...(capture.coordinateContext ? { coordinateContext: capture.coordinateContext } : {}),
         })),
-        message: `已获取 ${screenshots.length} 张屏幕截图`,
+        message: __t('server.tools', '已获取 {0} 张屏幕截图', [screenshots.length]),
       })
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err)
-      logger.error(`截图失败: ${errMsg}`)
+      logger.error(__t('logs.tools', '截图失败: {0}', [errMsg]))
       return JSON.stringify({ error: `截图失败: ${errMsg}` })
     }
   },

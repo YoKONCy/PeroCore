@@ -98,6 +98,18 @@
 .project-canvas-open > span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
 .project-canvas-row.current .project-canvas-open { color: var(--accent); }
 .project-canvas-row .pictoria-select.icon-only { width: 28px; min-height: 28px; justify-content: center; padding: 5px; background: transparent; border-color: transparent; box-shadow: none; color: var(--faint); }
+.project-context-menu { position: fixed; z-index: 510; width: 260px; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow-y: auto; padding: 8px; border-radius: 10px; color: var(--text); }
+.project-context-action { display: flex; align-items: center; gap: 9px; width: 100%; padding: 10px; border-radius: 6px; text-align: left; color: var(--text); font-size: 12px; }
+.project-context-delete { color: var(--danger); }
+.project-context-action:hover:not(:disabled), .project-context-action:focus-visible { background: var(--hover); }
+.project-context-menu > strong { display: block; padding: 5px; font-size: 12px; overflow-wrap: anywhere; }
+.project-context-menu > p { margin: 5px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.project-context-menu > footer, .project-rename-form > footer { display: flex; justify-content: flex-end; gap: 16px; padding: 10px 5px 5px; }
+.project-context-menu > footer .danger-button { color: var(--danger); }
+.project-rename-form { padding: 5px; font-size: 12px; }
+.project-rename-form label { display: grid; gap: 10px; }
+.project-rename-form input { width: 100%; min-width: 0; padding: 8px; border: 1px solid var(--line-bright); border-radius: 6px; background: var(--field); outline: 0; }
+.project-rename-form input:focus { border-color: var(--accent); }
 .pictoria-select.icon-only .select-chevron { display: none; }
 .project-empty-add { display: flex; gap: 7px; align-items: center; color: var(--faint); padding: 10px 24px; font-size: 11px; }
 .breadcrumb-divider { font-style: normal; color: var(--faint); opacity: .7; }

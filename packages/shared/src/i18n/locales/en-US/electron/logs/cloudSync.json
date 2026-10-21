@@ -1,0 +1,6 @@
+{
+  "Steam Cloud API 不可用": "Steam Cloud API is not available",
+  "写入 Steam Cloud 失败: {0} — {1}": "failed to write to Steam Cloud: {0} — {1}",
+  "读取 Steam Cloud 失败: {0} — {1}": "Failed to read Steam Cloud: {0} — {1}",
+  "已清除 {0} 个云端快照文件": "{0} cloud snapshot files cleared"
+}

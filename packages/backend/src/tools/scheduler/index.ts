@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * scheduler — 提醒/日程管理工具
  *
@@ -60,6 +61,8 @@ export const setReminderTool: BuiltinTool = {
       agentId: ctx.agentId,
       threadId: ctx.threadId,
       sourceExecutionId: ctx.executionId,
+      repeatIntervalMinutes:
+        typeof args.repeat_interval_minutes === 'number' ? args.repeat_interval_minutes : undefined,
     })
 
     return JSON.stringify({
@@ -69,8 +72,14 @@ export const setReminderTool: BuiltinTool = {
         type: reminder.type,
         time: reminder.time,
         content: reminder.content,
+        status: reminder.status,
+        repeatIntervalMinutes: reminder.repeatIntervalMinutes,
       },
-      message: `已设置${type === 'reminder' ? '提醒' : type === 'topic' ? '话题' : '反应'}: "${content}" → ${time}`,
+      message: __t('server.tools', '已设置{0}: "{1}" → {2}', [
+        type === 'reminder' ? '提醒' : type === 'topic' ? '话题' : '反应',
+        content,
+        time,
+      ]),
     })
   },
 }
@@ -88,7 +97,7 @@ export const listRemindersTool: BuiltinTool = {
     const reminders = await _schedulerService.listPending(ctx.agentId)
 
     if (reminders.length === 0) {
-      return JSON.stringify({ items: [], message: '当前没有待触发的提醒哦' })
+      return JSON.stringify({ items: [], message: __t('server.tools', '当前没有待触发的提醒哦') })
     }
 
     return JSON.stringify({
@@ -97,9 +106,13 @@ export const listRemindersTool: BuiltinTool = {
         type: r.type,
         time: r.time,
         content: r.content,
+        status: r.status,
+        repeatIntervalMinutes: r.repeatIntervalMinutes,
+        threadId: r.threadId,
+        lastError: r.lastError,
       })),
       total: reminders.length,
-      message: `共有 ${reminders.length} 个待触发的提醒`,
+      message: __t('server.tools', '共有 {0} 个待触发的提醒', [reminders.length]),
     })
   },
 }
@@ -123,7 +136,7 @@ export const cancelReminderTool: BuiltinTool = {
 
     return JSON.stringify({
       success: true,
-      message: `提醒 #${id} 已取消`,
+      message: __t('server.tools', '提醒 #{0} 已取消', [id]),
     })
   },
 }
@@ -152,7 +165,7 @@ export const scheduleFollowUpTool: BuiltinTool = {
     return JSON.stringify({
       success: true,
       item,
-      message: '已安排一次性跟进，可在任务中心查看和取消',
+      message: __t('server.tools', '已安排一次性跟进，可在任务中心查看和取消'),
     })
   },
 }
@@ -171,6 +184,10 @@ export const suggestNextStepTool: BuiltinTool = {
       reason: String(args.reason ?? ''),
       sourceExecutionId: ctx.executionId,
     })
-    return JSON.stringify({ success: true, item, message: '建议已保存，等待用户采纳或忽略' })
+    return JSON.stringify({
+      success: true,
+      item,
+      message: __t('server.tools', '建议已保存，等待用户采纳或忽略'),
+    })
   },
 }

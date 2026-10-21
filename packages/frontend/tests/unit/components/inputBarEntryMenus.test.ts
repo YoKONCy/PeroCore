@@ -79,7 +79,7 @@ async function input(compact = false) {
   wrapper = mount(InputBar, {
     props: { compact },
     attachTo: document.body,
-    global: { stubs: { PixelIcon: true } },
+    global: { stubs: { PixelIcon: true, ThreadModelControls: true } },
   })
   await flushPromises()
   return wrapper

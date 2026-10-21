@@ -1,3 +1,4 @@
+import { t as __t } from './i18n'
 /**
  * Arca Application Manifest
  *
@@ -9,11 +10,11 @@ export const arcaManifest = {
   manifestVersion: 1,
   id: 'infos.arca',
   name: 'Arca',
-  description: '自治式办公套件与语义文稿工作站',
+  description: __t('apps.arca.ui', '自治式办公套件与语义文稿工作站'),
   adapterVersion: '1.0.0',
   protocolVersion: 1,
   application: {
-    versions: '>=0.9.4 <1.0.0',
+    versions: '>=0.9.5 <1.0.0',
     transports: ['websocket'],
   },
   backend: { entry: '@infos/arca' },
@@ -21,7 +22,7 @@ export const arcaManifest = {
     entry: '@infos/arca/client',
     surfaces: [
       { surfaceId: 'workbench', title: 'Arca', slot: 'main.tab' },
-      { surfaceId: 'settings', title: 'Arca设置', slot: 'settings' },
+      { surfaceId: 'settings', title: __t('apps.arca.ui', 'Arca设置'), slot: 'settings' },
     ],
   },
   endpoints: [
@@ -92,14 +93,14 @@ export const arcaManifest = {
         'collaboration.get',
         'collaboration.revoke',
       ],
-      description: '提供语义文档读取、上下文区域与待审ChangeSet能力',
+      description: __t('apps.arca.ui', '提供语义文档读取、上下文区域与待审ChangeSet能力'),
     },
     {
       capabilityType: 'application.task',
       contractVersion: '1.0',
       endpointId: 'collaboration',
       operations: ['task.submit', 'task.get', 'task.list', 'task.cancel', 'task.retry'],
-      description: '提供Arca文档协作任务生命周期',
+      description: __t('apps.arca.ui', '提供Arca文档协作任务生命周期'),
     },
   ],
   toolProjections: [
@@ -111,8 +112,10 @@ export const arcaManifest = {
       availability: 'while_ready',
       invocation: 'invoke',
       requiresApproval: true,
-      description:
+      description: __t(
+        'apps.arca.ui',
         '为当前角色发起有明确文稿范围的 Arca 协作任务，修改先生成待审提案，成果回到原对话。',
+      ),
       parameters: {
         type: 'object',
         properties: {
@@ -124,8 +127,8 @@ export const arcaManifest = {
         required: ['documentId', 'instruction', 'scope'],
       },
       display: {
-        label: '发起文稿协作',
-        description: '提交文稿协作任务',
+        label: __t('apps.arca.ui', '发起文稿协作'),
+        description: __t('apps.arca.ui', '提交文稿协作任务'),
         icon: 'file',
         color: 'purple',
       },
@@ -137,15 +140,15 @@ export const arcaManifest = {
       audience: 'host_agent',
       availability: 'while_ready',
       invocation: 'invoke',
-      description: '读取Arca权威文档当前Snapshot与语义节点。',
+      description: __t('apps.arca.ui', '读取Arca权威文档当前Snapshot与语义节点。'),
       parameters: {
         type: 'object',
         properties: { documentId: { type: 'string' } },
         required: ['documentId'],
       },
       display: {
-        label: '查看Arca文档',
-        description: '读取在线Arca中的文档结构。',
+        label: __t('apps.arca.ui', '查看Arca文档'),
+        description: __t('apps.arca.ui', '读取在线Arca中的文档结构。'),
         icon: 'file',
         color: 'purple',
       },
@@ -157,15 +160,18 @@ export const arcaManifest = {
       audience: 'host_agent',
       availability: 'while_ready',
       invocation: 'invoke',
-      description: '读取Arca为Agent生成的权威上下文区域，可按当前语义节点聚焦。',
+      description: __t(
+        'apps.arca.ui',
+        '读取Arca为Agent生成的权威上下文区域，可按当前语义节点聚焦。',
+      ),
       parameters: {
         type: 'object',
         properties: { documentId: { type: 'string' }, currentNodeId: { type: 'string' } },
         required: ['documentId'],
       },
       display: {
-        label: '读取Arca上下文',
-        description: '读取在线Arca提供的语义上下文。',
+        label: __t('apps.arca.ui', '读取Arca上下文'),
+        description: __t('apps.arca.ui', '读取在线Arca提供的语义上下文。'),
         icon: 'book',
         color: 'purple',
       },
@@ -177,7 +183,7 @@ export const arcaManifest = {
       audience: 'host_agent',
       availability: 'while_ready',
       invocation: 'invoke',
-      description: '向Arca提交待人类审阅的语义ChangeSet。不得直接覆盖文档。',
+      description: __t('apps.arca.ui', '向Arca提交待人类审阅的语义ChangeSet。不得直接覆盖文档。'),
       parameters: {
         type: 'object',
         properties: {
@@ -192,8 +198,8 @@ export const arcaManifest = {
         required: ['documentId', 'baseRevisionId', 'intent', 'explanation', 'risk', 'operations'],
       },
       display: {
-        label: '提交Arca变更',
-        description: '向在线Arca提交待审文档变更。',
+        label: __t('apps.arca.ui', '提交Arca变更'),
+        description: __t('apps.arca.ui', '向在线Arca提交待审文档变更。'),
         icon: 'edit',
         color: 'pink',
       },
@@ -206,15 +212,18 @@ export const arcaManifest = {
       audience: 'host_agent',
       availability: 'while_ready',
       invocation: 'invoke',
-      description: '验证已提交ChangeSet的Revision、Generation与Policy，不会提交文档。',
+      description: __t(
+        'apps.arca.ui',
+        '验证已提交ChangeSet的Revision、Generation与Policy，不会提交文档。',
+      ),
       parameters: {
         type: 'object',
         properties: { changeSetId: { type: 'string' } },
         required: ['changeSetId'],
       },
       display: {
-        label: '验证Arca变更',
-        description: '验证在线Arca中的待审变更。',
+        label: __t('apps.arca.ui', '验证Arca变更'),
+        description: __t('apps.arca.ui', '验证在线Arca中的待审变更。'),
         icon: 'check',
         color: 'purple',
       },

@@ -1,0 +1,14 @@
+{
+  "正在停止本模块拉起的 Daemon...": "is stopping the Daemon started by this module...",
+  "开发模式，跳过内置 Daemon 拉起（:{0} 未就绪，请运行 dev:daemon）": "development mode, skips the built-in Daemon startup (:{0} is not ready, please run dev:daemon)",
+  "已尝试过拉起内置 Daemon，等待其就绪...": "has tried pulling up the built-in Daemon and waiting for it to be ready...",
+  "{0}，桌面能力将不可用": "{0}, desktop capabilities will not be available",
+  "打包版拉起内置 Daemon: {0}": "packaged version launches built-in Daemon: {0}",
+  "  数据目录: {0}": "data directory: {0}",
+  "  后端根:   {0}": "backend root: {0}",
+  "  Workshop: {0} 个订阅目录": "Workshop: {0} subscription directories",
+  "内置 Daemon 启动失败: {0}": "Built-in Daemon failed to start: {0}",
+  "内置 Daemon 退出: code={0}, signal={1}；启动日志: {2}": "built-in Daemon exit: code={0}, signal={1}; startup log: {2}",
+  "内置 Daemon 已就绪 → :{0}": "built-in Daemon is ready → :{0}",
+  "内置 Daemon 启动超时（:{0}），桌面能力可能暂不可用": "built-in Daemon startup timeout (:{0}), desktop capabilities may be temporarily unavailable"
+}

@@ -1,3 +1,4 @@
+import { t as __t } from '../../i18n/index'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { DesktopTab, DesktopTabsState } from '@infos/shared'
 import { invoke, isElectron, listen } from '../../utils/ipcAdapter'
@@ -185,7 +186,11 @@ export function useDesktopTabs() {
       await request('desktop-tabs:get-state')
       scheduleLayout()
     } catch (error) {
-      if (!disposed) notification.toast(`桌面标签初始化失败：${String(error)}`, 'error')
+      if (!disposed)
+        notification.toast(
+          __t('ui.navigation', '桌面标签初始化失败：{0}', [String(error)]),
+          'error',
+        )
     }
   })
 
@@ -243,7 +248,9 @@ export function useDesktopTabs() {
     if (appId !== 'infos.tarot' && (!existing || existing.loading || existing.error))
       openingApplication.value = {
         id: appId,
-        title: state.value.applications.find((app) => app.id === appId)?.title ?? '应用',
+        title:
+          state.value.applications.find((app) => app.id === appId)?.title ??
+          __t('ui.navigation', '应用'),
       }
     try {
       if (appId === 'infos.tarot') {

@@ -1,3 +1,4 @@
+import { t as __t } from '../i18n/index'
 /**
  * Vue Router 配置
  *
@@ -34,7 +35,11 @@ const routes: RouteRecordRaw[] = [
         path: '/launcher',
         name: 'Launcher',
         component: () => import('@/views/LauncherView.vue'),
-        meta: { title: '启动器' },
+        meta: {
+          get title() {
+            return __t('ui.index', '启动器')
+          },
+        },
       }
     : {
         path: '/launcher',
@@ -45,7 +50,12 @@ const routes: RouteRecordRaw[] = [
         path: '/pet-3d',
         name: 'PetStandalone',
         component: () => import('@/views/Pet3DView.vue'),
-        meta: { title: '桌宠', standalone: true },
+        meta: {
+          get title() {
+            return __t('ui.index', '桌宠')
+          },
+          standalone: true,
+        },
       }
     : {
         // 浏览器/Docker 模式不支持透明桌宠窗口

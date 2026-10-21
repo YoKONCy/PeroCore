@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../../i18n/index'
+
 /**
  * McpTab — MCP / 技能配置 Tab (F1-5)
  *
@@ -90,7 +92,7 @@ watch(
             @click="currentSubTab = 'mcp'"
           >
             <PixelIcon name="terminal" size="sm" />
-            <span class="font-pixel">MCP 服务</span>
+            <span class="font-pixel">{{ __t('ui.settings', 'MCP 服务') }}</span>
           </button>
           <span class="text-[var(--ui-border-strong)] text-xl font-light">/</span>
           <button
@@ -103,7 +105,7 @@ watch(
             @click="currentSubTab = 'skill'"
           >
             <PixelIcon name="brain" size="sm" />
-            <span class="font-pixel">技能管理</span>
+            <span class="font-pixel">{{ __t('ui.settings', '技能管理') }}</span>
           </button>
         </div>
         <p class="text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400 ml-7 font-pixel">
@@ -116,7 +118,7 @@ watch(
           <span
             class="text-[11px] font-bold text-slate-400 px-2.5 py-1 border border-slate-200 bg-slate-50"
           >
-            {{ servers.length }} 个服务
+            {{ servers.length }} {{ __t('ui.settings', '个服务') }}
           </span>
           <span
             class="text-[11px] font-bold px-2.5 py-1 border"
@@ -126,35 +128,35 @@ watch(
                 : 'text-slate-400 border-slate-200 bg-slate-50'
             "
           >
-            {{ connectedCount }} 已连接
+            {{ connectedCount }} {{ __t('ui.settings', '已连接') }}
           </span>
           <span
             class="text-[11px] font-bold text-sky-500 px-2.5 py-1 border border-sky-200 bg-sky-50"
           >
-            {{ totalTools }} 个工具
+            {{ totalTools }} {{ __t('ui.settings', '个工具') }}
           </span>
           <PButton variant="ghost" size="sm" :disabled="isLoading" @click="connectAll">
             <PixelIcon :name="isLoading ? 'loader' : 'refresh'" size="xs" />
-            全部连接
+            {{ __t('ui.settings', '全部连接') }}
           </PButton>
           <PButton variant="primary" @click="isAddOpen = true">
             <PixelIcon name="plus" size="xs" />
-            添加服务
+            {{ __t('ui.settings', '添加服务') }}
           </PButton>
         </template>
         <template v-else>
           <span
             class="text-[11px] font-bold text-violet-500 px-2.5 py-1 border border-violet-200 bg-violet-50"
           >
-            {{ skills.length }} 个技能
+            {{ skills.length }} {{ __t('ui.settings', '个技能') }}
           </span>
           <PButton variant="ghost" size="sm" :disabled="isSkillLoading" @click="reloadSkills">
             <PixelIcon :name="isSkillLoading ? 'loader' : 'refresh'" size="xs" />
-            重新扫描
+            {{ __t('ui.settings', '重新扫描') }}
           </PButton>
           <PButton variant="primary" @click="isImportOpen = true">
             <PixelIcon name="plus" size="xs" />
-            导入技能
+            {{ __t('ui.settings', '导入技能') }}
           </PButton>
         </template>
       </div>
@@ -185,23 +187,26 @@ watch(
     />
 
     <!-- 添加 MCP 服务弹窗 -->
-    <PDialog v-model="isAddOpen" title="添加 MCP 服务" width="520px">
+    <PDialog v-model="isAddOpen" :title="__t('ui.settings', '添加 MCP 服务')" width="520px">
       <div class="flex flex-col gap-4">
         <div class="flex flex-col gap-1.5">
           <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
-            名称
+            {{ __t('ui.settings', '名称') }}
           </label>
-          <PInput v-model="addForm.name" placeholder="服务名称 (如 filesystem)" />
+          <PInput
+            v-model="addForm.name"
+            :placeholder="__t('ui.settings', '服务名称 (如 filesystem)')"
+          />
         </div>
         <div class="flex flex-col gap-1.5">
           <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
-            连接类型
+            {{ __t('ui.settings', '连接类型') }}
           </label>
           <PSelect v-model="addForm.type" :options="typeOptions" />
         </div>
         <div v-if="addForm.type === 'stdio'" class="flex flex-col gap-1.5">
           <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
-            命令
+            {{ __t('ui.settings', '命令') }}
           </label>
           <PInput
             v-model="addForm.command"
@@ -210,9 +215,12 @@ watch(
         </div>
         <div v-if="addForm.type === 'stdio'" class="flex flex-col gap-1.5">
           <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
-            参数 (JSON 数组 或 空格分隔)
+            {{ __t('ui.settings', '参数 (JSON 数组 或 空格分隔)') }}
           </label>
-          <PInput v-model="addForm.args" placeholder='["/path/to/dir"] 或 /path/to/dir' />
+          <PInput
+            v-model="addForm.args"
+            :placeholder="__t('ui.settings', '[&quot;/path/to/dir&quot;] 或 /path/to/dir')"
+          />
         </div>
         <div v-if="addForm.type === 'sse'" class="flex flex-col gap-1.5">
           <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
@@ -222,21 +230,23 @@ watch(
         </div>
         <div class="flex flex-col gap-1.5">
           <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
-            环境变量 (JSON，可选)
+            {{ __t('ui.settings', '环境变量 (JSON，可选)') }}
           </label>
           <PInput v-model="addForm.env" placeholder='{"API_KEY": "xxx"}' />
         </div>
       </div>
       <template #footer>
-        <PButton variant="ghost" @click="isAddOpen = false">取消</PButton>
+        <PButton variant="ghost" @click="isAddOpen = false">
+          {{ __t('ui.settings', '取消') }}
+        </PButton>
         <PButton variant="primary" :disabled="!addForm.name.trim()" @click="addServer">
-          添加
+          {{ __t('ui.settings', '添加') }}
         </PButton>
       </template>
     </PDialog>
 
     <!-- 导入 Skill 弹窗 -->
-    <PDialog v-model="isImportOpen" title="导入本地技能" width="520px">
+    <PDialog v-model="isImportOpen" :title="__t('ui.settings', '导入本地技能')" width="520px">
       <div class="flex flex-col gap-4">
         <button
           type="button"
@@ -245,10 +255,14 @@ watch(
         >
           <PixelIcon name="folder" size="lg" />
           <strong class="font-pixel text-sm">
-            {{ importPath ? '重新选择 Skill 文件夹' : '浏览本机 Skill 文件夹' }}
+            {{
+              importPath
+                ? __t('ui.settings', '重新选择 Skill 文件夹')
+                : __t('ui.settings', '浏览本机 Skill 文件夹')
+            }}
           </strong>
           <span class="text-[10px] text-[var(--ui-text-tertiary)]">
-            请选择包含 SKILL.md 的完整文件夹
+            {{ __t('ui.settings', '请选择包含 SKILL.md 的完整文件夹') }}
           </span>
         </button>
 
@@ -259,7 +273,7 @@ watch(
           <PixelIcon name="brain" size="sm" class="text-violet-500" />
           <div class="min-w-0 flex-1">
             <div class="truncate text-sm font-bold text-[var(--ui-text-primary)]">
-              {{ importName || '已选择 Skill' }}
+              {{ importName || __t('ui.settings', '已选择 Skill') }}
             </div>
             <div class="truncate text-[10px] text-[var(--ui-text-tertiary)]" :title="importPath">
               {{ importPath }}
@@ -269,7 +283,7 @@ watch(
         </div>
 
         <p class="text-[10px] text-slate-400">
-          导入后会将整个文件夹复制到用户技能目录，包括 SKILL.md 和引用的脚本、模板及其他资源。
+          {{ __t('ui.settings', '导入整个技能文件夹及其资源。') }}
         </p>
         <p
           v-if="importError"
@@ -279,14 +293,16 @@ watch(
         </p>
       </div>
       <template #footer>
-        <PButton variant="ghost" @click="isImportOpen = false">取消</PButton>
+        <PButton variant="ghost" @click="isImportOpen = false">
+          {{ __t('ui.settings', '取消') }}
+        </PButton>
         <PButton
           variant="primary"
           :disabled="!importPath || isSkillLoading"
           :loading="isSkillLoading"
           @click="importSkill"
         >
-          导入
+          {{ __t('ui.settings', '导入') }}
         </PButton>
       </template>
     </PDialog>

@@ -1,0 +1,6 @@
+{
+  "CAPABILITY_MESSAGE_INVALID: 消息不是合法JSON": "CAPABILITY_MESSAGE_INVALID: The message is not a valid JSON",
+  "CAPABILITY_AUTH_FAILED: Token不匹配": "CAPABILITY_AUTH_FAILED: Token does not match",
+  "CAPABILITY_AUTH_REQUIRED: 请先认证": "CAPABILITY_AUTH_REQUIRED: Please authenticate first",
+  "Provider调用失败": "Provider call failed"
+}

@@ -1,3 +1,4 @@
+import { t as __t } from './i18n'
 import type { Binding, Step, Workflow, ServiceProfile } from './domain'
 import { effectiveService } from './providers'
 import type { Store } from './store'
@@ -190,7 +191,7 @@ export function workflowIssues(
         if ('path' in value && value.path?.length && !source)
           issues.push({
             code: 'path',
-            message: '选取路径将在运行时校验',
+            message: __t('apps.pictoria.ui', '选取路径将在运行时校验'),
             nodeId,
             field,
             severity: 'warning',

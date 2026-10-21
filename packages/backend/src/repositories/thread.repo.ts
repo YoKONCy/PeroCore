@@ -101,6 +101,20 @@ export class ThreadRepository {
 
   // ── Thread 操作 ──
 
+  async updateModelSettings(
+    threadId: string,
+    settings: {
+      modelConfigId: number | null
+      reasoningEffort: import('@infos/shared').ReasoningEffort | null
+    },
+  ): Promise<boolean> {
+    const result = await this.db
+      .update(threads)
+      .set({ ...settings, updatedAt: sql`datetime('now', 'localtime')` })
+      .where(and(eq(threads.id, threadId), eq(threads.status, 'active')))
+    return result.changes > 0
+  }
+
   /** 创建 Thread */
   async createThread(data: CreateThreadInput): Promise<ThreadRow> {
     const rows = await this.db
@@ -514,6 +528,32 @@ export class ThreadRepository {
 
   async findPair(threadId: string, pairId: string): Promise<ThreadMessageRow[]> {
     return this.findMessagesByPairIds(threadId, [pairId])
+  }
+
+  /** 补记周期固定追加边界，关机恢复后仍使用同一批来源。 */
+  async latestMemoryMessageId(): Promise<number> {
+    const [row] = await this.db
+      .select({ id: sql<number>`coalesce(max(${threadMessages.id}), 0)` })
+      .from(threadMessages)
+    return row?.id ?? 0
+  }
+
+  /** 后台审阅全部尚存来源，不受聊天窗口和最近一万轮的读取上限影响。 */
+  async queryMemoryMessagesThrough(
+    threadId: string,
+    throughMessageId: number,
+  ): Promise<ThreadMessageRow[]> {
+    return this.db
+      .select()
+      .from(threadMessages)
+      .where(
+        and(
+          eq(threadMessages.threadId, threadId),
+          eq(threadMessages.status, 'active'),
+          sql`${threadMessages.id} <= ${throughMessageId}`,
+        ),
+      )
+      .orderBy(asc(threadMessages.timestamp), asc(threadMessages.id))
   }
 
   /** 查询最近 N 个完整对话轮次，旧消息缺少 pairId 时按单条独立轮次处理。 */

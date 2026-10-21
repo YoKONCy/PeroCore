@@ -1,3 +1,4 @@
+import { t as __t } from './i18n'
 import type { Store } from './store'
 import type { Assets } from './assets'
 import { serviceSchema, stepSchema, type ServiceProfile } from './domain'
@@ -25,12 +26,29 @@ export const videoModels: VideoModel[] = [
     adapter: 'atlascloud',
     maxImages: 1,
     fields: {
-      duration: { type: 'integer', title: '时长（秒）', enum: [5, 10, 15], default: 5 },
+      duration: {
+        type: 'integer',
+        title: __t('apps.pictoria.ui', '时长（秒）'),
+        enum: [5, 10, 15],
+        default: 5,
+      },
       resolution: choice('分辨率', ['720p', '1080p'], '720p'),
       aspect_ratio: choice('画面比例', ['16:9', '9:16', '1:1', '4:3', '3:4'], '16:9'),
-      negative_prompt: { type: 'string', title: '负面提示词', maxLength: 4000 },
-      generate_audio: { type: 'boolean', title: '生成音频', default: true },
-      enable_prompt_expansion: { type: 'boolean', title: '优化提示词', default: true },
+      negative_prompt: {
+        type: 'string',
+        title: __t('apps.pictoria.ui', '负面提示词'),
+        maxLength: 4000,
+      },
+      generate_audio: {
+        type: 'boolean',
+        title: __t('apps.pictoria.ui', '生成音频'),
+        default: true,
+      },
+      enable_prompt_expansion: {
+        type: 'boolean',
+        title: __t('apps.pictoria.ui', '优化提示词'),
+        default: true,
+      },
     },
   },
   ...['grok-video-3', 'grok-video-3-10s'].map((id) => ({
@@ -41,7 +59,7 @@ export const videoModels: VideoModel[] = [
     fields: {
       duration: {
         type: 'integer',
-        title: '时长（秒）',
+        title: __t('apps.pictoria.ui', '时长（秒）'),
         enum: [6, 10, 15],
         default: id.endsWith('10s') ? 10 : 6,
       },
@@ -134,10 +152,15 @@ export function configureVideo(
     inputSchema: {
       type: 'object',
       properties: {
-        prompt: { type: 'string', title: '提示词', minLength: 1, maxLength: 20000 },
+        prompt: {
+          type: 'string',
+          title: __t('apps.pictoria.ui', '提示词'),
+          minLength: 1,
+          maxLength: 20000,
+        },
         images: {
           type: 'array',
-          title: '参考图片',
+          title: __t('apps.pictoria.ui', '参考图片'),
           items: asset,
           maxItems: model.maxImages,
           default: [],

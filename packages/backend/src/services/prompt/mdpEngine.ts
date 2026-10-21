@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * MDP 模板引擎 v2 — Nunjucks 渲染 + SillyTavern 风格提示词拼接
  *
@@ -304,7 +305,7 @@ export class MdpEngine {
       }
     }
 
-    logger.info(`已加载 ${this.prompts.size} 个 MDP 模板`)
+    logger.info(__t('logs.prompt', '已加载 {0} 个 MDP 模板', [this.prompts.size]))
   }
 
   /**
@@ -324,14 +325,20 @@ export class MdpEngine {
     // 去重：如果已注册相同 dir + prefix，跳过
     const exists = this.additionalRoots.some((r) => r.dir === dir && r.prefix === prefix)
     if (exists) {
-      logger.debug(`模板根目录已注册，跳过: ${dir} (prefix=${prefix ?? '无'})`)
+      logger.debug(
+        __t('logs.prompt', '模板根目录已注册，跳过: {0} (prefix={1})', [dir, prefix ?? '无']),
+      )
       return
     }
 
     this.additionalRoots.push({ dir, prefix })
     this.scanDir(dir, dir, prefix)
     logger.info(
-      `已注册额外模板根目录: ${dir} (prefix=${prefix ?? '无'}, 当前共 ${this.additionalRoots.length} 个额外根)`,
+      __t('logs.prompt', '已注册额外模板根目录: {0} (prefix={1}, 当前共 {2} 个额外根)', [
+        dir,
+        prefix ?? '无',
+        this.additionalRoots.length,
+      ]),
     )
   }
 
@@ -362,7 +369,7 @@ export class MdpEngine {
     const resolved = this.resolveKey(templateKey, vars)
     const prompt = this.prompts.get(resolved)
     if (!prompt) {
-      logger.warn(`模板未找到: ${templateKey}`)
+      logger.warn(__t('logs.prompt', '模板未找到: {0}', [templateKey]))
       return `{{Missing: ${templateKey}}}`
     }
     return this.renderTemplate(prompt.content, this.withOwnerDefaults(vars))
@@ -546,7 +553,7 @@ export class MdpEngine {
     const dir = path.dirname(savePath)
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
     writeFileSync(savePath, JSON.stringify(preset, null, 2), 'utf-8')
-    logger.info(`预设已保存: ${preset.name} → ${savePath}`)
+    logger.info(__t('logs.prompt', '预设已保存: {0} → {1}', [preset.name, savePath]))
   }
 
   /**
@@ -557,7 +564,7 @@ export class MdpEngine {
       const raw = readFileSync(presetPath, 'utf-8')
       return JSON.parse(raw) as PromptPreset
     } catch (err) {
-      logger.warn(`加载预设失败: ${presetPath}`, { error: err })
+      logger.warn(__t('logs.prompt', '加载预设失败: {0}', [presetPath]), { error: err })
       return null
     }
   }
@@ -698,7 +705,7 @@ export class MdpEngine {
         }
       }
     } catch (err) {
-      logger.warn(`加载模板失败: ${filePath}`, { error: err })
+      logger.warn(__t('logs.prompt', '加载模板失败: {0}', [filePath]), { error: err })
     }
   }
 

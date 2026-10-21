@@ -63,7 +63,20 @@ function setup() {
     }),
   }
   const threadService = {
-    createThread: vi.fn(async () => ({ id: 'thread-task' })),
+    createThread: vi.fn(async () => ({ id: 'thread-task', channel: 'desktop' })),
+    getThread: vi.fn(async () => ({
+      id: 'origin',
+      agentId: 'pero',
+      channel: 'desktop',
+      purpose: 'conversation',
+      status: 'active',
+      executionMode: 'manual',
+      interactionMode: 'minimal',
+      disabledTools: ['take_screenshot'],
+    })),
+    updateExecutionMode: vi.fn(),
+    updateInteractionMode: vi.fn(),
+    updateDisabledTools: vi.fn(),
     appendSystemMessage: vi.fn(),
   }
   const executeTurn = vi.fn(async () => ({ reply: '完成', toolCalls: [] }))
@@ -112,10 +125,32 @@ function setup() {
     { executeTurn } as never,
     scheduler as never,
   )
-  return { service, repo, scheduler, executeTurn, getScheduleInput: () => scheduleInput, seed }
+  return {
+    service,
+    repo,
+    threadService,
+    scheduler,
+    executeTurn,
+    getScheduleInput: () => scheduleInput,
+    seed,
+  }
 }
 
 describe('BackgroundTask KernelScheduler迁移', () => {
+  it('派发绑定来源会话时继承极简模式、审批模式与禁用工具', async () => {
+    const { service, threadService } = setup()
+    await service.dispatch({
+      agentId: 'pero',
+      instruction: '定时检查',
+      targetThreadId: 'origin',
+      completionAction: 'send_to_chat',
+    })
+    expect(threadService.updateInteractionMode).toHaveBeenCalledWith('thread-task', 'minimal')
+    expect(threadService.updateExecutionMode).toHaveBeenCalledWith('thread-task', 'manual')
+    expect(threadService.updateDisabledTools).toHaveBeenCalledWith('thread-task', [
+      'take_screenshot',
+    ])
+  })
   it('启动时补交排队任务，缺少可恢复等待条件的中断任务进入阻塞', async () => {
     const { service, repo, scheduler, seed } = setup()
     Object.assign(repo, {

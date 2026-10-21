@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 import { createServer, type Server } from 'node:http'
 import { createReadStream, readFileSync } from 'node:fs'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
@@ -222,8 +223,8 @@ export class PictoriaIntegration {
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify(result))
       })().catch((error) => {
-        logger.warn('子应用模型调用失败', {
-          error: error instanceof Error ? error.message : '未知错误',
+        logger.warn(__t('logs.applications', '子应用模型调用失败'), {
+          error: error instanceof Error ? error.message : __t('logs.applications', '未知错误'),
         })
         if (!res.headersSent)
           res.writeHead(
@@ -242,7 +243,9 @@ export class PictoriaIntegration {
     await this.runtime.start()
     this.federation.start()
     this.timer = setInterval(() => {
-      void this.flush().catch((error) => logger.warn('绘图结果同步失败', { error: String(error) }))
+      void this.flush().catch((error) =>
+        logger.warn(__t('logs.applications', '绘图结果同步失败'), { error: String(error) }),
+      )
     }, 3000)
     this.timer.unref()
   }
@@ -310,10 +313,12 @@ export class PictoriaIntegration {
       this.desktopWatch = watchDesktopGuard(value, () => {
         if (this.desktopGuard?.pipe !== value.pipe || this.closing) return
         this.desktopLost = true
-        logger.info('桌面连接已断开，正在回收托管 Pictoria')
-        void this.controller
-          .shutdownManaged()
-          .catch((failure) => logger.warn('托管 Pictoria 回收失败', { error: String(failure) }))
+        logger.info(__t('logs.applications', '桌面连接已断开，正在回收托管 Pictoria'))
+        void this.controller.shutdownManaged().catch((failure) =>
+          logger.warn(__t('logs.applications', '托管 Pictoria 回收失败'), {
+            error: String(failure),
+          }),
+        )
       })
     }
     await this.desktopWatch?.ready
@@ -459,7 +464,7 @@ export class PictoriaIntegration {
           channel: 'group',
           platform: 'app_internal',
           purpose: 'app_internal',
-          title: 'Pictoria 创作画布',
+          title: __t('server.applications', 'Pictoria 创作画布'),
         })
       } catch (error) {
         thread = await this.deps.threadService.getThread(id)

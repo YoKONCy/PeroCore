@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { getDisplayLocale } from '../../i18n/index'
+
+import { t as __t } from '../../i18n/index'
+
 /**
  * ApprovalCard — 跨区域共享的紧凑工具审批卡片。
  *
@@ -42,10 +46,38 @@ const command = computed(() => {
   return typeof value === 'string' ? value : null
 })
 const riskMeta: Record<ApprovalRiskLevel, { label: string; hint: string }> = {
-  low: { label: '轻度提醒', hint: '请核对参数后决定是否继续。' },
-  medium: { label: '需要留意', hint: '此操作会改变应用或系统状态。' },
-  high: { label: '高风险', hint: '此操作可能造成明显副作用，请仔细确认。' },
-  critical: { label: '严重风险', hint: '此操作可能造成不可逆影响，请逐项核对。' },
+  low: {
+    get label() {
+      return __t('ui.approval', '轻度提醒')
+    },
+    get hint() {
+      return __t('ui.approval', '请核对参数后决定是否继续。')
+    },
+  },
+  medium: {
+    get label() {
+      return __t('ui.approval', '需要留意')
+    },
+    get hint() {
+      return __t('ui.approval', '此操作会改变应用或系统状态。')
+    },
+  },
+  high: {
+    get label() {
+      return __t('ui.approval', '高风险')
+    },
+    get hint() {
+      return __t('ui.approval', '此操作可能造成明显副作用，请仔细确认。')
+    },
+  },
+  critical: {
+    get label() {
+      return __t('ui.approval', '严重风险')
+    },
+    get hint() {
+      return __t('ui.approval', '此操作可能造成不可逆影响，请逐项核对。')
+    },
+  },
 }
 const risk = computed(() => riskMeta[props.request.riskLevel])
 
@@ -68,7 +100,7 @@ async function toggleDetails(): Promise<void> {
 }
 
 function formatAuditTime(value: string): string {
-  return new Date(value).toLocaleString('zh-CN', { hour12: false })
+  return new Date(value).toLocaleString(getDisplayLocale(), { hour12: false })
 }
 </script>
 
@@ -80,16 +112,16 @@ function formatAuditTime(value: string): string {
     <header class="approval-card__header">
       <AgentRequestIdentity
         :agent-id="request.agentId"
-        subtitle="确认前不会执行这项操作"
+        :subtitle="__t('ui.approval', '确认前不会执行这项操作')"
         tone="approval"
       >
-        <template #title>请求执行一项操作</template>
+        <template #title>{{ __t('ui.approval', '请求执行一项操作') }}</template>
       </AgentRequestIdentity>
       <span class="approval-card__risk">
         <i />
         {{ risk.label }}
       </span>
-      <span class="approval-card__timer">等待操作</span>
+      <span class="approval-card__timer">{{ __t('ui.approval', '等待操作') }}</span>
     </header>
 
     <div class="approval-card__body">
@@ -103,14 +135,14 @@ function formatAuditTime(value: string): string {
 
       <button class="approval-card__details-toggle" type="button" @click="toggleDetails">
         <PixelIcon :name="expanded ? 'chevron-up' : 'chevron-down'" size="xs" />
-        {{ expanded ? '收起详情' : '参数与审计' }}
+        {{ expanded ? __t('ui.approval', '收起详情') : __t('ui.approval', '参数与审计') }}
       </button>
       <template v-if="expanded">
         <pre class="approval-card__details">{{ JSON.stringify(request.argsSummary, null, 2) }}</pre>
         <div class="approval-card__audit">
-          <strong>审批记录</strong>
-          <span v-if="auditLoading">正在读取…</span>
-          <span v-else-if="auditRecords.length === 0">暂无记录</span>
+          <strong>{{ __t('ui.approval', '审批记录') }}</strong>
+          <span v-if="auditLoading">{{ __t('ui.approval', '正在读取…') }}</span>
+          <span v-else-if="auditRecords.length === 0">{{ __t('ui.approval', '暂无记录') }}</span>
           <div v-for="record in auditRecords" :key="record.id" class="approval-card__audit-row">
             <span>{{ record.event }}</span>
             <time>{{ formatAuditTime(record.createdAt) }}</time>
@@ -124,13 +156,15 @@ function formatAuditTime(value: string): string {
         maxlength="2000"
         rows="2"
         class="approval-card__message"
-        placeholder="可以补充要求，例如“只执行这一步，不要改动其他内容”"
+        :placeholder="__t('ui.approval', '可以补充要求，例如“只执行这一步，不要改动其他内容”')"
       />
     </div>
 
     <p v-if="error" class="approval-card__error" role="alert">{{ error }}</p>
     <footer class="approval-card__actions">
-      <PButton size="sm" :disabled="loading" @click="submit('allow_once')">允许本次</PButton>
+      <PButton size="sm" :disabled="loading" @click="submit('allow_once')">
+        {{ __t('ui.approval', '允许本次') }}
+      </PButton>
       <PButton
         v-if="
           !['terminal_execute', 'terminal_create', 'terminal_write', 'delete_file'].includes(
@@ -142,10 +176,10 @@ function formatAuditTime(value: string): string {
         :disabled="loading"
         @click="submit('allow_session')"
       >
-        本轮对话允许
+        {{ __t('ui.approval', '本轮对话允许') }}
       </PButton>
       <PButton size="sm" variant="danger" :disabled="loading" @click="submit('deny_once')">
-        拒绝
+        {{ __t('ui.approval', '拒绝') }}
       </PButton>
     </footer>
   </article>

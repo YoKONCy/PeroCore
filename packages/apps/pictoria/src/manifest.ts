@@ -1,3 +1,4 @@
+import { t as __t } from './i18n'
 import { defineApplicationAdapter } from '@infos/node-sdk'
 import type { ApplicationAdapterManifest } from '@infos/shared'
 
@@ -6,6 +7,7 @@ export const operations = [
   'collection.save',
   'collection.delete',
   'project.move',
+  'project.rename',
   'prompt.search',
   'provider.settings',
   'provider.list',
@@ -61,10 +63,10 @@ export const pictoriaManifest = defineApplicationAdapter({
   manifestVersion: 1,
   id: 'infos.pictoria',
   name: 'Pictoria',
-  description: '画布创作与可编排媒体工作流',
+  description: __t('apps.pictoria.ui', '画布创作与可编排媒体工作流'),
   adapterVersion: '1.0.0',
   protocolVersion: 1,
-  application: { versions: '>=0.9.4 <1.0.0', transports: ['websocket'] },
+  application: { versions: '>=0.9.5 <1.0.0', transports: ['websocket'] },
   backend: { entry: '@infos/pictoria' },
   frontend: {
     entry: '@infos/pictoria/client',
@@ -87,8 +89,10 @@ export const pictoriaManifest = defineApplicationAdapter({
       audience: 'host_agent',
       availability: 'while_ready',
       invocation: 'invoke',
-      description:
+      description: __t(
+        'apps.pictoria.ui',
         '调用创作步骤或提交工作流。run 接收后后台执行并回传结果；catalog 查看步骤要求。素材使用 {resourceId}、{resourceSource:在线地址} 或已有 {assetId}。',
+      ),
       parameters: {
         type: 'object',
         properties: {
@@ -101,8 +105,10 @@ export const pictoriaManifest = defineApplicationAdapter({
           inputs: { type: 'object' },
           definition: {
             type: 'object',
-            description:
+            description: __t(
+              'apps.pictoria.ui',
               'run 工作流：{id,name,inputSchema,outputSchema,nodes:[{id,stepId,stepRevision,inputs:{字段:引用}}],outputs:{字段:引用}}。引用为 {input:输入字段}、{node:节点ID,output:输出字段} 或 {literal:值}。canvas 项目：{id,title,items:[{id,content,x,y}]}。',
+            ),
           },
           projectId: { type: 'string' },
           id: { type: 'string' },
@@ -115,8 +121,8 @@ export const pictoriaManifest = defineApplicationAdapter({
         additionalProperties: false,
       },
       display: {
-        label: '绘图与创作',
-        description: '调用绘图步骤与工作流。',
+        label: __t('apps.pictoria.ui', '绘图与创作'),
+        description: __t('apps.pictoria.ui', '调用绘图步骤与工作流。'),
         icon: 'image',
         color: 'purple',
       },

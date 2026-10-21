@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * Voice Router — 语音 API 端点
  *
@@ -125,7 +126,7 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
 
     return c.json({
       code: 'OK',
-      message: '语音识别成功',
+      message: __t('server.routers', '语音识别成功'),
       data: result,
     })
   })
@@ -136,7 +137,7 @@ export function createVoiceRouter(deps: VoiceRouterDeps) {
   router.get('/status', (c) => {
     return c.json({
       code: 'OK',
-      message: '获取成功',
+      message: __t('server.routers', '获取成功'),
       data: {
         tts: { available: deps.ttsService.isAvailable },
         asr: { available: deps.asrService.isAvailable },

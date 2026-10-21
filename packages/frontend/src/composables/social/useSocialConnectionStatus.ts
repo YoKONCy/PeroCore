@@ -34,7 +34,7 @@ export function useSocialConnectionStatus() {
     } catch (cause) {
       if (requestGeneration !== generation) return false
       connected.value = false
-      error.value = '无法读取社交服务状态，请检查后端社交应用是否启动成功'
+      error.value = '无法连接社交服务，请检查服务是否启动'
       fatal =
         cause instanceof ApiError &&
         ['FORBIDDEN', 'UNAUTHORIZED', 'AUTH_REQUIRED'].includes(cause.code)

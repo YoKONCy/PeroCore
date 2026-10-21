@@ -1,0 +1,14 @@
+{
+  "已停止": "has been stopped",
+  "正在连接 Daemon: {0}": "is connecting to Daemon: {0}",
+  "连接错误: {0}": "connection error: {0}",
+  "收到非法 JSON: {0}": "received illegal JSON: {0}",
+  "Node已接入，Session={0}": "Node has been connected, Session={0}",
+  "Daemon错误: {0}": "Daemon error: {0}",
+  "调用完成: {0}": "call completed: {0}",
+  "调用失败: {0} - {1}": "call failed: {0} - {1}",
+  "能力节点设备凭据已安全保存": "capability node device credentials have been safely saved",
+  "保存能力节点设备凭据失败: {0}": "Failed to save capability node device credentials: {0}",
+  "读取 Node ID失败: {0}": "failed to read Node ID: {0}",
+  "保存 Node ID失败: {0}": "failed to save Node ID: {0}"
+}

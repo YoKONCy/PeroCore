@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 /**
  * SettingsView.vue — 界面组件
  *
@@ -29,11 +31,21 @@ const section = ref<SettingsSection>(
   route.query.section === 'integration' ? 'integration' : 'models',
 )
 const sectionTitles: Record<SettingsSection, string> = {
-  models: '模型',
-  editor: '编辑',
-  collaboration: '协作',
-  appearance: '外观',
-  integration: '连接',
+  get models() {
+    return __t('apps.arca.ui', '模型')
+  },
+  get editor() {
+    return __t('apps.arca.ui', '编辑')
+  },
+  get collaboration() {
+    return __t('apps.arca.ui', '协作')
+  },
+  get appearance() {
+    return __t('apps.arca.ui', '外观')
+  },
+  get integration() {
+    return __t('apps.arca.ui', '连接')
+  },
 }
 const sectionIcons: Record<SettingsSection, string> = {
   models: 'sparkle',
@@ -87,7 +99,12 @@ const modelOptions = computed(() =>
   models.value.map((model) => ({ value: model.id, label: model.name, description: model.modelId })),
 )
 const agentOptions = computed(() => [
-  { value: '', label: '自动选择' },
+  {
+    value: '',
+    get label() {
+      return __t('apps.arca.ui', '自动选择')
+    },
+  },
   ...store.collaborationAgents.map((agent) => ({
     value: agent.id,
     label: agent.name,
@@ -95,19 +112,64 @@ const agentOptions = computed(() => [
   })),
 ])
 const widthOptions = [
-  { value: '760', label: '紧凑' },
-  { value: '840', label: '标准' },
-  { value: '960', label: '宽' },
+  {
+    value: '760',
+    get label() {
+      return __t('apps.arca.ui', '紧凑')
+    },
+  },
+  {
+    value: '840',
+    get label() {
+      return __t('apps.arca.ui', '标准')
+    },
+  },
+  {
+    value: '960',
+    get label() {
+      return __t('apps.arca.ui', '宽')
+    },
+  },
 ]
 const themeOptions = [
-  { value: 'system', label: '跟随系统' },
-  { value: 'light', label: '浅色' },
-  { value: 'dark', label: '深色' },
+  {
+    value: 'system',
+    get label() {
+      return __t('apps.arca.ui', '跟随系统')
+    },
+  },
+  {
+    value: 'light',
+    get label() {
+      return __t('apps.arca.ui', '浅色')
+    },
+  },
+  {
+    value: 'dark',
+    get label() {
+      return __t('apps.arca.ui', '深色')
+    },
+  },
 ] as const
 const motionOptions = [
-  { value: 'system', label: '跟随系统' },
-  { value: 'full', label: '标准' },
-  { value: 'reduced', label: '减少' },
+  {
+    value: 'system',
+    get label() {
+      return __t('apps.arca.ui', '跟随系统')
+    },
+  },
+  {
+    value: 'full',
+    get label() {
+      return __t('apps.arca.ui', '标准')
+    },
+  },
+  {
+    value: 'reduced',
+    get label() {
+      return __t('apps.arca.ui', '减少')
+    },
+  },
 ]
 let disposed = false
 useApplicationBusy(computed(() => saving.value || !!testingId.value))
@@ -121,9 +183,12 @@ watch(section, () => {
 
 function readableError(cause: unknown): string {
   const message = cause instanceof Error ? cause.message : String(cause)
-  if (message.startsWith('ARCA_HOST_UNAVAILABLE')) return '应用未连接，暂时无法管理模型。'
-  if (message.startsWith('ARCA_MODEL_NOT_CONFIGURED')) return '尚未配置Arca本地模型。'
-  if (message.startsWith('ARCA_CREDENTIAL')) return 'Arca本地凭据不可用，请重新保存API Key。'
+  if (message.startsWith('ARCA_HOST_UNAVAILABLE'))
+    return __t('apps.arca.ui', '应用未连接，暂时无法管理模型。')
+  if (message.startsWith('ARCA_MODEL_NOT_CONFIGURED'))
+    return __t('apps.arca.ui', '尚未配置Arca本地模型。')
+  if (message.startsWith('ARCA_CREDENTIAL'))
+    return __t('apps.arca.ui', 'Arca本地凭据不可用，请重新保存API Key。')
   return message
 }
 
@@ -318,14 +383,14 @@ watch(
       <header class="settings-masthead">
         <div>
           <span class="settings-eyebrow">Arca</span>
-          <h1>偏好设置</h1>
+          <h1>{{ __t('apps.arca.ui', '偏好设置') }}</h1>
         </div>
         <button class="settings-return" type="button" @click="leave">
           <ArcaIcon name="back" :size="16" />
-          返回文稿
+          {{ __t('apps.arca.ui', '返回文稿') }}
         </button>
       </header>
-      <nav ref="settingsTabs" class="settings-tabs" aria-label="设置分类">
+      <nav ref="settingsTabs" class="settings-tabs" :aria-label="__t('apps.arca.ui', '设置分类')">
         <button
           v-for="(label, key) in sectionTitles"
           :key="key"
@@ -357,14 +422,14 @@ watch(
             <div class="settings-section-title">
               <span class="settings-symbol"><ArcaIcon name="sparkle" :size="21" /></span>
               <div>
-                <h2>当前模型</h2>
-                <small>{{ models.length }} 个配置</small>
+                <h2>{{ __t('apps.arca.ui', '当前模型') }}</h2>
+                <small>{{ models.length }} {{ __t('apps.arca.ui', '个配置') }}</small>
               </div>
             </div>
             <ArcaSelect
               v-model="preferences.modelConfigId"
-              aria-label="当前模型"
-              placeholder="选择模型"
+              :aria-label="__t('apps.arca.ui', '当前模型')"
+              :placeholder="__t('apps.arca.ui', '选择模型')"
               :options="modelOptions"
               :disabled="loading || saving || store.connection !== 'ready'"
               @change="savePreferences"
@@ -372,8 +437,8 @@ watch(
             <button
               class="icon-button"
               type="button"
-              title="刷新模型"
-              aria-label="刷新模型"
+              :title="__t('apps.arca.ui', '刷新模型')"
+              :aria-label="__t('apps.arca.ui', '刷新模型')"
               :disabled="loading || saving || !!testingId"
               @click="load"
             >
@@ -383,12 +448,12 @@ watch(
           <div class="settings-model-workspace">
             <aside class="settings-models">
               <header>
-                <h2>配置</h2>
+                <h2>{{ __t('apps.arca.ui', '配置') }}</h2>
                 <button
                   class="icon-button"
                   type="button"
-                  title="新建配置"
-                  aria-label="新建配置"
+                  :title="__t('apps.arca.ui', '新建配置')"
+                  :aria-label="__t('apps.arca.ui', '新建配置')"
                   :disabled="saving || !!testingId"
                   @click="newModel"
                 >
@@ -413,12 +478,12 @@ watch(
                   <i
                     v-if="preferences.modelConfigId === model.id"
                     class="model-in-use"
-                    title="使用中"
-                    aria-label="使用中"
+                    :title="__t('apps.arca.ui', '使用中')"
+                    :aria-label="__t('apps.arca.ui', '使用中')"
                   />
                 </button>
                 <p v-if="!models.length" class="settings-model-empty">
-                  {{ loading ? '读取中…' : '暂无配置' }}
+                  {{ loading ? __t('apps.arca.ui', '读取中…') : __t('apps.arca.ui', '暂无配置') }}
                 </p>
               </div>
             </aside>
@@ -436,7 +501,13 @@ watch(
                       editor.provider
                     }}
                   </span>
-                  <h2>{{ editor.id ? editor.name || '模型配置' : '新建配置' }}</h2>
+                  <h2>
+                    {{
+                      editor.id
+                        ? editor.name || __t('apps.arca.ui', '模型配置')
+                        : __t('apps.arca.ui', '新建配置')
+                    }}
+                  </h2>
                 </div>
                 <span
                   v-if="editor.id"
@@ -448,37 +519,41 @@ watch(
                 >
                   {{
                     models.find((model) => model.id === editor.id)?.credentialConfigured
-                      ? '密钥已配置'
-                      : '未配置密钥'
+                      ? __t('apps.arca.ui', '密钥已配置')
+                      : __t('apps.arca.ui', '未配置密钥')
                   }}
                 </span>
               </header>
               <div class="settings-fields">
                 <label>
-                  名称
+                  {{ __t('apps.arca.ui', '名称') }}
                   <input
                     ref="modelNameInput"
                     v-model="editor.name"
                     required
                     maxlength="120"
-                    placeholder="模型名称"
+                    :placeholder="__t('apps.arca.ui', '模型名称')"
                   />
                 </label>
                 <label>
-                  供应商
-                  <ArcaSelect v-model="editor.provider" aria-label="供应商" :options="providers" />
+                  {{ __t('apps.arca.ui', '供应商') }}
+                  <ArcaSelect
+                    v-model="editor.provider"
+                    :aria-label="__t('apps.arca.ui', '供应商')"
+                    :options="providers"
+                  />
                 </label>
                 <label class="field-wide">
-                  模型 ID
+                  {{ __t('apps.arca.ui', '模型 ID') }}
                   <input
                     v-model="editor.modelId"
                     required
-                    placeholder="模型 ID"
+                    :placeholder="__t('apps.arca.ui', '模型 ID')"
                     spellcheck="false"
                   />
                 </label>
                 <label class="field-wide">
-                  API 地址
+                  {{ __t('apps.arca.ui', 'API 地址') }}
                   <input v-model="editor.apiBase" type="url" spellcheck="false" />
                 </label>
                 <label class="field-wide">
@@ -488,10 +563,14 @@ watch(
                       v-model="editor.apiKey"
                       :type="revealKey ? 'text' : 'password'"
                       autocomplete="new-password"
-                      :placeholder="editor.id ? '留空保留原密钥' : '输入密钥'"
+                      :placeholder="
+                        editor.id
+                          ? __t('apps.arca.ui', '留空保留原密钥')
+                          : __t('apps.arca.ui', '输入密钥')
+                      "
                     />
                     <button type="button" :aria-pressed="revealKey" @click="revealKey = !revealKey">
-                      {{ revealKey ? '隐藏' : '显示' }}
+                      {{ revealKey ? __t('apps.arca.ui', '隐藏') : __t('apps.arca.ui', '显示') }}
                     </button>
                   </span>
                 </label>
@@ -499,12 +578,12 @@ watch(
               <details class="settings-advanced">
                 <summary>
                   <ArcaIcon name="sliders" :size="16" />
-                  高级设置
+                  {{ __t('apps.arca.ui', '高级设置') }}
                   <ArcaIcon name="chevronDown" :size="13" />
                 </summary>
                 <div class="settings-fields">
                   <label>
-                    温度
+                    {{ __t('apps.arca.ui', '温度') }}
                     <input
                       v-model.number="editor.temperature"
                       type="number"
@@ -514,20 +593,20 @@ watch(
                     />
                   </label>
                   <label>
-                    最大输出
+                    {{ __t('apps.arca.ui', '最大输出') }}
                     <input v-model.number="editor.maxTokens" type="number" min="1" step="256" />
                   </label>
                   <label class="field-wide">
-                    思考强度
+                    {{ __t('apps.arca.ui', '思考强度') }}
                     <ArcaSelect
                       v-model="editor.reasoningEffort"
-                      aria-label="思考强度"
+                      :aria-label="__t('apps.arca.ui', '思考强度')"
                       :options="[
-                        { value: null, label: '跟随模型' },
-                        { value: 'low', label: '低' },
-                        { value: 'medium', label: '中' },
-                        { value: 'high', label: '高' },
-                        { value: 'max', label: '最大' },
+                        { value: null, label: __t('apps.arca.ui', '跟随模型') },
+                        { value: 'low', label: __t('apps.arca.ui', '低') },
+                        { value: 'medium', label: __t('apps.arca.ui', '中') },
+                        { value: 'high', label: __t('apps.arca.ui', '高') },
+                        { value: 'max', label: __t('apps.arca.ui', '最大') },
                       ]"
                     />
                   </label>
@@ -543,7 +622,7 @@ watch(
                   @click="testSelectedModel"
                 >
                   <ArcaIcon name="connection" :size="16" />
-                  {{ testingId ? '测试中…' : '测试连接' }}
+                  {{ testingId ? __t('apps.arca.ui', '测试中…') : __t('apps.arca.ui', '测试连接') }}
                 </button>
                 <span class="toolbar-spacer" />
                 <button
@@ -551,7 +630,7 @@ watch(
                   type="submit"
                   :disabled="saving || loading || !!testingId || store.connection !== 'ready'"
                 >
-                  {{ saving ? '保存中…' : '保存并使用' }}
+                  {{ saving ? __t('apps.arca.ui', '保存中…') : __t('apps.arca.ui', '保存并使用') }}
                   <ArcaIcon name="check" :size="16" />
                 </button>
               </footer>
@@ -566,14 +645,20 @@ watch(
           <section class="settings-card">
             <header class="settings-card-heading">
               <div>
-                <span class="settings-eyebrow">文稿</span>
-                <h2>编辑视图</h2>
+                <span class="settings-eyebrow">{{ __t('apps.arca.ui', '文稿') }}</span>
+                <h2>{{ __t('apps.arca.ui', '编辑视图') }}</h2>
               </div>
-              <span class="settings-pill is-ready">自动保存已开启</span>
+              <span class="settings-pill is-ready">
+                {{ __t('apps.arca.ui', '自动保存已开启') }}
+              </span>
             </header>
             <div class="settings-card-body">
-              <h3>连续视图宽度</h3>
-              <div class="settings-choice-grid" role="group" aria-label="连续视图宽度">
+              <h3>{{ __t('apps.arca.ui', '连续视图宽度') }}</h3>
+              <div
+                class="settings-choice-grid"
+                role="group"
+                :aria-label="__t('apps.arca.ui', '连续视图宽度')"
+              >
                 <button
                   v-for="(option, index) in widthOptions"
                   :key="option.value"
@@ -604,7 +689,7 @@ watch(
             <footer class="settings-card-footer">
               <span class="toolbar-spacer" />
               <button class="primary-button" :disabled="saving">
-                {{ saving ? '保存中…' : '保存设置' }}
+                {{ saving ? __t('apps.arca.ui', '保存中…') : __t('apps.arca.ui', '保存设置') }}
               </button>
             </footer>
           </section>
@@ -617,8 +702,8 @@ watch(
           <section class="settings-card">
             <header class="settings-card-heading">
               <div>
-                <span class="settings-eyebrow">角色</span>
-                <h2>协作偏好</h2>
+                <span class="settings-eyebrow">{{ __t('apps.arca.ui', '角色') }}</span>
+                <h2>{{ __t('apps.arca.ui', '协作偏好') }}</h2>
               </div>
               <ArcaAvatar
                 v-if="preferences.defaultAgentId"
@@ -627,23 +712,23 @@ watch(
             </header>
             <div class="settings-card-body">
               <label class="settings-field">
-                默认协作者
+                {{ __t('apps.arca.ui', '默认协作者') }}
                 <ArcaSelect
                   v-model="preferences.defaultAgentId"
-                  aria-label="默认协作者"
+                  :aria-label="__t('apps.arca.ui', '默认协作者')"
                   :options="agentOptions"
                 />
               </label>
               <div class="settings-assurance">
                 <ArcaIcon name="check" :size="17" />
-                <span>接受前审阅</span>
-                <span class="settings-pill is-ready">已开启</span>
+                <span>{{ __t('apps.arca.ui', '接受前审阅') }}</span>
+                <span class="settings-pill is-ready">{{ __t('apps.arca.ui', '已开启') }}</span>
               </div>
             </div>
             <footer class="settings-card-footer">
               <span class="toolbar-spacer" />
               <button class="primary-button" :disabled="saving">
-                {{ saving ? '保存中…' : '保存设置' }}
+                {{ saving ? __t('apps.arca.ui', '保存中…') : __t('apps.arca.ui', '保存设置') }}
               </button>
             </footer>
           </section>
@@ -652,19 +737,23 @@ watch(
           <section class="settings-card">
             <header class="settings-card-heading">
               <div>
-                <span class="settings-eyebrow">工作台</span>
-                <h2>外观</h2>
+                <span class="settings-eyebrow">{{ __t('apps.arca.ui', '工作台') }}</span>
+                <h2>{{ __t('apps.arca.ui', '外观') }}</h2>
               </div>
               <span
                 v-if="store.hostTheme && store.themePreference === 'system'"
                 class="settings-pill"
               >
-                跟随主窗口
+                {{ __t('apps.arca.ui', '跟随主窗口') }}
               </span>
             </header>
             <div class="settings-card-body">
-              <h3>主题</h3>
-              <div class="settings-choice-grid" role="group" aria-label="主题">
+              <h3>{{ __t('apps.arca.ui', '主题') }}</h3>
+              <div
+                class="settings-choice-grid"
+                role="group"
+                :aria-label="__t('apps.arca.ui', '主题')"
+              >
                 <button
                   v-for="option in themeOptions"
                   :key="option.value"
@@ -691,7 +780,11 @@ watch(
                     </b>
                   </span>
                   <span>
-                    {{ option.value === 'system' && store.hostTheme ? '跟随主窗口' : option.label }}
+                    {{
+                      option.value === 'system' && store.hostTheme
+                        ? __t('apps.arca.ui', '跟随主窗口')
+                        : option.label
+                    }}
                     <ArcaIcon
                       v-if="store.themePreference === option.value"
                       name="check"
@@ -700,8 +793,12 @@ watch(
                   </span>
                 </button>
               </div>
-              <h3 class="settings-subheading">动效</h3>
-              <div class="settings-motion-options" role="group" aria-label="动效">
+              <h3 class="settings-subheading">{{ __t('apps.arca.ui', '动效') }}</h3>
+              <div
+                class="settings-motion-options"
+                role="group"
+                :aria-label="__t('apps.arca.ui', '动效')"
+              >
                 <button
                   v-for="option in motionOptions"
                   :key="option.value"

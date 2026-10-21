@@ -1,0 +1,18 @@
+{
+  "向量Store维度已切换: {0}": "Vector Store dimension has been switched: {0}",
+  "Store 已关闭: {0}": "Store Closed: {0}",
+  "Store 关闭失败: {0}": "Store closing failed: {0}",
+  "已保留数据库升级前的完整备份": "has retained a full backup of the database before the upgrade",
+  "快照完成后关闭只读 Store 失败": "Failed to close the read-only Store after the snapshot was completed",
+  "快照完成后恢复自动压实失败": "Failed to restore automatic compaction after snapshot completion",
+  "Store 已落盘: {0}": "Store has been placed: {0}",
+  "Store 落盘失败: {0}": "Store placement failed: {0}",
+  "文本索引已重编译: {0}": "text index recompiled: {0}",
+  "文本索引重编译失败: {0}": "Text index recompilation failed: {0}",
+  "文本索引懒编译完成: {0}": "Text index lazy compilation completed: {0}",
+  "文本索引懒编译失败: {0}": "Text index lazy compilation failed: {0}",
+  "Store 节点统计失败: {0}": "Store node statistics failed: {0}",
+  "Agent Store 已清空: agent={0}, mode={1}": "Agent Store has been cleared: agent={0}, mode={1}",
+  "共享 Store 已清空: kind={0}": "Shared Store has been cleared: kind={0}",
+  "打开 TriviumDB Store: {0}": "Open TriviumDB Store: {0}"
+}

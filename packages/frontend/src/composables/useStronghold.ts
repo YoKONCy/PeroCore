@@ -1,3 +1,4 @@
+import { t as __t } from '../i18n/index'
 /**
  * useStronghold — 据点管理 composable
  *
@@ -185,7 +186,7 @@ export function useStronghold() {
       rebuildAgentStatus()
     } catch (e) {
       // 档案加载失败不阻塞据点功能：回退为显示 agentId
-      logger.error('Stronghold', '加载角色档案失败', e)
+      logger.error('Stronghold', __t('logs.frontend.useStronghold', '加载角色档案失败'), e)
     }
   }
 
@@ -216,7 +217,7 @@ export function useStronghold() {
       isAwaitingReply.value = false
       replyStatus.value = ''
       activeRound.value = null
-      notify.toast('据点实时状态已中断，已通过消息快照完成对账', { type: 'warning' })
+      notify.toast(__t('ui.useStronghold', '连接中断，消息已刷新'), { type: 'warning' })
     }, 90_000)
   }
 
@@ -372,7 +373,7 @@ export function useStronghold() {
       }
       return snapshot
     } catch (e) {
-      logger.error('Stronghold', '加载消息失败', e)
+      logger.error('Stronghold', __t('logs.frontend.useStronghold', '加载消息失败'), e)
       return []
     } finally {
       if (requestId === messageRequestId) isLoadingMessages.value = false
@@ -439,13 +440,17 @@ export function useStronghold() {
         isAwaitingReply.value = true
         replyStatus.value = `${dispatch.agentIds?.length ?? 1} 位角色已进入本轮回复队列`
       } else if (!dispatch.replyQueued) {
-        notify.toast(`消息已发送；${dispatch.reason}`, { type: 'info' })
+        notify.toast(__t('ui.useStronghold', '消息已发送；{0}', [dispatch.reason]), {
+          type: 'info',
+        })
       }
       return true
     } catch (e) {
       complete?.(false)
-      notify.toast('发送消息失败: ' + (e as Error).message, { type: 'error' })
-      logger.error('Stronghold', '发送消息失败', e)
+      notify.toast(__t('ui.useStronghold', '发送消息失败: ') + (e as Error).message, {
+        type: 'error',
+      })
+      logger.error('Stronghold', __t('logs.frontend.useStronghold', '发送消息失败'), e)
       return false
     } finally {
       isSendingMessage.value = false
@@ -464,13 +469,20 @@ export function useStronghold() {
       const deleted = new Set(response.data?.deletedMessageIds ?? [messageId])
       await fetchMessages(roomId)
       const deletedCount = response.data?.deletedCount ?? deleted.size
-      notify.toast(deletedCount > 1 ? `已删除 ${deletedCount} 条关联消息` : '消息已删除', {
-        type: 'success',
-      })
+      notify.toast(
+        deletedCount > 1
+          ? __t('ui.useStronghold', '已删除 {0} 条关联消息', [deletedCount])
+          : __t('ui.useStronghold', '消息已删除'),
+        {
+          type: 'success',
+        },
+      )
       return true
     } catch (e) {
-      notify.toast('删除消息失败: ' + (e as Error).message, { type: 'error' })
-      logger.error('Stronghold', '删除消息失败', e)
+      notify.toast(__t('ui.useStronghold', '删除消息失败: ') + (e as Error).message, {
+        type: 'error',
+      })
+      logger.error('Stronghold', __t('logs.frontend.useStronghold', '删除消息失败'), e)
       return false
     }
   }
@@ -495,11 +507,11 @@ export function useStronghold() {
     try {
       const res = await strongholdApi.callButler(roomId, query)
       // 管家执行结果（含 LLM 旁白/动作汇总）以 toast 反馈
-      notify.toast(res.data?.message || '管家已执行', { type: 'success' })
+      notify.toast(res.data?.message || __t('ui.useStronghold', '管家已执行'), { type: 'success' })
       await Promise.all([fetchMessages(roomId), fetchRooms(currentFacility.value?.id)])
     } catch (e) {
-      notify.toast('管家调用失败: ' + (e as Error).message, 'error')
-      logger.error('Stronghold', '管家调用失败', e)
+      notify.toast(__t('ui.useStronghold', '管家调用失败: ') + (e as Error).message, 'error')
+      logger.error('Stronghold', __t('logs.frontend.useStronghold', '管家调用失败'), e)
     }
   }
 

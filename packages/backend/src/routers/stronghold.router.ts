@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * Stronghold Router — 据点/群聊管理 API
  *
@@ -26,7 +27,7 @@ export function createStrongholdRouter(ctx: AppContext) {
   // GET /api/stronghold/facilities — 列出所有设施
   router.get('/facilities', async (c) => {
     const facilities = await ctx.strongholdService.listFacilities()
-    return c.json({ code: 'OK', message: '获取成功', data: facilities })
+    return c.json({ code: 'OK', message: __t('server.routers', '获取成功'), data: facilities })
   })
 
   // POST /api/stronghold/facilities — 创建设施
@@ -36,7 +37,10 @@ export function createStrongholdRouter(ctx: AppContext) {
       throw new AppError('VALIDATION_ERROR', { message: 'name 为必填字段' })
     }
     const facility = await ctx.strongholdService.createFacility(body)
-    return c.json({ code: 'CREATED', message: '设施已创建', data: facility }, 201)
+    return c.json(
+      { code: 'CREATED', message: __t('server.routers', '设施已创建'), data: facility },
+      201,
+    )
   })
 
   // ═══ 房间管理 ═══
@@ -54,7 +58,7 @@ export function createStrongholdRouter(ctx: AppContext) {
       }),
     )
 
-    return c.json({ code: 'OK', message: '获取成功', data: enriched })
+    return c.json({ code: 'OK', message: __t('server.routers', '获取成功'), data: enriched })
   })
 
   // POST /api/stronghold/rooms — 创建房间
@@ -64,7 +68,10 @@ export function createStrongholdRouter(ctx: AppContext) {
       throw new AppError('VALIDATION_ERROR', { message: 'facilityId 和 name 为必填字段' })
     }
     const room = await ctx.strongholdService.createRoom(body)
-    return c.json({ code: 'CREATED', message: '房间已创建', data: room }, 201)
+    return c.json(
+      { code: 'CREATED', message: __t('server.routers', '房间已创建'), data: room },
+      201,
+    )
   })
 
   // PUT /api/stronghold/rooms/:roomId — 更新房间
@@ -75,14 +82,14 @@ export function createStrongholdRouter(ctx: AppContext) {
     if (!room) {
       throw new AppError('NOT_FOUND', { message: `房间 ${roomId} 不存在` })
     }
-    return c.json({ code: 'OK', message: '房间已更新', data: room })
+    return c.json({ code: 'OK', message: __t('server.routers', '房间已更新'), data: room })
   })
 
   // DELETE /api/stronghold/rooms/:roomId — 删除房间
   router.delete('/rooms/:roomId', async (c) => {
     const roomId = c.req.param('roomId')
     await ctx.strongholdService.deleteRoom(roomId)
-    return c.json({ code: 'OK', message: '房间已删除' })
+    return c.json({ code: 'OK', message: __t('server.routers', '房间已删除') })
   })
 
   // PUT /api/stronghold/rooms/:roomId/env — 更新环境变量
@@ -93,7 +100,7 @@ export function createStrongholdRouter(ctx: AppContext) {
       throw new AppError('VALIDATION_ERROR', { message: 'key 为必填字段' })
     }
     await ctx.strongholdService.updateEnvironment(roomId, body.key, body.value)
-    return c.json({ code: 'OK', message: '环境变量已更新' })
+    return c.json({ code: 'OK', message: __t('server.routers', '环境变量已更新') })
   })
 
   // ═══ Agent 位置 ═══
@@ -110,14 +117,14 @@ export function createStrongholdRouter(ctx: AppContext) {
       throw new AppError('VALIDATION_ERROR', { message: `Agent ${body.agentId} 未启用` })
     }
     const location = await ctx.strongholdService.moveAgent(body.agentId, body.roomId)
-    return c.json({ code: 'OK', message: 'Agent 已移动', data: location })
+    return c.json({ code: 'OK', message: __t('server.routers', 'Agent 已移动'), data: location })
   })
 
   // GET /api/stronghold/locations/:agentId — 获取 Agent 位置
   router.get('/locations/:agentId', async (c) => {
     const agentId = c.req.param('agentId')
     const room = await ctx.strongholdService.getAgentLocation(agentId)
-    return c.json({ code: 'OK', message: '获取成功', data: room ?? null })
+    return c.json({ code: 'OK', message: __t('server.routers', '获取成功'), data: room ?? null })
   })
 
   // ═══ 群聊消息 ═══
@@ -127,7 +134,7 @@ export function createStrongholdRouter(ctx: AppContext) {
     try {
       const limit = Math.min(200, Math.max(1, Number(c.req.query('limit') ?? '100')))
       const projection = await ctx.strongholdProjection.getSnapshot(c.req.param('roomId'), limit)
-      return c.json({ code: 'OK', message: '获取成功', data: projection })
+      return c.json({ code: 'OK', message: __t('server.routers', '获取成功'), data: projection })
     } catch (error) {
       throw new AppError('NOT_FOUND', {
         message: error instanceof Error ? error.message : '据点 Projection 不存在',
@@ -140,14 +147,14 @@ export function createStrongholdRouter(ctx: AppContext) {
     const roomId = c.req.param('roomId')
     const limit = Number(c.req.query('limit') ?? '50')
     const messages = await ctx.groupChatService.getHistory(roomId, limit)
-    return c.json({ code: 'OK', message: '获取成功', data: messages })
+    return c.json({ code: 'OK', message: __t('server.routers', '获取成功'), data: messages })
   })
 
   // GET /api/stronghold/rooms/:roomId/message-count — 获取房间消息数量（轻量计数）
   router.get('/rooms/:roomId/message-count', async (c) => {
     const roomId = c.req.param('roomId')
     const count = await ctx.groupChatService.countMessages(roomId)
-    return c.json({ code: 'OK', message: '获取成功', data: { count } })
+    return c.json({ code: 'OK', message: __t('server.routers', '获取成功'), data: { count } })
   })
 
   // POST /api/stronghold/rooms/:roomId/messages — 发送消息 + 触发调度
@@ -193,7 +200,7 @@ export function createStrongholdRouter(ctx: AppContext) {
       return c.json(
         {
           code: 'CREATED',
-          message: '系统消息已发送',
+          message: __t('server.routers', '系统消息已发送'),
           data: { message: msg, replyQueued: false, reason: '系统消息不触发回复' },
         },
         201,
@@ -214,11 +221,11 @@ export function createStrongholdRouter(ctx: AppContext) {
     const allowAutoFollowUp = initialQueue.length === 1 && !isAllMention
     if (queue.length === 0) {
       const reason = validRoomAgents.length === 0 ? '当前房间没有已启用的角色' : dispatch.reason
-      logger.info(`调度决定: 无人接话 (${reason})`)
+      logger.info(__t('logs.routers', '调度决定: 无人接话 ({0})', [reason]))
       return c.json(
         {
           code: 'CREATED',
-          message: '消息已发送，但当前没有角色接话',
+          message: __t('server.routers', '消息已发送，但当前没有角色接话'),
           data: { message: msg, replyQueued: false, reason },
         },
         201,
@@ -237,7 +244,7 @@ export function createStrongholdRouter(ctx: AppContext) {
         timestamp: Date.now(),
       })
     await broadcastRound('stronghold_round_started', { agentIds: initialQueue })
-    logger.info(`调度决定: ${queue.join(' -> ')} (${dispatch.reason})`)
+    logger.info(__t('logs.routers', '调度决定: {0} ({1})', [queue.join(' -> '), dispatch.reason]))
     setImmediate(async () => {
       const completed = new Set<string>()
       let allowSummon = allowAutoFollowUp
@@ -310,17 +317,22 @@ export function createStrongholdRouter(ctx: AppContext) {
               if (followUpAgentId) {
                 queue.push(followUpAgentId)
                 await broadcastRound('stronghold_agent_queued', { agentId: followUpAgentId })
-                logger.info(`自动接话调度: ${followUpAgentId} (${followUpDispatch.reason})`)
+                logger.info(
+                  __t('logs.routers', '自动接话调度: {0} ({1})', [
+                    followUpAgentId,
+                    followUpDispatch.reason,
+                  ]),
+                )
               }
             } catch (followUpError) {
               const followUpReason =
                 followUpError instanceof Error ? followUpError.message : String(followUpError)
-              logger.error(`自动接话调度失败: ${followUpReason}`)
+              logger.error(__t('logs.routers', '自动接话调度失败: {0}', [followUpReason]))
             }
           }
         } catch (err) {
           const reason = err instanceof Error ? err.message : String(err)
-          logger.error(`Agent ${agentId} 群聊发言失败: ${reason}`)
+          logger.error(__t('logs.routers', 'Agent {0} 群聊发言失败: {1}', [agentId, reason]))
           await broadcastRound('stronghold_agent_failed', { agentId, error: reason })
           if (!pairId || (await ctx.groupChatService.isPairActive(roomId, pairId))) {
             await ctx.groupChatService.sendMessage({
@@ -343,7 +355,9 @@ export function createStrongholdRouter(ctx: AppContext) {
       {
         code: 'CREATED',
         message:
-          initialQueue.length > 1 ? '消息已发送，成员将依次回复' : '消息已发送，角色正在回复',
+          initialQueue.length > 1
+            ? __t('server.routers', '消息已发送，成员将依次回复')
+            : __t('server.routers', '消息已发送，角色正在回复'),
         data: {
           message: msg,
           roundId,
@@ -373,7 +387,9 @@ export function createStrongholdRouter(ctx: AppContext) {
       return c.json({
         code: 'OK',
         message:
-          result.deletedCount > 1 ? `已删除 ${result.deletedCount} 条关联消息` : '消息已删除',
+          result.deletedCount > 1
+            ? __t('server.routers', '已删除 {0} 条关联消息', [result.deletedCount])
+            : __t('server.routers', '消息已删除'),
         data: result,
       })
     } catch (err) {
@@ -387,7 +403,7 @@ export function createStrongholdRouter(ctx: AppContext) {
   router.get('/rooms/:roomId/members', async (c) => {
     const roomId = c.req.param('roomId')
     const members = await ctx.groupChatService.getRoomMembers(roomId)
-    return c.json({ code: 'OK', message: '获取成功', data: members })
+    return c.json({ code: 'OK', message: __t('server.routers', '获取成功'), data: members })
   })
 
   // POST /api/stronghold/rooms/:roomId/members — 添加成员
@@ -404,7 +420,7 @@ export function createStrongholdRouter(ctx: AppContext) {
       })
     }
     await ctx.groupChatService.addMember(roomId, agent.id, body.role)
-    return c.json({ code: 'OK', message: '成员已添加' })
+    return c.json({ code: 'OK', message: __t('server.routers', '成员已添加') })
   })
 
   // ═══ 管家 ═══
@@ -423,7 +439,7 @@ export function createStrongholdRouter(ctx: AppContext) {
         action: body.action,
         requesterId: body.requesterId ?? 'user',
       })
-      return c.json({ code: 'OK', message: '管家命令已执行', data: result })
+      return c.json({ code: 'OK', message: __t('server.routers', '管家命令已执行'), data: result })
     } catch (err) {
       throw new AppError('VALIDATION_ERROR', {
         message: err instanceof Error ? err.message : '管家命令执行失败',
@@ -434,14 +450,14 @@ export function createStrongholdRouter(ctx: AppContext) {
   // GET /api/stronghold/butler — 获取管家配置
   router.get('/butler', async (c) => {
     const config = await ctx.strongholdService.getButlerConfig()
-    return c.json({ code: 'OK', message: '获取成功', data: config })
+    return c.json({ code: 'OK', message: __t('server.routers', '获取成功'), data: config })
   })
 
   // PUT /api/stronghold/butler/toggle — 切换管家启用
   router.put('/butler/toggle', async (c) => {
     const body = await c.req.json()
     await ctx.strongholdService.updateButlerEnabled(body.enabled ?? false)
-    return c.json({ code: 'OK', message: '管家状态已更新' })
+    return c.json({ code: 'OK', message: __t('server.routers', '管家状态已更新') })
   })
 
   return router

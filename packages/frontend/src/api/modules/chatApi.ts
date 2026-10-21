@@ -5,7 +5,12 @@
  * 非流式聊天走 ApiClient；流式走 streamRequest。
  */
 
-import type { ConversationProjectionSnapshot, ConversationSurfaceDescriptor } from '@infos/shared'
+import type {
+  ConversationProjectionSnapshot,
+  ConversationSurfaceDescriptor,
+  ConversationQueueSnapshot,
+  QueuedConversationInput,
+} from '@infos/shared'
 import { apiClient } from '../client'
 import { streamRequest } from '../stream'
 import type { SseEvents } from '../stream'
@@ -74,7 +79,56 @@ export interface ChatSendResponse {
   surface: ConversationSurfaceDescriptor
 }
 
+async function historyRequest<T>(
+  threadId: string,
+  request: Promise<T>,
+  discardPending: boolean,
+): Promise<T> {
+  const result = await request
+  if (typeof window !== 'undefined')
+    window.dispatchEvent(
+      new CustomEvent('infos:conversation-history-changed', {
+        detail: { threadId, discardPending },
+      }),
+    )
+  return result
+}
+
 export const chatApi = {
+  queueLive: (threadId: string) =>
+    apiClient.request<ConversationSurfaceDescriptor | null>(
+      `/chat/queue/${encodeURIComponent(threadId)}/live`,
+      { signal: AbortSignal.timeout(10_000) },
+    ),
+  queue: (threadId: string, signal?: AbortSignal) =>
+    apiClient.request<ConversationQueueSnapshot>(`/chat/queue/${encodeURIComponent(threadId)}`, {
+      signal: signal ?? AbortSignal.timeout(10_000),
+    }),
+  enqueue: (input: QueuedConversationInput, clientMessageId: string) =>
+    apiClient.post<ConversationQueueSnapshot>(`/chat/queue/${encodeURIComponent(input.threadId)}`, {
+      ...input,
+      clientMessageId,
+    }),
+  changeQueued: (
+    threadId: string,
+    id: string,
+    revision: number,
+    action: 'edit' | 'cancel' | 'immediate' | 'draft',
+    content?: string,
+  ) =>
+    apiClient.patch<ConversationQueueSnapshot>(
+      `/chat/queue/${encodeURIComponent(threadId)}/items/${encodeURIComponent(id)}`,
+      { revision, action, content },
+    ),
+  controlQueue: (threadId: string, paused: boolean) =>
+    apiClient.post<ConversationQueueSnapshot>(
+      `/chat/queue/${encodeURIComponent(threadId)}/control`,
+      { paused },
+    ),
+  reorderQueue: (threadId: string, order: Array<{ id: string; revision: number }>) =>
+    apiClient.post<ConversationQueueSnapshot>(`/chat/queue/${encodeURIComponent(threadId)}/order`, {
+      order,
+    }),
   /** 非流式聊天返回与历史、流式提交同构的 committed Surface。 */
   send: (data: ChatRequest) => apiClient.post<ChatSendResponse>('/chat', data),
 
@@ -82,19 +136,41 @@ export const chatApi = {
   stream: (data: ChatRequest, events: SseEvents) => streamRequest('/chat/stream', data, events),
 
   stop: (data: StopRequest) => apiClient.post<void>('/chat/stop', data),
-  activeTasks: () => apiClient.get<Array<{ threadId: string; state: string }>>('/chat/tasks'),
-
-  editMessage: (threadId: string, msgId: string, content: string, expectedRevision?: number) =>
-    apiClient.patch<ConversationProjectionSnapshot>(`/chat/threads/${threadId}/messages/${msgId}`, {
-      content,
-      expectedRevision,
+  activeTasks: () =>
+    apiClient.request<Array<{ threadId: string; state: string }>>('/chat/tasks', {
+      signal: AbortSignal.timeout(10_000),
     }),
 
+  editMessage: (threadId: string, msgId: string, content: string, expectedRevision?: number) =>
+    historyRequest(
+      threadId,
+      apiClient.patch<ConversationProjectionSnapshot>(
+        `/chat/threads/${threadId}/messages/${msgId}`,
+        {
+          content,
+          expectedRevision,
+        },
+      ),
+      false,
+    ),
+
   deleteMessage: (threadId: string, msgId: string) =>
-    apiClient.delete<ConversationProjectionSnapshot>(`/chat/threads/${threadId}/messages/${msgId}`),
+    historyRequest(
+      threadId,
+      apiClient.delete<ConversationProjectionSnapshot>(
+        `/chat/threads/${threadId}/messages/${msgId}`,
+      ),
+      true,
+    ),
 
   deleteMessagePair: (threadId: string, msgId: string) =>
-    apiClient.delete<{ deletedCount: number }>(`/chat/threads/${threadId}/messages/${msgId}/pair`),
+    historyRequest(
+      threadId,
+      apiClient.delete<{ deletedCount: number }>(
+        `/chat/threads/${threadId}/messages/${msgId}/pair`,
+      ),
+      true,
+    ),
 
   previewRewind: (threadId: string, input: { messageId?: number; wholeThread?: boolean }) =>
     apiClient.post<RewindPreview>(`/chat/threads/${threadId}/rewind-preview`, input),
@@ -102,7 +178,12 @@ export const chatApi = {
   rewind: (
     threadId: string,
     input: { messageId?: number; wholeThread?: boolean; preserveInputAttachments?: boolean },
-  ) => apiClient.post<RewindResult>(`/chat/threads/${threadId}/rewind`, input),
+  ) =>
+    historyRequest(
+      threadId,
+      apiClient.post<RewindResult>(`/chat/threads/${threadId}/rewind`, input),
+      true,
+    ),
 
   pauseTask: (threadId: string) => apiClient.post<void>('/chat/tasks/pause', { threadId }),
 

@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * MCP Tool Bridge — MCP 工具 → ToolRegistry 桥接
  *
@@ -61,7 +62,7 @@ function createBridgedTool(manager: McpClientManager, tool: McpToolInfo): Bridge
     },
 
     async execute(args, context) {
-      logger.debug(`MCP 工具调用: ${qualifiedName}`, { args })
+      logger.debug(__t('logs.mcp', 'MCP 工具调用: {0}', [qualifiedName]), { args })
 
       try {
         const result = await manager.callTool(
@@ -93,7 +94,7 @@ function createBridgedTool(manager: McpClientManager, tool: McpToolInfo): Bridge
         return JSON.stringify(result)
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : String(err)
-        logger.error(`MCP 工具执行失败: ${qualifiedName} — ${errorMsg}`)
+        logger.error(__t('logs.mcp', 'MCP 工具执行失败: {0} — {1}', [qualifiedName, errorMsg]))
         return {
           output: `MCP 工具执行失败: ${errorMsg}`,
           durationMs: 0,

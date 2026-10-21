@@ -1,3 +1,4 @@
+import { t as __t } from '../../i18n/index'
 /**
  * useLauncher — 启动器流程 composable
  *
@@ -19,6 +20,7 @@ import { memoryApi } from '../../api/modules/memoryApi'
 import { agentApi } from '../../api/modules/agentApi'
 import { invoke, isElectron } from '../../utils/ipcAdapter'
 import { logger } from '../../lib/logger'
+import { completeOnboarding, loadOnboardingFlow, queueDesktopOnboarding } from './onboardingFlow'
 
 export type LaunchPhase = 'connecting' | 'checking' | 'ready' | 'entering' | 'done'
 
@@ -42,13 +44,45 @@ export function useLauncher() {
 
   const showOnboarding = ref(false)
   const onboardingCompleted = ref(false)
+  const desktopGuidePending = ref(false)
+  const onboardingLaunching = ref(false)
 
   const checks = ref<CheckItem[]>([
-    { id: 'backend', label: '后端服务', status: 'pending' },
-    { id: 'database', label: '数据库连接', status: 'pending' },
-    { id: 'model', label: '模型可用性', status: 'pending' },
-    { id: 'memory', label: '记忆系统', status: 'pending' },
-    { id: 'extension', label: 'Agent 系统', status: 'pending' },
+    {
+      id: 'backend',
+      get label() {
+        return __t('ui.launcher', '后端服务')
+      },
+      status: 'pending',
+    },
+    {
+      id: 'database',
+      get label() {
+        return __t('ui.launcher', '数据库连接')
+      },
+      status: 'pending',
+    },
+    {
+      id: 'model',
+      get label() {
+        return __t('ui.launcher', '模型可用性')
+      },
+      status: 'pending',
+    },
+    {
+      id: 'memory',
+      get label() {
+        return __t('ui.launcher', '记忆系统')
+      },
+      status: 'pending',
+    },
+    {
+      id: 'extension',
+      get label() {
+        return __t('ui.launcher', 'Agent 系统')
+      },
+      status: 'pending',
+    },
   ])
 
   const allChecksOk = computed(() =>
@@ -94,7 +128,7 @@ export function useLauncher() {
       await checkOnboardingStatus()
       await runChecks()
     } catch (e) {
-      logger.error('Launcher', '保存 EULA 状态失败', e)
+      logger.error('Launcher', __t('logs.frontend.launcher', '保存 EULA 状态失败'), e)
       errorMessage.value = '保存用户协议状态失败，请确认后端服务已启动后重试'
     }
   }
@@ -112,14 +146,9 @@ export function useLauncher() {
   /** 检查新手引导是否已完成 */
   async function checkOnboardingStatus(): Promise<void> {
     try {
-      const res = await configApi.get('onboarding_completed')
-      const completed = res.data?.value
-      if (!completed || completed === 'false') {
-        // 新用户，引导在就绪后触发
-        onboardingCompleted.value = false
-      } else {
-        onboardingCompleted.value = true
-      }
+      const flow = await loadOnboardingFlow()
+      onboardingCompleted.value = flow.stage !== 'launcher'
+      desktopGuidePending.value = flow.stage === 'desktop'
     } catch {
       // 配置不存在 = 新用户
       onboardingCompleted.value = false
@@ -132,11 +161,23 @@ export function useLauncher() {
    */
   async function finishOnboarding(): Promise<void> {
     showOnboarding.value = false
+    await completeOnboarding()
+    onboardingCompleted.value = true
+    desktopGuidePending.value = false
+  }
+
+  /** 最后一步点击真实启动按钮，先交接进度，再打开桌面主界面。 */
+  async function launchDesktopOnboarding(): Promise<boolean> {
+    if (onboardingLaunching.value || !['ready', 'done'].includes(phase.value)) return false
+    onboardingLaunching.value = true
     try {
-      await configApi.set('onboarding_completed', 'launcher_done')
-      onboardingCompleted.value = true
-    } catch (e) {
-      logger.error('Launcher', '保存引导状态失败', e)
+      if (!desktopGuidePending.value) await queueDesktopOnboarding()
+      desktopGuidePending.value = true
+      const success = await enterApp('app')
+      if (success) showOnboarding.value = false
+      return success
+    } finally {
+      onboardingLaunching.value = false
     }
   }
 
@@ -321,6 +362,14 @@ export function useLauncher() {
   async function enterApp(target: 'pet' | 'app' = 'pet'): Promise<boolean> {
     if (phase.value === 'entering') return false
     phase.value = 'entering'
+    if (desktopGuidePending.value) {
+      try {
+        desktopGuidePending.value = (await loadOnboardingFlow()).stage === 'desktop'
+      } catch {
+        /* 读取失败时仍按待接续的桌面导览启动。 */
+      }
+      if (desktopGuidePending.value) target = 'app'
+    }
 
     if (!isElectron()) {
       // Docker/浏览器模式: 后端已经独立运行，直接跳转
@@ -346,7 +395,7 @@ export function useLauncher() {
       phase.value = 'done'
       return true
     } catch (e) {
-      logger.error('Launcher', '启动流程出错', e)
+      logger.error('Launcher', __t('logs.frontend.launcher', '启动流程出错'), e)
       enteringText.value = '启动出错，请重试'
       errorMessage.value = `启动失败: ${e}`
       // 恢复就绪状态，允许用户重试。
@@ -369,7 +418,7 @@ export function useLauncher() {
       try {
         const res = await systemApi.health()
         if (res.data?.status === 'ok') {
-          logger.info('Launcher', '后端已就绪!')
+          logger.info('Launcher', __t('logs.frontend.launcher', '后端已就绪!'))
           return true
         }
       } catch {
@@ -393,6 +442,7 @@ export function useLauncher() {
 
   /** 手动触发新手引导 */
   function triggerOnboarding(): void {
+    desktopGuidePending.value = false
     showOnboarding.value = true
   }
 
@@ -418,5 +468,8 @@ export function useLauncher() {
     showOnboarding,
     finishOnboarding,
     triggerOnboarding,
+    launchDesktopOnboarding,
+    desktopGuidePending,
+    onboardingLaunching,
   }
 }

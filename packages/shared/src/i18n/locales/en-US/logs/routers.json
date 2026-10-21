@@ -1,0 +1,15 @@
+{
+  "任务事件广播失败 ({0}): {1}": "Task event broadcast failed ({0}): {1}",
+  "日志级别已热更新: {0} (level={1})": "log level has been hot updated: {0} (level={1})",
+  "无效的日志级别: \"{0}\"，忽略变更（保持当前级别）": "Invalid log level: \"{0}\", ignore changes (keep current level)",
+  "检测到配置变更: {0}，触发 {1}": "detects configuration change: {0}, triggers {1}",
+  "批量配置变更，触发 {0}": "batch configuration changes, triggering {0}",
+  "WS 连接建立: {0}": "WS connection established: {0}",
+  "WS 连接断开: {0}": "WS disconnected: {0}",
+  "调度决定: 无人接话 ({0})": "Scheduling decision: No one answered ({0})",
+  "调度决定: {0} ({1})": "Scheduling decision: {0} ({1})",
+  "自动接话调度: {0} ({1})": "automatic call scheduling: {0} ({1})",
+  "自动接话调度失败: {0}": "Automatic call scheduling failure: {0}",
+  "Agent {0} 群聊发言失败: {1}": "Agent {0} failed to speak in group chat: {1}",
+  "收到迟到回答后继续会话失败": "Failed to continue session after receiving late reply"
+}

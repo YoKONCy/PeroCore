@@ -1,3 +1,4 @@
+import { t as __t } from './i18n.mjs'
 /**
  * 便携包运行依赖收集脚本
  *
@@ -158,6 +159,44 @@ function preservePeerDependency(packageName, peerName) {
   copyPackageTo(peerSource, peerTarget, peerName)
 }
 
+/** 文档库依赖不同代的 uuid、nanoid、流与压缩库，保留实际解析版本，避免扁平收集后串用。 */
+function preserveDocumentDependencies(packageName) {
+  const visited = new Set()
+  const visit = (source, target) => {
+    const key = `${source}:${target}`
+    if (visited.has(key)) return
+    visited.add(key)
+    const manifest = JSON.parse(fs.readFileSync(path.join(source, 'package.json'), 'utf8'))
+    for (const dependency of classifyManifestDependencies(manifest)) {
+      const candidates = [path.join(source, 'node_modules'), findNodeModulesAncestor(source)]
+        .filter(Boolean)
+        .map((base) => path.join(base, ...dependency.name.split('/')))
+      const installed = candidates.find((candidate) => fs.existsSync(candidate))
+      if (!installed) {
+        if (dependency.optional) continue
+        throw new Error(`文档依赖缺失: ${manifest.name} -> ${dependency.name}`)
+      }
+      const dependencySource = fs.realpathSync(installed)
+      const dependencyManifest = JSON.parse(
+        fs.readFileSync(path.join(dependencySource, 'package.json'), 'utf8'),
+      )
+      const flat = path.join(OUT_NODE_MODULES, ...dependency.name.split('/'))
+      const flatManifest = path.join(flat, 'package.json')
+      const sameVersion =
+        fs.existsSync(flatManifest) &&
+        JSON.parse(fs.readFileSync(flatManifest, 'utf8')).version === dependencyManifest.version
+      const destination = sameVersion
+        ? flat
+        : path.join(target, 'node_modules', ...dependency.name.split('/'))
+      copyPackageTo(dependencySource, destination, dependency.name)
+      visit(dependencySource, destination)
+    }
+  }
+  const source = resolvePackageDir(packageName)
+  if (!source) throw new Error(`文档运行依赖缺失: ${packageName}`)
+  visit(source, path.join(OUT_NODE_MODULES, ...packageName.split('/')))
+}
+
 /** 收集单个包及其依赖树到输出 node_modules */
 function collectPackage(pkgName, visited, optional = false) {
   if (visited.has(pkgName)) return
@@ -169,7 +208,9 @@ function collectPackage(pkgName, visited, optional = false) {
   const source = resolvePackageDir(pkgName)
   if (!source) {
     if (optional) {
-      console.warn(`⚠️  未找到当前平台可选依赖: ${pkgName}（跳过）`)
+      console.warn(
+        __t('scripts.collect-daemon-deps', '⚠️  未找到当前平台可选依赖: {0}（跳过）', [pkgName]),
+      )
       return
     }
     throw new Error(`未找到必需运行依赖: ${pkgName}`)
@@ -182,7 +223,7 @@ function collectPackage(pkgName, visited, optional = false) {
   copyDir(source, target, pkgName)
   // 该包自身的 node_modules 可能含嵌套依赖链接，加入候选基目录
   registerNestedNodeModules(source)
-  console.log(`✅ 已收集: ${pkgName}`)
+  console.log(__t('scripts.collect-daemon-deps', '✅ 已收集: {0}', [pkgName]))
 
   // 必需依赖缺失时直接终止发行构建；仅允许平台不匹配的可选依赖跳过。
   const pkgJsonPath = path.join(source, 'package.json')
@@ -266,7 +307,7 @@ function collectBundledRipgrep() {
   const target = path.join(targetDir, process.platform === 'win32' ? 'rg.exe' : 'rg')
   fs.copyFileSync(rgPath, target)
   if (process.platform !== 'win32') fs.chmodSync(target, 0o755)
-  console.log(`✅ 已收集内置 ripgrep: ${target}`)
+  console.log(__t('scripts.collect-daemon-deps', '✅ 已收集内置 ripgrep: {0}', [target]))
 }
 
 /** 对关键原生运行文件做强校验，避免发行包静默降级。 */
@@ -277,17 +318,29 @@ function validateNativeRuntime() {
     fs.readFileSync(path.join(root, 'packages', 'backend', 'package.json'), 'utf8'),
   ).dependencies.triviumdb
   if (triviumManifest.version !== requiredTriviumVersion)
-    throw new Error(`发行依赖 TriviumDB 版本错误：${triviumManifest.version}，需要 ${requiredTriviumVersion}`)
-  const libc = process.platform === 'linux' && process.report?.getReport?.().header?.glibcVersionRuntime
-    ? 'gnu' : 'musl'
-  const nativePlatform = process.platform === 'win32'
-    ? `${process.platform}-${process.arch}-msvc`
-    : process.platform === 'linux' ? `${process.platform}-${process.arch}-${libc}`
-      : `${process.platform}-${process.arch}`
-  const triviumCandidates = [`triviumdb.${nativePlatform}.node`,
-    `triviumdb.${process.platform}-${process.arch}.node`, 'triviumdb.node']
+    throw new Error(
+      `发行依赖 TriviumDB 版本错误：${triviumManifest.version}，需要 ${requiredTriviumVersion}`,
+    )
+  const libc =
+    process.platform === 'linux' && process.report?.getReport?.().header?.glibcVersionRuntime
+      ? 'gnu'
+      : 'musl'
+  const nativePlatform =
+    process.platform === 'win32'
+      ? `${process.platform}-${process.arch}-msvc`
+      : process.platform === 'linux'
+        ? `${process.platform}-${process.arch}-${libc}`
+        : `${process.platform}-${process.arch}`
+  const triviumCandidates = [
+    `triviumdb.${nativePlatform}.node`,
+    `triviumdb.${process.platform}-${process.arch}.node`,
+    'triviumdb.node',
+  ]
   if (!triviumCandidates.some((name) => fs.existsSync(path.join(triviumDir, name))))
     throw new Error(`TriviumDB 缺少当前平台原生模块：${nativePlatform}`)
+  const anydocDir = path.join(OUT_NODE_MODULES, '@firecrawl', `anydoc-${nativePlatform}`)
+  if (!findFileRecursive(anydocDir, (file) => path.extname(file) === '.node'))
+    throw new Error(`Anydoc 缺少当前平台原生模块：${nativePlatform}`)
   const ptyDir = path.join(OUT_NODE_MODULES, 'node-pty')
   if (!fs.existsSync(ptyDir)) throw new Error('发行依赖缺少 node-pty')
   if (!findFileRecursive(ptyDir, (file) => path.extname(file).toLowerCase() === '.node')) {
@@ -323,6 +376,7 @@ function main() {
   }
 
   preservePeerDependency('ajv-formats', 'ajv')
+  for (const name of ['docx', 'exceljs', 'pdfkit']) preserveDocumentDependencies(name)
   const isolatedAjv = JSON.parse(
     fs.readFileSync(
       path.join(OUT_NODE_MODULES, 'ajv-formats', 'node_modules', 'ajv', 'package.json'),
@@ -359,7 +413,13 @@ function main() {
     .readdirSync(OUT_NODE_MODULES, { recursive: true, withFileTypes: true })
     .filter((entry) => entry.isFile()).length
   const sizeMB = (fs.statSync(OUT_NODE_MODULES).size / 1024 / 1024).toFixed(2)
-  console.log(`\n🎉 运行依赖收集完成: ${count} 个文件, ${sizeMB} MB → ${OUT_NODE_MODULES}`)
+  console.log(
+    __t('scripts.collect-daemon-deps', '\n🎉 运行依赖收集完成: {0} 个文件, {1} MB → {2}', [
+      count,
+      sizeMB,
+      OUT_NODE_MODULES,
+    ]),
+  )
 }
 
 const isDirectExecution = process.argv[1]

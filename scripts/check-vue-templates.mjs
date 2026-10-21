@@ -1,3 +1,4 @@
+import { t as __t } from './i18n.mjs'
 import { readdirSync, readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { parse } from 'vue/compiler-sfc'
@@ -35,8 +36,15 @@ function checkDirectory(directory) {
 for (const directory of directories) checkDirectory(directory)
 
 if (errorCount > 0) {
-  console.error(`Vue 模板语法检查失败：${componentCount} 个组件，${errorCount} 个错误`)
+  console.error(
+    __t('scripts.check-vue-templates', 'Vue 模板语法检查失败：{0} 个组件，{1} 个错误', [
+      componentCount,
+      errorCount,
+    ]),
+  )
   process.exitCode = 1
 } else {
-  console.log(`Vue 模板语法检查通过：${componentCount} 个组件`)
+  console.log(
+    __t('scripts.check-vue-templates', 'Vue 模板语法检查通过：{0} 个组件', [componentCount]),
+  )
 }

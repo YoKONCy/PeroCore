@@ -1,3 +1,4 @@
+import { t as __t } from '../utils/i18n'
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -22,6 +23,7 @@ import { desktopControl, type DesktopCaller } from './desktopControl'
 import { windowsDesktop } from './windowsDesktop'
 import { completionAlerts } from './completionAlerts'
 import { isApplicationFocused } from './notificationVisibility'
+import { renderDocumentPdf } from './documentPdf'
 
 const CAPABILITY_PORT = Number(process.env.PERO_CAPABILITY_PORT ?? 9121)
 const DAEMON_HOST = process.env.PERO_DAEMON_HOST ?? '127.0.0.1'
@@ -125,13 +127,16 @@ class ElectronCapabilityProvider {
     this.socket?.close()
     this.socket = null
     this.sessionId = undefined
-    logger.info('CapabilityProvider', '已停止')
+    logger.info('CapabilityProvider', __t('electron.logs.capabilityProvider', '已停止'))
   }
 
   private connect(): void {
     if (this.stopped) return
     const url = `ws://${DAEMON_HOST}:${CAPABILITY_PORT}`
-    logger.info('CapabilityProvider', `正在连接 Daemon: ${url}`)
+    logger.info(
+      'CapabilityProvider',
+      __t('electron.logs.capabilityProvider', '正在连接 Daemon: {0}', [url]),
+    )
     const socket = new WebSocket(url)
     this.socket = socket
     socket.on('open', () => {
@@ -154,7 +159,12 @@ class ElectronCapabilityProvider {
       this.stopHeartbeat()
       this.scheduleReconnect()
     })
-    socket.on('error', (error) => logger.error('CapabilityProvider', `连接错误: ${error.message}`))
+    socket.on('error', (error) =>
+      logger.error(
+        'CapabilityProvider',
+        __t('electron.logs.capabilityProvider', '连接错误: {0}', [error.message]),
+      ),
+    )
   }
 
   private async handleMessage(raw: string): Promise<void> {
@@ -162,7 +172,10 @@ class ElectronCapabilityProvider {
     try {
       message = JSON.parse(raw) as DaemonToNodeMessage
     } catch {
-      logger.warn('CapabilityProvider', `收到非法 JSON: ${raw.slice(0, 200)}`)
+      logger.warn(
+        'CapabilityProvider',
+        __t('electron.logs.capabilityProvider', '收到非法 JSON: {0}', [raw.slice(0, 200)]),
+      )
       return
     }
     if (message.type === 'authenticated') {
@@ -175,7 +188,10 @@ class ElectronCapabilityProvider {
     if (message.type === 'node_accepted') {
       this.sessionId = message.sessionId
       this.startHeartbeat()
-      logger.info('CapabilityProvider', `Node已接入，Session=${message.sessionId}`)
+      logger.info(
+        'CapabilityProvider',
+        __t('electron.logs.capabilityProvider', 'Node已接入，Session={0}', [message.sessionId]),
+      )
       return
     }
     if (message.type === 'capability_invoke') {
@@ -188,7 +204,10 @@ class ElectronCapabilityProvider {
       return
     }
     if (message.type === 'error')
-      logger.error('CapabilityProvider', `Daemon错误: ${message.message}`)
+      logger.error(
+        'CapabilityProvider',
+        __t('electron.logs.capabilityProvider', 'Daemon错误: {0}', [message.message]),
+      )
   }
 
   private sendHello(): void {
@@ -229,6 +248,7 @@ class ElectronCapabilityProvider {
         'speaker',
         'audio-playback',
       ]),
+      this.offer('electron.document-render', 'document.render', ['renderPdf'], ['pdf']),
       this.offer(
         'electron.completion-alert',
         'client.completion-alert',
@@ -318,6 +338,8 @@ class ElectronCapabilityProvider {
           envelope.payload.input as Record<string, unknown>,
           controller.signal,
         )
+      } else if (envelope.operation === 'document.render/renderPdf') {
+        output = await renderDocumentPdf(envelope.payload.input, controller.signal)
       } else if (envelope.operation === 'client.completion-alert/notify') {
         controller.signal.throwIfAborted()
         output = await completionAlerts.notify(envelope.payload.input)
@@ -325,7 +347,10 @@ class ElectronCapabilityProvider {
         throw new Error(`CAPABILITY_TYPE_UNSUPPORTED: ${envelope.operation}`)
       }
       this.send({ type: 'capability_result', invocationId, success: true, output })
-      logger.info('CapabilityProvider', `调用完成: ${envelope.operation}`)
+      logger.info(
+        'CapabilityProvider',
+        __t('electron.logs.capabilityProvider', '调用完成: {0}', [envelope.operation]),
+      )
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error)
       const separator = text.indexOf(':')
@@ -339,7 +364,10 @@ class ElectronCapabilityProvider {
           retryable: /TIMEOUT|UNAVAILABLE|DISCONNECTED/.test(text),
         },
       })
-      logger.error('CapabilityProvider', `调用失败: ${envelope.operation} - ${text}`)
+      logger.error(
+        'CapabilityProvider',
+        __t('electron.logs.capabilityProvider', '调用失败: {0} - {1}', [envelope.operation, text]),
+      )
     } finally {
       clearTimeout(deadlineTimer)
       this.invocations.delete(invocationId)
@@ -376,6 +404,8 @@ class ElectronCapabilityProvider {
     targetWindow?.webContents.send('audio-output:play', {
       playbackId,
       assetUrl,
+      agentId: typeof input.agentId === 'string' ? input.agentId : undefined,
+      threadId: typeof input.threadId === 'string' ? input.threadId : undefined,
       volume: Number(input.volume ?? 1),
       caption:
         typeof input.caption === 'string' && input.caption.length <= 240
@@ -466,8 +496,12 @@ class ElectronCapabilityProvider {
           },
         ],
         message:
-          `已截取屏幕 (${raw.width}x${raw.height})。` +
-          `如需点击截图位置，请使用coordinateSpace=screenshot、displayId=${raw.displayId}、` +
+          __t('electron.ui.capabilityProvider', '已截取屏幕 ({0}x{1})。', [raw.width, raw.height]) +
+          __t(
+            'electron.ui.capabilityProvider',
+            '如需点击截图位置，请使用coordinateSpace=screenshot、displayId={0}、',
+            [raw.displayId],
+          ) +
           `screenshotWidth=${raw.width}、screenshotHeight=${raw.height}。`,
       }
     }
@@ -610,9 +644,15 @@ class ElectronCapabilityProvider {
         JSON.stringify({ version: 1, endpoint: `${host}:${port}`, token }, null, 2),
         { encoding: 'utf8', mode: 0o600 },
       )
-      logger.info('CapabilityProvider', '能力节点设备凭据已安全保存')
+      logger.info(
+        'CapabilityProvider',
+        __t('electron.logs.capabilityProvider', '能力节点设备凭据已安全保存'),
+      )
     } catch (error) {
-      logger.warn('CapabilityProvider', `保存能力节点设备凭据失败: ${error}`)
+      logger.warn(
+        'CapabilityProvider',
+        __t('electron.logs.capabilityProvider', '保存能力节点设备凭据失败: {0}', [error]),
+      )
     }
   }
 
@@ -622,13 +662,19 @@ class ElectronCapabilityProvider {
       const existing = fs.existsSync(file) ? fs.readFileSync(file, 'utf8').trim() : ''
       if (existing) return existing as KernelNodeId
     } catch (error) {
-      logger.warn('CapabilityProvider', `读取 Node ID失败: ${error}`)
+      logger.warn(
+        'CapabilityProvider',
+        __t('electron.logs.capabilityProvider', '读取 Node ID失败: {0}', [error]),
+      )
     }
     const id = `electron:${randomUUID()}` as KernelNodeId
     try {
       fs.writeFileSync(file, id, 'utf8')
     } catch (error) {
-      logger.warn('CapabilityProvider', `保存 Node ID失败: ${error}`)
+      logger.warn(
+        'CapabilityProvider',
+        __t('electron.logs.capabilityProvider', '保存 Node ID失败: {0}', [error]),
+      )
     }
     return id
   }

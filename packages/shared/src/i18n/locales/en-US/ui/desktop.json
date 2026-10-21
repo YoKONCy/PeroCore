@@ -1,0 +1,14 @@
+{
+  "桌面操作": "desktop operation",
+  "允许桌面操作": "allows desktop operation",
+  "用户操作鼠标键盘时暂停，继续后重新观察界面。": "The user pauses when operating the mouse and keyboard, and then re-observes the interface after continuing.",
+  "停止快捷键": "stop shortcut key",
+  "按下快捷键…": "Press the shortcut key...",
+  "正在操作桌面": "is operating the desktop",
+  "任务已暂停": "task has been suspended",
+  "随时操作鼠标键盘即可接管": "can take over at any time by operating the mouse and keyboard",
+  "继续后会核对当前状态，保留已有工作结果。": "will check the current status after continuing and retain the existing work results.",
+  "暂停": "Pause",
+  "继续任务": "continue the task",
+  "解除桌面暂停": "Unpause desktop"
+}

@@ -1,6 +1,8 @@
+import { t as __t } from '../lib/i18n'
 import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { z } from 'zod'
+import { WHOLESOME_MODE_KEY } from '@infos/shared'
 import type { AppContext } from '../container'
 import { promptBundleSchema, readPromptPersona } from '../services/prompt/promptWorkspace'
 import { AppError } from '../lib/appError'
@@ -26,11 +28,19 @@ export function createPromptRouter(ctx: AppContext) {
     '*',
     bodyLimit({
       maxSize: 4_100_000,
-      onError: (c) => c.json({ code: 'VALIDATION_ERROR', message: '提示词配置不能超过 4 MB' }, 413),
+      onError: (c) =>
+        c.json(
+          { code: 'VALIDATION_ERROR', message: __t('server.routers', '提示词配置不能超过 4 MB') },
+          413,
+        ),
     }),
   )
   router.get('/', (c) =>
-    c.json({ code: 'OK', message: '获取成功', data: ctx.promptWorkspace.view() }),
+    c.json({
+      code: 'OK',
+      message: __t('server.routers', '获取成功'),
+      data: ctx.promptWorkspace.view(),
+    }),
   )
   router.get('/variables', async (c) => {
     const scope = parse(z.string().min(1).max(500).optional(), c.req.query('scope'))
@@ -47,12 +57,12 @@ export function createPromptRouter(ctx: AppContext) {
       await c.req.json(),
     )
     await ctx.promptWorkspace.variableStore.reset(input.scope)
-    return c.json({ code: 'OK', message: '变量已重置' })
+    return c.json({ code: 'OK', message: __t('server.routers', '变量已重置') })
   })
   router.get('/versions/:id', (c) =>
     c.json({
       code: 'OK',
-      message: '获取成功',
+      message: __t('server.routers', '获取成功'),
       data: ctx.promptWorkspace.release(c.req.param('id')),
     }),
   )
@@ -60,7 +70,7 @@ export function createPromptRouter(ctx: AppContext) {
     const input = parse(z.object({ revision, bundle: promptBundleSchema }), await c.req.json())
     return c.json({
       code: 'OK',
-      message: '草稿已保存',
+      message: __t('server.routers', '草稿已保存'),
       data: await ctx.promptWorkspace.save(input.bundle, input.revision),
     })
   })
@@ -68,7 +78,7 @@ export function createPromptRouter(ctx: AppContext) {
     const input = parse(z.object({ bundle: promptBundleSchema }), await c.req.json())
     return c.json({
       code: 'OK',
-      message: '校验完成',
+      message: __t('server.routers', '校验完成'),
       data: ctx.promptWorkspace.validate(input.bundle),
     })
   })
@@ -93,7 +103,11 @@ export function createPromptRouter(ctx: AppContext) {
               result.framework.blocks.some((block) => block.id === issue.source),
           ),
       )
-      return c.json({ code: 'OK', message: '预设已解析，尚未保存', data: result })
+      return c.json({
+        code: 'OK',
+        message: __t('server.routers', '预设已解析，尚未保存'),
+        data: result,
+      })
     } catch (error) {
       throw new AppError('VALIDATION_ERROR', {
         message: error instanceof Error ? error.message : '酒馆预设解析失败',
@@ -117,7 +131,7 @@ export function createPromptRouter(ctx: AppContext) {
     )
     return c.json({
       code: 'OK',
-      message: '已发布，下轮生效',
+      message: __t('server.routers', '已发布，下轮生效'),
       data: await ctx.promptWorkspace.publish(input.revision, input.note),
     })
   })
@@ -125,7 +139,7 @@ export function createPromptRouter(ctx: AppContext) {
     const input = parse(z.object({ revision, id: z.string().max(180) }), await c.req.json())
     return c.json({
       code: 'OK',
-      message: '版本已恢复到草稿',
+      message: __t('server.routers', '版本已恢复到草稿'),
       data: await ctx.promptWorkspace.restore(input.id, input.revision),
     })
   })
@@ -160,6 +174,7 @@ export function createPromptRouter(ctx: AppContext) {
       prompt_seed: 'preview',
       generation_type: 'normal',
       ...input.variables,
+      wholesome_mode_enabled: (await ctx.configRepo.get(WHOLESOME_MODE_KEY)) !== 'false',
     }
     const state = input.taskId
       ? undefined
@@ -176,7 +191,7 @@ export function createPromptRouter(ctx: AppContext) {
       state.global = parse(seed, input.variables.global_variables)
     return c.json({
       code: 'OK',
-      message: '预览完成',
+      message: __t('server.routers', '预览完成'),
       data: ctx.promptWorkspace.preview(
         input.bundle,
         input.channel,

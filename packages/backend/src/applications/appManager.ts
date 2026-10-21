@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * AppManager — Agent 应用生命周期管理
  *
@@ -379,7 +380,7 @@ export class AppManagerImpl implements AppManager {
    */
   registerBuiltinRuntime(appId: string, factory: () => AgentAppRuntime): void {
     this.builtinRuntimes.set(appId, factory)
-    logger.info(`内置应用 runtime 已注册: ${appId}`)
+    logger.info(__t('logs.applications', '内置应用 runtime 已注册: {0}', [appId]))
   }
 
   /**
@@ -406,15 +407,21 @@ export class AppManagerImpl implements AppManager {
       return // 没有孤儿实例
     }
 
-    logger.info(`发现 ${staleRows.length} 个孤儿实例，正在清理...`)
+    logger.info(__t('logs.applications', '发现 {0} 个孤儿实例，正在清理...', [staleRows.length]))
     for (const row of staleRows) {
-      logger.info(`  清理孤儿实例: ${row.instanceId} (appId=${row.appId}, 旧状态=${row.status})`)
+      logger.info(
+        __t('logs.applications', '  清理孤儿实例: {0} (appId={1}, 旧状态={2})', [
+          row.instanceId,
+          row.appId,
+          row.status,
+        ]),
+      )
       await this.db
         .update(appInstances)
         .set({ status: 'stopped', stoppedAt: new Date().toISOString() })
         .where(eq(appInstances.instanceId, row.instanceId))
     }
-    logger.info(`孤儿实例清理完成，共清理 ${staleRows.length} 个`)
+    logger.info(__t('logs.applications', '孤儿实例清理完成，共清理 {0} 个', [staleRows.length]))
   }
 
   // ── 应用安装管理 ──
@@ -483,7 +490,7 @@ export class AppManagerImpl implements AppManager {
           updatedAt: now,
         })
         .where(eq(appRegistry.appId, manifest.id))
-      logger.info(`应用已更新: ${manifest.id} v${manifest.version}`)
+      logger.info(__t('logs.applications', '应用已更新: {0} v{1}', [manifest.id, manifest.version]))
     } else {
       // 新增
       await this.db.insert(appRegistry).values({
@@ -495,7 +502,7 @@ export class AppManagerImpl implements AppManager {
         installedAt: now,
         updatedAt: now,
       })
-      logger.info(`应用已安装: ${manifest.id} v${manifest.version}`)
+      logger.info(__t('logs.applications', '应用已安装: {0} v{1}', [manifest.id, manifest.version]))
     }
 
     return { appId: manifest.id, warnings }
@@ -522,7 +529,7 @@ export class AppManagerImpl implements AppManager {
     // 目前仅删除注册信息，保留文件
 
     if (result.length > 0) {
-      logger.info(`应用已卸载: ${appId}`)
+      logger.info(__t('logs.applications', '应用已卸载: {0}', [appId]))
       return true
     }
     return false
@@ -606,7 +613,7 @@ export class AppManagerImpl implements AppManager {
       // 6.记录应用工具声明；具体Handler由内置Realm Runtime初始化时注册。
       if (manifest.providesTools) {
         for (const tool of manifest.providesTools) {
-          logger.debug(`应用工具声明: ${appId}.${tool.name}`)
+          logger.debug(__t('logs.applications', '应用工具声明: {0}.{1}', [appId, tool.name]))
         }
       }
 
@@ -615,9 +622,9 @@ export class AppManagerImpl implements AppManager {
       if (this.builtinRuntimes.has(appId)) {
         try {
           runtime = this.builtinRuntimes.get(appId)!()
-          logger.info(`系统应用运行时已加载: ${appId}`)
+          logger.info(__t('logs.applications', '系统应用运行时已加载: {0}', [appId]))
         } catch (err) {
-          logger.warn(`系统应用运行时加载失败: ${appId}, ${err}`)
+          logger.warn(__t('logs.applications', '系统应用运行时加载失败: {0}, {1}', [appId, err]))
         }
       }
 
@@ -729,7 +736,10 @@ export class AppManagerImpl implements AppManager {
                 })
                 const abort = () => {
                   void this.kernelScheduler!.cancel(snapshot.descriptor.executionId).catch(
-                    (error) => logger.warn(`社交执行取消失败: ${String(error)}`),
+                    (error) =>
+                      logger.warn(
+                        __t('logs.applications', '社交执行取消失败: {0}', [String(error)]),
+                      ),
                   )
                 }
                 input.signal?.addEventListener('abort', abort, { once: true })
@@ -782,13 +792,21 @@ export class AppManagerImpl implements AppManager {
         .where(eq(appInstances.instanceId, instanceId))
 
       logger.info(
-        `应用实例已启动: appId=${appId}, instanceId=${instanceId}, hostAgent=${hostAgentId}`,
+        __t('logs.applications', '应用实例已启动: appId={0}, instanceId={1}, hostAgent={2}', [
+          appId,
+          instanceId,
+          hostAgentId,
+        ]),
       )
       return instanceId
     } catch (err) {
       await realm
         ?.dispose()
-        .catch((error) => logger.warn(`释放启动失败的Application Realm失败: ${error}`))
+        .catch((error) =>
+          logger.warn(
+            __t('logs.applications', '释放启动失败的Application Realm失败: {0}', [error]),
+          ),
+        )
       //启动失败：更新状态为error
       await this.db
         .update(appInstances)
@@ -801,7 +819,7 @@ export class AppManagerImpl implements AppManager {
   async pause(instanceId: string): Promise<boolean> {
     const entry = this.runtimes.get(instanceId)
     if (!entry) {
-      logger.warn(`暂停失败：实例未运行或无 runtime: ${instanceId}`)
+      logger.warn(__t('logs.applications', '暂停失败：实例未运行或无 runtime: {0}', [instanceId]))
       return false
     }
 
@@ -811,10 +829,10 @@ export class AppManagerImpl implements AppManager {
         .update(appInstances)
         .set({ status: 'paused' })
         .where(eq(appInstances.instanceId, instanceId))
-      logger.info(`应用实例已暂停: ${instanceId}`)
+      logger.info(__t('logs.applications', '应用实例已暂停: {0}', [instanceId]))
       return true
     } catch (err) {
-      logger.error(`暂停应用实例失败: ${instanceId}, ${err}`)
+      logger.error(__t('logs.applications', '暂停应用实例失败: {0}, {1}', [instanceId, err]))
       return false
     }
   }
@@ -822,7 +840,7 @@ export class AppManagerImpl implements AppManager {
   async resume(instanceId: string): Promise<boolean> {
     const entry = this.runtimes.get(instanceId)
     if (!entry) {
-      logger.warn(`恢复失败：实例未运行或无 runtime: ${instanceId}`)
+      logger.warn(__t('logs.applications', '恢复失败：实例未运行或无 runtime: {0}', [instanceId]))
       return false
     }
 
@@ -832,10 +850,10 @@ export class AppManagerImpl implements AppManager {
         .update(appInstances)
         .set({ status: 'running' })
         .where(eq(appInstances.instanceId, instanceId))
-      logger.info(`应用实例已恢复: ${instanceId}`)
+      logger.info(__t('logs.applications', '应用实例已恢复: {0}', [instanceId]))
       return true
     } catch (err) {
-      logger.error(`恢复应用实例失败: ${instanceId}, ${err}`)
+      logger.error(__t('logs.applications', '恢复应用实例失败: {0}, {1}', [instanceId, err]))
       return false
     }
   }
@@ -874,13 +892,17 @@ export class AppManagerImpl implements AppManager {
       // 6. 清理事件订阅者
       this.subscribers.delete(instanceId)
 
-      logger.info(`应用实例已停止: ${instanceId}`)
+      logger.info(__t('logs.applications', '应用实例已停止: {0}', [instanceId]))
       return true
     } catch (err) {
       await entry?.ctx.realm
         .dispose()
-        .catch((error) => logger.warn(`释放异常停止的Application Realm失败: ${error}`))
-      logger.error(`停止应用实例失败: ${instanceId}, ${err}`)
+        .catch((error) =>
+          logger.warn(
+            __t('logs.applications', '释放异常停止的Application Realm失败: {0}', [error]),
+          ),
+        )
+      logger.error(__t('logs.applications', '停止应用实例失败: {0}, {1}', [instanceId, err]))
       // 即使失败也标记为 stopped
       await this.db
         .update(appInstances)
@@ -907,11 +929,20 @@ export class AppManagerImpl implements AppManager {
       try {
         await this.stop(instanceId)
       } catch (error) {
-        logger.error(`停止Application Realm实例失败: instanceId=${instanceId}, error=${error}`)
+        logger.error(
+          __t('logs.applications', '停止Application Realm实例失败: instanceId={0}, error={1}', [
+            instanceId,
+            error,
+          ]),
+        )
       }
     }
     this.subscribers.clear()
-    logger.info(`Application Realm宿主已停止，共关闭${instanceIds.length}个实例`)
+    logger.info(
+      __t('logs.applications', 'Application Realm宿主已停止，共关闭{0}个实例', [
+        instanceIds.length,
+      ]),
+    )
   }
 
   async listInstances(params: {
@@ -983,7 +1014,11 @@ export class AppManagerImpl implements AppManager {
             : (signal ?? params.signal),
       }
       logger.info(
-        `执行应用命令: app=${params.appId}, instance=${instanceId}, action=${params.action}, correlation=${request.correlationId}`,
+        __t(
+          'logs.applications',
+          '执行应用命令: app={0}, instance={1}, action={2}, correlation={3}',
+          [params.appId, instanceId, params.action, request.correlationId],
+        ),
       )
       return entry.runtime.executeCommand!(request)
     }
@@ -1060,15 +1095,19 @@ export class AppManagerImpl implements AppManager {
         if (summaries.length > 0) {
           allSummaries.push(...summaries)
           logger.debug(
-            `应用 ${entry.manifest.id} (instance=${instanceId.slice(0, 8)}) ` +
-              `贡献 ${summaries.length} 条当日记忆摘要`,
+            __t('logs.applications', '应用 {0} (instance={1}) ', [
+              entry.manifest.id,
+              instanceId.slice(0, 8),
+            ]) + __t('logs.applications', '贡献 {0} 条当日记忆摘要', [summaries.length]),
           )
         }
       } catch (err) {
         // 单个应用异常不影响其他应用
         logger.warn(
-          `应用 ${entry.manifest.id} (instance=${instanceId.slice(0, 8)}) ` +
-            `获取当日记忆摘要失败: ${err}`,
+          __t('logs.applications', '应用 {0} (instance={1}) ', [
+            entry.manifest.id,
+            instanceId.slice(0, 8),
+          ]) + __t('logs.applications', '获取当日记忆摘要失败: {0}', [err]),
         )
       }
     }
@@ -1086,7 +1125,9 @@ export class AppManagerImpl implements AppManager {
       try {
         handler(event)
       } catch (err) {
-        logger.warn(`事件处理器异常: instanceId=${instanceId}, ${err}`)
+        logger.warn(
+          __t('logs.applications', '事件处理器异常: instanceId={0}, {1}', [instanceId, err]),
+        )
       }
     }
   }

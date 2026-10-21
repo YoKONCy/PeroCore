@@ -7,7 +7,7 @@
       <div class="avatar-overlay__spinner">
         <PixelIcon name="loader" size="md" animation="spin" />
       </div>
-      <div class="avatar-overlay__text">正在召唤中...</div>
+      <div class="avatar-overlay__text">{{ __t('ui.avatar', '正在召唤中...') }}</div>
     </div>
 
     <!-- 错误遮罩 -->
@@ -21,6 +21,8 @@
 </template>
 
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /**
  * BedrockAvatar — Bedrock 3D 虚拟人组件
  *
@@ -105,7 +107,6 @@ watch(
 )
 
 // ═══ 渲染循环 ═══
-let lastShadowTime = -Infinity
 let lastInteractionTime = -Infinity
 let frameDirty = true
 const frameLoop = createAvatarFrameLoop(animate, () => {
@@ -164,11 +165,6 @@ function animate(safeDt: number, now: number): void {
 
   // 渲染
   if (sceneCtx.renderer.value && sceneCtx.scene.value && cam) {
-    const shadowFps = Math.min(30, AVATAR_QUALITY[quality.value].idleFps)
-    if (now - lastShadowTime >= 1000 / shadowFps - 0.5) {
-      sceneCtx.renderer.value.shadowMap.needsUpdate = true
-      lastShadowTime = now
-    }
     sceneCtx.renderer.value.render(sceneCtx.scene.value, cam)
   }
 }
@@ -177,7 +173,6 @@ watch(
   [active, ready, model.loading],
   ([visible, loaded, loading]) => {
     if (visible && loaded && !loading && !disposed) {
-      lastShadowTime = -Infinity
       frameDirty = true
       frameLoop.start()
     } else {
@@ -261,7 +256,7 @@ async function loadManifestPath(newPath: string): Promise<boolean> {
     )
       return false
     const message = e instanceof Error ? e.message : String(e)
-    logger.error('BedrockAvatar', `切换模型失败: ${newPath}`, e)
+    logger.error('BedrockAvatar', __t('logs.frontend.avatar', '切换模型失败: {0}', [newPath]), e)
     model.errorMsg.value = `切换模型失败: ${message}`
     emit('model-load-error', message)
     return false

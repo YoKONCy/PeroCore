@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import type { CanvasStore } from '../composables/useCanvas'
 import { useWorkflow } from '../composables/useWorkflow'
@@ -214,20 +216,20 @@ const portFields = (node: WorkflowNode, output: boolean) =>
     (output ? flow.stepFor(node)?.outputSchema : flow.stepFor(node)?.inputSchema)?.properties || {},
   )
 function bindingLabel(binding?: Binding) {
-  if (!binding) return '未连接'
+  if (!binding) return __t('apps.pictoria.ui', '未连接')
   if ('literal' in binding)
     return typeof binding.literal === 'string'
-      ? binding.literal || '空文本'
+      ? binding.literal || __t('apps.pictoria.ui', '空文本')
       : Array.isArray(binding.literal)
-        ? `${binding.literal.length} 项`
-        : '固定值'
-  if ('array' in binding) return `${binding.array.length} 项引用`
-  if ('select' in binding) return '字段选取'
+        ? __t('apps.pictoria.ui', '{0} 项', [binding.literal.length])
+        : __t('apps.pictoria.ui', '固定值')
+  if ('array' in binding) return __t('apps.pictoria.ui', '{0} 项引用', [binding.array.length])
+  if ('select' in binding) return __t('apps.pictoria.ui', '字段选取')
   if ('input' in binding) return doc.inputSchema.properties?.[binding.input]?.title || binding.input
   return (
     doc.nodes.find((node) => node.id === binding.node)?.label ||
     flow.stepFor(doc.nodes.find((node) => node.id === binding.node)!)?.name ||
-    '节点输出'
+    __t('apps.pictoria.ui', '节点输出')
   )
 }
 function nodePointer(event: PointerEvent, id: string) {
@@ -771,7 +773,7 @@ onBeforeUnmount(() => {
       <div class="header-left">
         <button class="quiet-button" :disabled="busy || saving" @click="exit">
           <Icon name="chevron" class="workflow-left" :size="17" />
-          画布
+          {{ __t('apps.pictoria.ui', '画布') }}
         </button>
         <i class="header-divider" />
         <button class="project-switcher" @click="picker = !picker">
@@ -781,10 +783,18 @@ onBeforeUnmount(() => {
         </button>
         <span class="save-status">
           <span class="status-dot" />
-          {{ saving ? '保存中' : dirty ? '未保存' : doc.revision ? '已保存' : '草稿' }}
+          {{
+            saving
+              ? __t('apps.pictoria.ui', '保存中')
+              : dirty
+                ? __t('apps.pictoria.ui', '未保存')
+                : doc.revision
+                  ? __t('apps.pictoria.ui', '已保存')
+                  : __t('apps.pictoria.ui', '草稿')
+          }}
         </span>
         <span v-if="flow.examplePending.value" class="workflow-example-badge">
-          教学示例 · 待配置
+          {{ __t('apps.pictoria.ui', '教学示例 · 待配置') }}
         </span>
         <span v-if="doc.publishedRevision" class="workflow-version">
           v{{ doc.publishedRevision }}
@@ -793,24 +803,32 @@ onBeforeUnmount(() => {
       <div class="header-actions">
         <button class="quiet-button" @click="providerSettings = true">
           <Icon name="link" :size="16" />
-          供应商
+          {{ __t('apps.pictoria.ui', '供应商') }}
         </button>
         <button class="quiet-button" :disabled="busy" @click="check">
           <Icon name="check" :size="16" />
-          校验
+          {{ __t('apps.pictoria.ui', '校验') }}
         </button>
         <button class="quiet-button" @click="drawer = drawer === 'run' ? null : 'run'">
           <Icon name="play" :size="16" />
-          试运行
+          {{ __t('apps.pictoria.ui', '试运行') }}
         </button>
         <button class="quiet-button" :disabled="busy || arranging" @click="graph.organize()">
           <Icon name="arrange" :size="16" />
-          整理
+          {{ __t('apps.pictoria.ui', '整理') }}
         </button>
-        <button class="icon-button" aria-label="发布历史" @click="history">
+        <button
+          class="icon-button"
+          :aria-label="__t('apps.pictoria.ui', '发布历史')"
+          @click="history"
+        >
           <Icon name="history" :size="17" />
         </button>
-        <button class="icon-button" aria-label="切换主题" @click="emit('theme')">
+        <button
+          class="icon-button"
+          :aria-label="__t('apps.pictoria.ui', '切换主题')"
+          @click="emit('theme')"
+        >
           <Icon :name="theme === 'dark' ? 'sun' : 'moon'" :size="18" />
         </button>
         <button
@@ -818,14 +836,14 @@ onBeforeUnmount(() => {
           :disabled="busy || uploading || flow.examplePending.value"
           @click="publish"
         >
-          发布
+          {{ __t('apps.pictoria.ui', '发布') }}
         </button>
         <i class="header-divider" />
         <button
           class="icon-button danger-button"
           :disabled="props.exitDisabled || busy || uploading || !loaded"
-          title="退出 Pictoria"
-          aria-label="退出 Pictoria"
+          :title="__t('apps.pictoria.ui', '退出 Pictoria')"
+          :aria-label="__t('apps.pictoria.ui', '退出 Pictoria')"
           @click="emit('quit')"
         >
           <Icon name="power" :size="18" />
@@ -841,12 +859,18 @@ onBeforeUnmount(() => {
         role="status"
       >
         <span>{{ error || notice }}</span>
-        <button v-if="blocked" class="text-button" @click="flow.retrySave">重试</button>
-        <button v-if="blocked" class="text-button" @click="create(true)">另存副本</button>
-        <button v-if="blocked" class="text-button" @click="flow.exportDraft">导出</button>
+        <button v-if="blocked" class="text-button" @click="flow.retrySave">
+          {{ __t('apps.pictoria.ui', '重试') }}
+        </button>
+        <button v-if="blocked" class="text-button" @click="create(true)">
+          {{ __t('apps.pictoria.ui', '另存副本') }}
+        </button>
+        <button v-if="blocked" class="text-button" @click="flow.exportDraft">
+          {{ __t('apps.pictoria.ui', '导出') }}
+        </button>
         <button
           class="icon-button"
-          aria-label="关闭提示"
+          :aria-label="__t('apps.pictoria.ui', '关闭提示')"
           @click="
             () => {
               error = ''
@@ -863,7 +887,12 @@ onBeforeUnmount(() => {
       class="canvas-world"
       :style="{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})` }"
     >
-      <svg class="canvas-connections" width="1" height="1" aria-label="工作流连线">
+      <svg
+        class="canvas-connections"
+        width="1"
+        height="1"
+        :aria-label="__t('apps.pictoria.ui', '工作流连线')"
+      >
         <g v-for="edge in edges" :key="edge.id" :class="{ active: selectedEdge === edge.id }">
           <path
             class="edge-hit"
@@ -894,8 +923,16 @@ onBeforeUnmount(() => {
           <span class="draft-symbol">
             <Icon :name="kind === 'input' ? 'upload' : 'image'" :size="17" />
           </span>
-          <strong>{{ kind === 'input' ? '输入' : '输出' }}</strong>
-          <button class="icon-button" aria-label="配置字段" @click="inspect(`__${kind}`)">
+          <strong>
+            {{
+              kind === 'input' ? __t('apps.pictoria.ui', '输入') : __t('apps.pictoria.ui', '输出')
+            }}
+          </strong>
+          <button
+            class="icon-button"
+            :aria-label="__t('apps.pictoria.ui', '配置字段')"
+            @click="inspect(`__${kind}`)"
+          >
             <Icon name="settings" :size="15" />
           </button>
         </header>
@@ -905,7 +942,7 @@ onBeforeUnmount(() => {
         >
           <button class="text-button" @click="inspect(`__${kind}`)">
             <Icon name="plus" :size="13" />
-            添加字段
+            {{ __t('apps.pictoria.ui', '添加字段') }}
           </button>
         </div>
         <div
@@ -922,7 +959,7 @@ onBeforeUnmount(() => {
             class="workflow-port workflow-port-bottom"
             :style="graph.portStyle('__input', String(name), true)"
             :title="String(field.title || name)"
-            aria-label="连接输出"
+            :aria-label="__t('apps.pictoria.ui', '连接输出')"
             @pointerdown.stop="graph.begin($event, '__input', String(name))"
           />
           <button
@@ -933,7 +970,7 @@ onBeforeUnmount(() => {
             data-workflow-target="__output"
             :data-workflow-field="name"
             data-workflow-port="top"
-            aria-label="连接输入"
+            :aria-label="__t('apps.pictoria.ui', '连接输入')"
             @pointerdown.stop
           />
         </div>
@@ -978,22 +1015,33 @@ onBeforeUnmount(() => {
             />
           </span>
           <strong :title="stepLabel(flow.stepFor(node))">
-            {{ node.label || (flow.stepFor(node) ? stepLabel(flow.stepFor(node)) : '选择步骤') }}
+            {{
+              node.label ||
+              (flow.stepFor(node)
+                ? stepLabel(flow.stepFor(node))
+                : __t('apps.pictoria.ui', '选择步骤'))
+            }}
           </strong>
-          <span v-if="node.example && !node.stepId" class="workflow-node-state">示例</span>
+          <span v-if="node.example && !node.stepId" class="workflow-node-state">
+            {{ __t('apps.pictoria.ui', '示例') }}
+          </span>
           <span v-if="stateFor(node.id)" class="workflow-node-state">
             {{ statuses[stateFor(node.id) || ''] }}
           </span>
           <button
             v-if="flow.stepFor(node)?.implementation?.kind !== 'workflow'"
             class="icon-button"
-            title="配置 API"
-            aria-label="配置节点 API"
+            :title="__t('apps.pictoria.ui', '配置 API')"
+            :aria-label="__t('apps.pictoria.ui', '配置节点 API')"
             @click.stop="configureApi(node.id)"
           >
             <Icon name="link" :size="15" />
           </button>
-          <button class="icon-button" aria-label="节点设置" @click="inspect(node.id)">
+          <button
+            class="icon-button"
+            :aria-label="__t('apps.pictoria.ui', '节点设置')"
+            @click="inspect(node.id)"
+          >
             <Icon name="more" :size="16" />
           </button>
         </header>
@@ -1015,7 +1063,7 @@ onBeforeUnmount(() => {
                 :data-workflow-target="node.id"
                 :data-workflow-field="name"
                 data-workflow-port="left"
-                :aria-label="`${field.title || name}输入`"
+                :aria-label="__t('apps.pictoria.ui', '{0}输入', [field.title || name])"
                 @pointerdown.stop
               />
               <button
@@ -1038,7 +1086,7 @@ onBeforeUnmount(() => {
                 :data-workflow-target="node.id"
                 :data-workflow-field="name"
                 data-workflow-port="top"
-                aria-label="从上方连接"
+                :aria-label="__t('apps.pictoria.ui', '从上方连接')"
                 @pointerdown.stop
               />
             </div>
@@ -1055,14 +1103,14 @@ onBeforeUnmount(() => {
               </button>
               <button
                 class="workflow-port workflow-port-out"
-                :aria-label="`${field.title || name}输出`"
+                :aria-label="__t('apps.pictoria.ui', '{0}输出', [field.title || name])"
                 @pointerdown.stop="graph.begin($event, node.id, name, 'right')"
               />
               <button
                 class="workflow-port workflow-port-bottom"
                 :title="String(field.title || name)"
                 :style="graph.portStyle(node.id, name, true)"
-                aria-label="从下方连接"
+                :aria-label="__t('apps.pictoria.ui', '从下方连接')"
                 @pointerdown.stop="graph.begin($event, node.id, name, 'bottom')"
               />
             </div>
@@ -1115,12 +1163,16 @@ onBeforeUnmount(() => {
     </div>
     <CanvasGuides :guides="guides" :viewport="viewport" />
 
-    <nav class="canvas-toolrail floating-panel" data-ui aria-label="工作流工具">
+    <nav
+      class="canvas-toolrail floating-panel"
+      data-ui
+      :aria-label="__t('apps.pictoria.ui', '工作流工具')"
+    >
       <button
         class="icon-button"
         :class="{ active: tool === 'free' }"
-        title="自由操作 · A；拖动时 Alt 暂停吸附，Ctrl 对齐网格"
-        aria-label="自由操作"
+        :title="__t('apps.pictoria.ui', '自由操作 · A；拖动时 Alt 暂停吸附，Ctrl 对齐网格')"
+        :aria-label="__t('apps.pictoria.ui', '自由操作')"
         @click="tool = 'free'"
       >
         <Icon name="arrow" />
@@ -1128,8 +1180,8 @@ onBeforeUnmount(() => {
       <button
         class="icon-button"
         :class="{ active: tool === 'select' }"
-        title="框选 · V / Shift＋左键"
-        aria-label="框选"
+        :title="__t('apps.pictoria.ui', '框选 · V / Shift＋左键')"
+        :aria-label="__t('apps.pictoria.ui', '框选')"
         @click="tool = 'select'"
       >
         <Icon name="select" />
@@ -1137,8 +1189,8 @@ onBeforeUnmount(() => {
       <button
         class="icon-button"
         :class="{ active: tool === 'hand' }"
-        title="拖动画布 · H / 空格 / 中键"
-        aria-label="拖动画布"
+        :title="__t('apps.pictoria.ui', '拖动画布 · H / 空格 / 中键')"
+        :aria-label="__t('apps.pictoria.ui', '拖动画布')"
         @click="tool = 'hand'"
       >
         <Icon name="hand" />
@@ -1147,19 +1199,24 @@ onBeforeUnmount(() => {
       <button
         class="icon-button"
         :class="{ active: palette }"
-        aria-label="节点目录"
+        :aria-label="__t('apps.pictoria.ui', '节点目录')"
         @click="palette = !palette"
       >
         <Icon name="plus" :size="22" />
       </button>
-      <button class="icon-button" aria-label="添加备注" title="备注 · N" @click="addNote">
+      <button
+        class="icon-button"
+        :aria-label="__t('apps.pictoria.ui', '添加备注')"
+        :title="__t('apps.pictoria.ui', '备注 · N')"
+        @click="addNote"
+      >
         <Icon name="note" :size="18" />
       </button>
       <button
         class="icon-button"
         :class="{ active: searchOpen }"
-        aria-label="搜索节点"
-        title="搜索 · Ctrl F"
+        :aria-label="__t('apps.pictoria.ui', '搜索节点')"
+        :title="__t('apps.pictoria.ui', '搜索 · Ctrl F')"
         @click="searchOpen = !searchOpen"
       >
         <Icon name="search" :size="18" />
@@ -1167,8 +1224,8 @@ onBeforeUnmount(() => {
       <span class="rail-divider" />
       <button
         class="icon-button"
-        title="复制 · Ctrl C"
-        aria-label="复制节点"
+        :title="__t('apps.pictoria.ui', '复制 · Ctrl C')"
+        :aria-label="__t('apps.pictoria.ui', '复制节点')"
         :disabled="!selected.length"
         @click="clipboard.copy"
       >
@@ -1176,8 +1233,8 @@ onBeforeUnmount(() => {
       </button>
       <button
         class="icon-button"
-        title="粘贴 · Ctrl V"
-        aria-label="粘贴节点"
+        :title="__t('apps.pictoria.ui', '粘贴 · Ctrl V')"
+        :aria-label="__t('apps.pictoria.ui', '粘贴节点')"
         @click="clipboard.paste"
       >
         <Icon name="paste" :size="18" />
@@ -1185,7 +1242,7 @@ onBeforeUnmount(() => {
       <button
         class="icon-button"
         :disabled="!flow.history.value.length"
-        aria-label="撤销"
+        :aria-label="__t('apps.pictoria.ui', '撤销')"
         @click="
           () => {
             graph.finishArrangement()
@@ -1198,7 +1255,7 @@ onBeforeUnmount(() => {
       <button
         class="icon-button"
         :disabled="!flow.future.value.length"
-        aria-label="重做"
+        :aria-label="__t('apps.pictoria.ui', '重做')"
         @click="
           () => {
             graph.finishArrangement()
@@ -1212,14 +1269,18 @@ onBeforeUnmount(() => {
     <Transition name="float">
       <section v-if="palette" class="workflow-palette floating-panel" data-ui>
         <header>
-          <strong>节点</strong>
-          <button class="icon-button" aria-label="关闭目录" @click="palette = false">
+          <strong>{{ __t('apps.pictoria.ui', '节点') }}</strong>
+          <button
+            class="icon-button"
+            :aria-label="__t('apps.pictoria.ui', '关闭目录')"
+            @click="palette = false"
+          >
             <Icon name="close" :size="15" />
           </button>
         </header>
         <div class="workflow-filter">
           <Icon name="search" :size="14" />
-          <input v-model="paletteQuery" placeholder="搜索步骤" />
+          <input v-model="paletteQuery" :placeholder="__t('apps.pictoria.ui', '搜索步骤')" />
         </div>
         <div class="workflow-step-list">
           <button
@@ -1246,16 +1307,18 @@ onBeforeUnmount(() => {
             <span>{{ stepLabel(step) }}</span>
             <Icon name="plus" :size="14" />
           </button>
-          <small v-if="!catalogue.length" class="workflow-muted">暂无步骤</small>
+          <small v-if="!catalogue.length" class="workflow-muted">
+            {{ __t('apps.pictoria.ui', '暂无步骤') }}
+          </small>
         </div>
         <div class="workflow-new-step-actions">
           <button class="quiet-button" @click="settings(undefined, '', true)">
             <Icon name="plus" :size="14" />
-            API 步骤
+            {{ __t('apps.pictoria.ui', 'API 步骤') }}
           </button>
           <button class="quiet-button" @click="settings(undefined, '', true, false, true)">
             <Icon name="play" :size="14" />
-            视频 API
+            {{ __t('apps.pictoria.ui', '视频 API') }}
           </button>
           <button class="quiet-button" @click="settings(undefined, '', true, true)">
             <Icon name="sparkle" :size="14" />
@@ -1283,12 +1346,12 @@ onBeforeUnmount(() => {
             v-model="searchQuery"
             class="canvas-search-input"
             maxlength="200"
-            placeholder="备注 / 提示词"
+            :placeholder="__t('apps.pictoria.ui', '备注 / 提示词')"
             @keydown.enter.prevent.stop="jump($event.shiftKey ? -1 : 1)"
           />
           <button
             class="icon-button"
-            aria-label="关闭搜索"
+            :aria-label="__t('apps.pictoria.ui', '关闭搜索')"
             @click="
               () => {
                 searchOpen = false
@@ -1301,11 +1364,17 @@ onBeforeUnmount(() => {
           </button>
         </div>
         <footer v-if="searchQuery">
-          <small>{{ matches.length ? `${searchPosition} / ${matches.length}` : '无匹配' }}</small>
+          <small>
+            {{
+              matches.length
+                ? `${searchPosition} / ${matches.length}`
+                : __t('apps.pictoria.ui', '无匹配')
+            }}
+          </small>
           <button
             class="icon-button"
             :disabled="!matches.length"
-            aria-label="上一个"
+            :aria-label="__t('apps.pictoria.ui', '上一个')"
             @click="jump(-1)"
           >
             <Icon class="search-previous" name="down" :size="14" />
@@ -1313,7 +1382,7 @@ onBeforeUnmount(() => {
           <button
             class="icon-button"
             :disabled="!matches.length"
-            aria-label="下一个"
+            :aria-label="__t('apps.pictoria.ui', '下一个')"
             @click="jump(1)"
           >
             <Icon name="down" :size="14" />
@@ -1324,8 +1393,14 @@ onBeforeUnmount(() => {
     <Transition name="float">
       <div v-if="selectedEdge" class="connection-actions floating-panel" data-ui>
         <Icon name="link" :size="15" />
-        <button class="text-button" @click="graph.disconnect()">断开</button>
-        <button class="icon-button" aria-label="取消选择" @click="selectedEdge = ''">
+        <button class="text-button" @click="graph.disconnect()">
+          {{ __t('apps.pictoria.ui', '断开') }}
+        </button>
+        <button
+          class="icon-button"
+          :aria-label="__t('apps.pictoria.ui', '取消选择')"
+          @click="selectedEdge = ''"
+        >
           <Icon name="close" :size="14" />
         </button>
       </div>
@@ -1339,19 +1414,19 @@ onBeforeUnmount(() => {
             :disabled="!selectedNode"
             @click="panel = 'node'"
           >
-            节点
+            {{ __t('apps.pictoria.ui', '节点') }}
           </button>
           <button :class="{ active: panel === 'interface' }" @click="panel = 'interface'">
-            接口
+            {{ __t('apps.pictoria.ui', '接口') }}
           </button>
           <button :class="{ active: panel === 'tutorial' }" @click="panel = 'tutorial'">
-            教程
+            {{ __t('apps.pictoria.ui', '教程') }}
           </button>
         </div>
       </header>
       <div v-if="panel === 'node' && selectedNode" class="workflow-inspector-body">
         <label class="panel-field">
-          名称
+          {{ __t('apps.pictoria.ui', '名称') }}
           <input
             v-model="selectedNode.label"
             :placeholder="selectedStep?.name"
@@ -1360,7 +1435,7 @@ onBeforeUnmount(() => {
           />
         </label>
         <div class="panel-field">
-          <span>步骤</span>
+          <span>{{ __t('apps.pictoria.ui', '步骤') }}</span>
           <PictoriaSelect
             :model-value="selectedNode.stepId"
             :options="
@@ -1376,7 +1451,7 @@ onBeforeUnmount(() => {
           />
         </div>
         <p v-if="selectedNode.example && !selectedNode.stepId" class="workflow-muted">
-          示例步骤 · 待配置
+          {{ __t('apps.pictoria.ui', '示例步骤 · 待配置') }}
         </p>
         <div class="workflow-node-tools">
           <button
@@ -1384,7 +1459,7 @@ onBeforeUnmount(() => {
             class="text-button"
             @click="configureApi(selectedNode.id)"
           >
-            配置 API
+            {{ __t('apps.pictoria.ui', '配置 API') }}
           </button>
           <button
             v-if="
@@ -1395,7 +1470,7 @@ onBeforeUnmount(() => {
             class="text-button"
             @click="settings(selectedStep, selectedNode.id)"
           >
-            配置步骤
+            {{ __t('apps.pictoria.ui', '配置步骤') }}
           </button>
           <button
             v-if="
@@ -1407,12 +1482,14 @@ onBeforeUnmount(() => {
             class="text-button"
             @click="updateStep"
           >
-            更新版本
+            {{ __t('apps.pictoria.ui', '更新版本') }}
           </button>
-          <button class="text-button danger-button" @click="flow.removeSelection">删除节点</button>
+          <button class="text-button danger-button" @click="flow.removeSelection">
+            {{ __t('apps.pictoria.ui', '删除节点') }}
+          </button>
         </div>
         <label class="panel-field">
-          备注
+          {{ __t('apps.pictoria.ui', '备注') }}
           <textarea
             v-model="selectedNode.comment"
             rows="2"
@@ -1460,11 +1537,11 @@ onBeforeUnmount(() => {
             <small class="workflow-muted">{{ elapsed(node) }}</small>
             <p v-if="node.error" class="workflow-field-error">{{ node.error }}</p>
             <details v-if="node.inputs">
-              <summary>输入</summary>
+              <summary>{{ __t('apps.pictoria.ui', '输入') }}</summary>
               <pre>{{ JSON.stringify(resolvedInputs(node), null, 2) }}</pre>
             </details>
             <details v-if="node.outputs">
-              <summary>输出</summary>
+              <summary>{{ __t('apps.pictoria.ui', '输出') }}</summary>
               <pre>{{ JSON.stringify(node.outputs, null, 2) }}</pre>
             </details>
           </template>
@@ -1473,16 +1550,16 @@ onBeforeUnmount(() => {
       <div v-else-if="panel === 'interface'" class="workflow-inspector-body">
         <div class="workflow-interface-tabs">
           <button :class="{ active: interfaceTab === 'input' }" @click="interfaceTab = 'input'">
-            输入
+            {{ __t('apps.pictoria.ui', '输入') }}
           </button>
           <button :class="{ active: interfaceTab === 'output' }" @click="interfaceTab = 'output'">
-            输出
+            {{ __t('apps.pictoria.ui', '输出') }}
           </button>
           <button
             :class="{ active: interfaceTab === 'settings' }"
             @click="interfaceTab = 'settings'"
           >
-            设置
+            {{ __t('apps.pictoria.ui', '设置') }}
           </button>
         </div>
         <WorkflowFields
@@ -1518,11 +1595,11 @@ onBeforeUnmount(() => {
         </template>
         <template v-else>
           <label class="panel-field">
-            名称
+            {{ __t('apps.pictoria.ui', '名称') }}
             <input v-model="doc.name" maxlength="100" @focus="flow.checkpoint" />
           </label>
           <label class="panel-field">
-            输入说明
+            {{ __t('apps.pictoria.ui', '输入说明') }}
             <textarea
               v-model="doc.usageDescription"
               rows="5"
@@ -1532,11 +1609,11 @@ onBeforeUnmount(() => {
           </label>
           <button class="quiet-button outlined" :disabled="busy" @click="importInput?.click()">
             <Icon name="upload" :size="15" />
-            导入
+            {{ __t('apps.pictoria.ui', '导入') }}
           </button>
           <button class="quiet-button outlined" @click="flow.exportDraft">
             <Icon name="download" :size="15" />
-            导出
+            {{ __t('apps.pictoria.ui', '导出') }}
           </button>
         </template>
       </div>
@@ -1547,36 +1624,56 @@ onBeforeUnmount(() => {
           @click="createExample"
         >
           <Icon name="workflow" :size="16" />
-          创建示例工作流
+          {{ __t('apps.pictoria.ui', '创建示例工作流') }}
         </button>
-        <h3>从输入到输出</h3>
+        <h3>{{ __t('apps.pictoria.ui', '从输入到输出') }}</h3>
         <p>
-          先添加输入字段，再把步骤放进画布。拖动输出圆点，连接下一个节点的输入。点选节点，在右侧填写参数。
+          {{
+            __t(
+              'apps.pictoria.ui',
+              '先添加输入字段，再把步骤放进画布。拖动输出圆点，连接下一个节点的输入。点选节点，在右侧填写参数。',
+            )
+          }}
         </p>
-        <h3>多份参考</h3>
+        <h3>{{ __t('apps.pictoria.ui', '多份参考') }}</h3>
         <p>
-          数组字段可以连接多个来源。选择“多项”后可调整顺序；开启“展开数组”，可以把整组图片与单张图片合并。选取路径
+          {{
+            __t(
+              'apps.pictoria.ui',
+              '数组字段可以连接多个来源。选择“多项”后可调整顺序；开启“展开数组”，可以把整组图片与单张图片合并。选取路径',
+            )
+          }}
           <code>0</code>
-          表示第一项，
+          {{ __t('apps.pictoria.ui', '表示第一项，') }}
           <code>0/image</code>
-          表示第一项中的 image 字段。
+          {{ __t('apps.pictoria.ui', '表示第一项中的 image 字段。') }}
         </p>
-        <h3>发布成步骤</h3>
+        <h3>{{ __t('apps.pictoria.ui', '发布成步骤') }}</h3>
         <p>
-          设置输出字段并连接最终结果。输入说明用于告诉 Agent 该怎么填写提示词：自然语言、正反 tags
-          或其他要求都由作者声明，系统按原样传递。
+          {{
+            __t(
+              'apps.pictoria.ui',
+              '设置输出字段并连接最终结果。输入说明用于告诉 Agent 该怎么填写提示词：自然语言、正反 tags 或其他要求都由作者声明，系统按原样传递。',
+            )
+          }}
         </p>
-        <h3>运行与恢复</h3>
+        <h3>{{ __t('apps.pictoria.ui', '运行与恢复') }}</h3>
         <p>
-          试运行会真实调用已配置的服务，可能计费。API 节点直接调用已配置服务，LLM API
-          也可独立使用。infOS LLM
-          需要挂载宿主并授权。断网后后台保留任务；提交结果不明时，先核验供应商任务 ID，再继续恢复。
+          {{
+            __t(
+              'apps.pictoria.ui',
+              '试运行会真实调用已配置的服务，可能计费。API 节点直接调用已配置服务，LLM API 也可独立使用。infOS LLM 需要挂载宿主并授权。断网后后台保留任务；提交结果不明时，先核验供应商任务 ID，再继续恢复。',
+            )
+          }}
         </p>
-        <h3>画布操作</h3>
+        <h3>{{ __t('apps.pictoria.ui', '画布操作') }}</h3>
         <p>
-          空白处左拖平移；空格、中键和手形模式可在节点上平移视野。Shift＋左键拖动追加框选，V
-          框选，Shift 单击多选，Ctrl+C 复制，Ctrl+V 粘贴，Ctrl+D 原地创建副本，Ctrl+Z 撤销，Ctrl+F
-          搜索。复制节点时会包含附属备注和内部连线；跨工作流粘贴时，未选中的外部连线会断开。输入、输出接口保持唯一。
+          {{
+            __t(
+              'apps.pictoria.ui',
+              '空白处左拖平移；空格、中键和手形模式可在节点上平移视野。Shift＋左键拖动追加框选，V 框选，Shift 单击多选，Ctrl+C 复制，Ctrl+V 粘贴，Ctrl+D 原地创建副本，Ctrl+Z 撤销，Ctrl+F 搜索。复制节点时会包含附属备注和内部连线；跨工作流粘贴时，未选中的外部连线会断开。输入、输出接口保持唯一。',
+            )
+          }}
         </p>
       </div>
     </aside>
@@ -1584,10 +1681,10 @@ onBeforeUnmount(() => {
     <Transition name="float">
       <section v-if="picker" class="workflow-picker floating-panel" data-ui>
         <header>
-          <strong>工作流</strong>
+          <strong>{{ __t('apps.pictoria.ui', '工作流') }}</strong>
           <button
             class="icon-button"
-            aria-label="关闭"
+            :aria-label="__t('apps.pictoria.ui', '关闭')"
             @click="
               () => {
                 picker = false
@@ -1613,21 +1710,25 @@ onBeforeUnmount(() => {
         <footer>
           <button class="quiet-button" :disabled="busy || saving" @click="create()">
             <Icon name="plus" :size="15" />
-            新建
+            {{ __t('apps.pictoria.ui', '新建') }}
           </button>
           <button class="text-button" :disabled="busy || saving" @click="createExample">
-            创建示例
+            {{ __t('apps.pictoria.ui', '创建示例') }}
           </button>
-          <button class="text-button" :disabled="busy" @click="create(true)">副本</button>
+          <button class="text-button" :disabled="busy" @click="create(true)">
+            {{ __t('apps.pictoria.ui', '副本') }}
+          </button>
           <button class="text-button danger-button" :disabled="busy" @click="deletion = !deletion">
-            删除
+            {{ __t('apps.pictoria.ui', '删除') }}
           </button>
         </footer>
         <div v-if="deletion" class="workflow-delete-confirm">
-          <span>删除此工作流？</span>
-          <button class="text-button" @click="deletion = false">取消</button>
+          <span>{{ __t('apps.pictoria.ui', '删除此工作流？') }}</span>
+          <button class="text-button" @click="deletion = false">
+            {{ __t('apps.pictoria.ui', '取消') }}
+          </button>
           <button class="text-button danger-button" :disabled="busy" @click="removeFlow">
-            删除
+            {{ __t('apps.pictoria.ui', '删除') }}
           </button>
         </div>
       </section>
@@ -1636,7 +1737,13 @@ onBeforeUnmount(() => {
       <section v-if="drawer" class="workflow-drawer floating-panel" data-ui>
         <header>
           <strong>
-            {{ drawer === 'run' ? '试运行' : drawer === 'history' ? '发布历史' : '校验' }}
+            {{
+              drawer === 'run'
+                ? __t('apps.pictoria.ui', '试运行')
+                : drawer === 'history'
+                  ? __t('apps.pictoria.ui', '发布历史')
+                  : __t('apps.pictoria.ui', '校验')
+            }}
           </strong>
           <span
             v-if="drawer === 'run' && run"
@@ -1646,9 +1753,13 @@ onBeforeUnmount(() => {
             {{ statuses[run.state] || run.state }}
           </span>
           <small v-if="drawer === 'run' && flow.runStale.value" class="workflow-muted">
-            旧结果
+            {{ __t('apps.pictoria.ui', '旧结果') }}
           </small>
-          <button class="icon-button" aria-label="收起" @click="drawer = null">
+          <button
+            class="icon-button"
+            :aria-label="__t('apps.pictoria.ui', '收起')"
+            @click="drawer = null"
+          >
             <Icon name="close" :size="15" />
           </button>
         </header>
@@ -1677,7 +1788,9 @@ onBeforeUnmount(() => {
                   @upload="chooseUpload('test', String(name))"
                 />
               </label>
-              <p v-if="flow.examplePending.value" class="workflow-muted">示例步骤未配置</p>
+              <p v-if="flow.examplePending.value" class="workflow-muted">
+                {{ __t('apps.pictoria.ui', '示例步骤未配置') }}
+              </p>
               <div class="workflow-run-actions">
                 <button
                   class="create-button"
@@ -1690,7 +1803,7 @@ onBeforeUnmount(() => {
                   @click="flow.action('run', testInputs)"
                 >
                   <Icon name="play" :size="14" />
-                  {{ busy ? '提交中' : '运行' }}
+                  {{ busy ? __t('apps.pictoria.ui', '提交中') : __t('apps.pictoria.ui', '运行') }}
                 </button>
                 <button
                   v-if="run && ['queued', 'running', 'waiting'].includes(run.state)"
@@ -1701,14 +1814,14 @@ onBeforeUnmount(() => {
                       .catch((failure) => (error = failure.message))
                   "
                 >
-                  停止
+                  {{ __t('apps.pictoria.ui', '停止') }}
                 </button>
                 <button
                   v-if="run && ['waiting', 'failed', 'partial'].includes(run.state)"
                   class="text-button"
                   @click="recovery = true"
                 >
-                  恢复任务
+                  {{ __t('apps.pictoria.ui', '恢复任务') }}
                 </button>
               </div>
             </div>
@@ -1734,7 +1847,10 @@ onBeforeUnmount(() => {
                       assets.find((asset) => asset.id === id)?.mimeType.startsWith('image/')
                     "
                     :src="props.canvas.urls[id]"
-                    :alt="assets.find((asset) => asset.id === id)?.name || '作品'"
+                    :alt="
+                      assets.find((asset) => asset.id === id)?.name ||
+                      __t('apps.pictoria.ui', '作品')
+                    "
                   />
                   <video
                     v-else-if="
@@ -1755,19 +1871,27 @@ onBeforeUnmount(() => {
                     preload="metadata"
                   />
                   <Icon v-else name="image" :size="22" />
-                  <span>{{ assets.find((asset) => asset.id === id)?.name || '作品' }}</span>
+                  <span>
+                    {{
+                      assets.find((asset) => asset.id === id)?.name ||
+                      __t('apps.pictoria.ui', '作品')
+                    }}
+                  </span>
                   <a
                     v-if="props.canvas.urls[id]"
                     :href="props.canvas.urls[id]"
-                    :download="assets.find((asset) => asset.id === id)?.name || '作品'"
+                    :download="
+                      assets.find((asset) => asset.id === id)?.name ||
+                      __t('apps.pictoria.ui', '作品')
+                    "
                     @click.stop
                   >
                     <Icon name="download" :size="14" />
                   </a>
                   <button
                     class="icon-button"
-                    title="加入画布"
-                    aria-label="加入画布"
+                    :title="__t('apps.pictoria.ui', '加入画布')"
+                    :aria-label="__t('apps.pictoria.ui', '加入画布')"
                     @click="addResult(id)"
                   >
                     <Icon name="plus" :size="14" />
@@ -1775,7 +1899,7 @@ onBeforeUnmount(() => {
                 </div>
               </div>
               <details v-if="run.result">
-                <summary>结果</summary>
+                <summary>{{ __t('apps.pictoria.ui', '结果') }}</summary>
                 <pre>{{ JSON.stringify(run.result, null, 2) }}</pre>
               </details>
             </div>
@@ -1804,7 +1928,11 @@ onBeforeUnmount(() => {
               </span>
             </button>
             <span v-if="!issues.length" class="workflow-muted">
-              {{ notice === '校验通过' ? '校验通过' : '点击校验' }}
+              {{
+                notice === '校验通过'
+                  ? __t('apps.pictoria.ui', '校验通过')
+                  : __t('apps.pictoria.ui', '点击校验')
+              }}
             </span>
           </template>
           <template v-else>
@@ -1821,29 +1949,45 @@ onBeforeUnmount(() => {
                   release.createdAt ? new Date(release.createdAt).toLocaleString() : release.name
                 }}
               </small>
-              <span>恢复草稿</span>
+              <span>{{ __t('apps.pictoria.ui', '恢复草稿') }}</span>
             </button>
-            <span v-if="!releases.length" class="workflow-muted">暂无发布</span>
+            <span v-if="!releases.length" class="workflow-muted">
+              {{ __t('apps.pictoria.ui', '暂无发布') }}
+            </span>
           </template>
         </div>
       </section>
     </Transition>
     <div class="canvas-bottom-left" data-ui>
-      <button class="text-button" @click="panel = 'tutorial'">教程</button>
-      <small>{{ doc.nodes.length }} 个节点</small>
+      <button class="text-button" @click="panel = 'tutorial'">
+        {{ __t('apps.pictoria.ui', '教程') }}
+      </button>
+      <small>{{ doc.nodes.length }} {{ __t('apps.pictoria.ui', '个节点') }}</small>
     </div>
     <div class="canvas-zoom floating-panel" data-ui>
-      <button class="icon-button" aria-label="缩小" @click="navigation.zoom(viewport.scale / 1.2)">
+      <button
+        class="icon-button"
+        :aria-label="__t('apps.pictoria.ui', '缩小')"
+        @click="navigation.zoom(viewport.scale / 1.2)"
+      >
         <Icon name="minus" :size="15" />
       </button>
       <button class="zoom-percent" @click="navigation.zoom(1)">
         {{ Math.round(viewport.scale * 100) }}%
       </button>
-      <button class="icon-button" aria-label="放大" @click="navigation.zoom(viewport.scale * 1.2)">
+      <button
+        class="icon-button"
+        :aria-label="__t('apps.pictoria.ui', '放大')"
+        @click="navigation.zoom(viewport.scale * 1.2)"
+      >
         <Icon name="plus" :size="15" />
       </button>
       <i class="header-divider" />
-      <button class="icon-button" aria-label="适应画布" @click="navigation.fit()">
+      <button
+        class="icon-button"
+        :aria-label="__t('apps.pictoria.ui', '适应画布')"
+        @click="navigation.fit()"
+      >
         <Icon name="fit" :size="17" />
       </button>
     </div>
@@ -1878,9 +2022,9 @@ onBeforeUnmount(() => {
       />
     </Transition>
     <div v-if="!loaded" class="workflow-loading" data-ui>
-      <span>{{ error || '连接中…' }}</span>
+      <span>{{ error || __t('apps.pictoria.ui', '连接中…') }}</span>
       <button v-if="error" class="create-button" :disabled="busy" @click="flow.connect">
-        重试
+        {{ __t('apps.pictoria.ui', '重试') }}
       </button>
     </div>
     <input

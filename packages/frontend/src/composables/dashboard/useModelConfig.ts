@@ -1,3 +1,4 @@
+import { t as __t } from '../../i18n/index'
 /**
  * useModelConfig — 模型配置 composable
  *
@@ -8,7 +9,7 @@
  *
  * @module packages/frontend/src/composables/dashboard/useModelConfig
  */
-import { ref, shallowRef, computed, onMounted } from 'vue'
+import { ref, shallowRef, computed, onMounted, watch } from 'vue'
 import { modelApi } from '../../api/modules/modelApi'
 import type { ModelConfigItem, ReasoningEffort } from '../../api/modules/modelApi'
 import { configApi } from '../../api/modules/configApi'
@@ -16,6 +17,12 @@ import { useNotificationStore } from '../../stores/useNotificationStore'
 import { logger } from '../../lib/logger'
 import { EMBEDDING_ENABLED_KEY } from '@infos/shared'
 import { useConfigSwitch } from './useConfigSwitch'
+import {
+  providerApi,
+  type ProviderConnectionItem,
+  type ProviderProtocol,
+  type ProviderAuthMode,
+} from '../../api/modules/providerApi'
 
 // ── 类型 ──
 
@@ -38,48 +45,76 @@ export interface LlmModel {
   topP: number | null
   apiBase?: string
   apiKey?: string
-  /** 自定义 provider 的协议格式 (openai/anthropic/gemini) */
+  /** 旧版模型用途字段；请求协议由 connectionProtocol 单独保存。 */
   providerType: string
+  providerConnectionId: string | null
+  connectionOverride: boolean
+  connectionProtocol: ProviderProtocol
+  connectionAuthMode: ProviderAuthMode
 }
 
-export type ModelTab = 'llm' | 'vector' | 'multimodal'
+export type ModelTab = 'llm' | 'vector'
 
 /** 任务槽元数据（供前端 UI 使用） */
 export const TASK_SLOTS = [
   {
     key: 'approval',
-    label: '工具审批',
-    description: '自动审批终端操作与工作区外删除；未指派时跟随主模型',
+    get label() {
+      return __t('ui.settings', '工具审批')
+    },
+    get description() {
+      return __t('ui.settings', '自动审批终端操作与工作区外删除；未指派时跟随主模型')
+    },
     icon: 'check',
   },
   {
     key: 'knowledge',
-    label: '知识整理',
-    description: '整理文档摘要、关键词与内容切片',
+    get label() {
+      return __t('ui.settings', '知识整理')
+    },
+    get description() {
+      return __t('ui.settings', '整理文档摘要、关键词与内容切片')
+    },
     icon: 'book',
   },
   {
     key: 'scorer',
-    label: '整理长期记忆',
-    description: '从对话中找出以后仍值得记住的内容',
+    get label() {
+      return __t('ui.settings', '整理长期记忆')
+    },
+    get description() {
+      return __t('ui.settings', '从对话中找出以后仍值得记住的内容')
+    },
     icon: 'brain',
   },
   {
     key: 'reflection',
-    label: '整理记忆关系',
-    description: '关联相近经历、修正内容并减少重复记忆',
+    get label() {
+      return __t('ui.settings', '整理记忆关系')
+    },
+    get description() {
+      return __t('ui.settings', '关联相近经历、修正内容并减少重复记忆')
+    },
     icon: 'link',
   },
   {
     key: 'social_scorer',
-    label: '整理社交记忆',
-    description: '从社交互动中保留重要的人物印象与经历',
+    get label() {
+      return __t('ui.settings', '整理社交记忆')
+    },
+    get description() {
+      return __t('ui.settings', '从社交互动中保留重要的人物印象与经历')
+    },
     icon: 'chat',
   },
   {
     key: 'butler',
-    label: '据点管家',
-    description: '理解房间管理请求，并协助安排角色与环境',
+    get label() {
+      return __t('ui.settings', '据点管家')
+    },
+    get description() {
+      return __t('ui.settings', '理解房间管理请求，并协助安排角色与环境')
+    },
     icon: 'home',
   },
 ] as const
@@ -108,6 +143,16 @@ function toLlmModel(item: ModelConfigItem): LlmModel {
     apiBase: item.apiBase,
     apiKey: item.apiKey, // 后端已遮蔽
     providerType: item.providerType ?? 'openai',
+    providerConnectionId: item.providerConnectionId ?? null,
+    connectionOverride: item.connectionOverride ?? false,
+    connectionProtocol:
+      item.connectionProtocol ??
+      (item.provider === 'gemini'
+        ? 'gemini'
+        : ['anthropic', 'claude'].includes(item.provider)
+          ? 'anthropic'
+          : 'openai'),
+    connectionAuthMode: item.connectionAuthMode ?? 'api_key',
   }
 }
 
@@ -119,13 +164,67 @@ export function useModelConfig() {
     ready: embeddingSwitchReady,
     saving: embeddingSwitchSaving,
     setEnabled: setEmbeddingEnabled,
-  } = useConfigSwitch(EMBEDDING_ENABLED_KEY, '向量功能')
+  } = useConfigSwitch(EMBEDDING_ENABLED_KEY, '向量功能', false)
   const notify = useNotificationStore()
   // ── LLM 模型列表 ──
   const models = shallowRef<LlmModel[]>([])
   const currentTab = ref<ModelTab>('llm')
   const isLoading = ref(false)
   const error = ref<string | null>(null)
+  const modelTests = ref<Record<string, { loading: boolean; success?: boolean; message: string }>>(
+    {},
+  )
+  const switchingConnections = ref<Record<string, boolean>>({})
+
+  async function testModel(id: string): Promise<void> {
+    if (modelTests.value[id]?.loading) return
+    modelTests.value[id] = {
+      loading: true,
+      get message() {
+        return __t('ui.settings', '测试中…')
+      },
+    }
+    try {
+      const result = (await modelApi.test(id)).data
+      if (!result) throw new Error('模型测试未返回结果')
+      modelTests.value[id] = {
+        loading: false,
+        success: result.success,
+        get message() {
+          return __t('ui.settings', '推理成功 · {0} ms{1}', [
+            result.durationMs,
+            result.response ? ` · ${result.response}` : '',
+          ])
+        },
+      }
+    } catch (failure) {
+      modelTests.value[id] = { loading: false, success: false, message: (failure as Error).message }
+    }
+  }
+
+  async function setModelConnection(model: LlmModel, connectionId: string): Promise<void> {
+    if (switchingConnections.value[model.id]) return
+    const connection = providerConnections.value.find((item) => item.id === connectionId)
+    if (!connection) return
+    switchingConnections.value[model.id] = true
+    try {
+      await modelApi.update(model.id, {
+        providerConnectionId: connectionId,
+        connectionOverride: false,
+        provider: connection.brand,
+        connectionProtocol: connection.protocol,
+        connectionAuthMode: connection.authMode,
+      })
+      delete modelTests.value[model.id]
+      await fetchModels()
+      notify.toast(__t('ui.settings', '已切换到「{0}」', [connection.name]), 'success')
+      window.dispatchEvent(new CustomEvent('infos:model-capabilities-changed'))
+    } catch (failure) {
+      notify.toast(__t('ui.settings', '切换服务商失败：') + (failure as Error).message, 'error')
+    } finally {
+      switchingConnections.value[model.id] = false
+    }
+  }
 
   // ── 主模型 + 任务指派 ──
   const mainModelId = ref<string | null>(null)
@@ -158,30 +257,70 @@ export function useModelConfig() {
     apiBase: '',
     apiKey: '',
     providerType: 'openai',
+    providerConnectionId: null,
+    connectionOverride: false,
+    connectionProtocol: 'openai',
+    connectionAuthMode: 'api_key',
   })
 
   // ── 全局配置弹窗 ──
   const isGlobalOpen = ref(false)
-  // 每个主流供应商的全局 apiBase/apiKey
-  const globalConfig = ref({
-    openai: { apiBase: 'https://api.openai.com/v1', apiKey: '' },
-    anthropic: { apiBase: 'https://api.anthropic.com/v1', apiKey: '' },
-    gemini: { apiBase: 'https://generativelanguage.googleapis.com/v1beta', apiKey: '' },
-    siliconflow: { apiBase: 'https://api.siliconflow.cn/v1', apiKey: '' },
-    deepseek: { apiBase: 'https://api.deepseek.com/v1', apiKey: '' },
-    moonshot: { apiBase: 'https://api.moonshot.cn/v1', apiKey: '' },
-    dashscope: { apiBase: 'https://dashscope.aliyuncs.com/compatible-mode/v1', apiKey: '' },
-    volcengine: { apiBase: 'https://ark.cn-beijing.volces.com/api/v3', apiKey: '' },
-    groq: { apiBase: 'https://api.groq.com/openai/v1', apiKey: '' },
-    zhipu: { apiBase: 'https://open.bigmodel.cn/api/paas/v4', apiKey: '' },
-    minimax: { apiBase: 'https://api.minimax.chat/v1', apiKey: '' },
-    mistral: { apiBase: 'https://api.mistral.ai/v1', apiKey: '' },
-    yi: { apiBase: 'https://api.lingyiwanwu.com/v1', apiKey: '' },
-    xai: { apiBase: 'https://api.x.ai/v1', apiKey: '' },
-    stepfun: { apiBase: 'https://api.stepfun.com/v1', apiKey: '' },
-    hunyuan: { apiBase: 'https://api.hunyuan.cloud.tencent.com/v1', apiKey: '' },
-    ollama: { apiBase: 'http://localhost:11434/v1', apiKey: '' },
+  const providerConnections = ref<ProviderConnectionItem[]>([])
+  const selectedConnection = computed(() =>
+    providerConnections.value.find(
+      (connection) => connection.id === editorForm.value.providerConnectionId,
+    ),
+  )
+  watch(isGlobalOpen, (visible) => {
+    if (visible) void loadConnections()
   })
+
+  async function loadConnections(): Promise<void> {
+    try {
+      providerConnections.value = (await providerApi.list()).data ?? []
+    } catch (e) {
+      notify.toast(__t('ui.settings', '加载服务商连接失败：') + (e as Error).message, 'error')
+    }
+  }
+
+  function handleConnectionChange(id: string): void {
+    const connection = providerConnections.value.find((item) => item.id === id)
+    if (!connection) return
+    Object.assign(editorForm.value, {
+      providerConnectionId: id,
+      provider: connection.brand,
+      connectionProtocol: connection.protocol,
+      connectionAuthMode: connection.authMode,
+      connectionOverride: false,
+      apiBase: '',
+      apiKey: '',
+    })
+    remoteModels.value = []
+  }
+
+  async function setConnectionOverride(enabled: boolean): Promise<void> {
+    if (!enabled) {
+      editorForm.value.connectionOverride = false
+      return
+    }
+    const id = editorForm.value.providerConnectionId
+    if (!id) return
+    try {
+      const connection = (await providerApi.get(id)).data
+      if (!connection) throw new Error('服务商连接不存在')
+      if (!isEditorOpen.value || editorForm.value.providerConnectionId !== id) return
+      Object.assign(editorForm.value, {
+        connectionOverride: true,
+        apiBase: connection.apiBase,
+        apiKey: connection.apiKey,
+        provider: connection.brand,
+        connectionProtocol: connection.protocol,
+        connectionAuthMode: connection.authMode,
+      })
+    } catch (e) {
+      notify.toast(__t('ui.settings', '读取连接配置失败：') + (e as Error).message, 'error')
+    }
+  }
 
   // ── 向量配置 ──
   const embeddingProvider = ref<'local' | 'api'>('api')
@@ -217,20 +356,70 @@ export function useModelConfig() {
     { label: 'Mistral', value: 'mistral' },
     { label: 'Groq', value: 'groq' },
     // 国内服务商
-    { label: 'SiliconFlow (硅基流动)', value: 'siliconflow' },
-    { label: 'DeepSeek (深度求索)', value: 'deepseek' },
+    {
+      get label() {
+        return __t('ui.settings', 'SiliconFlow (硅基流动)')
+      },
+      value: 'siliconflow',
+    },
+    {
+      get label() {
+        return __t('ui.settings', 'DeepSeek (深度求索)')
+      },
+      value: 'deepseek',
+    },
     { label: 'Moonshot (Kimi)', value: 'moonshot' },
-    { label: 'DashScope (阿里百炼)', value: 'dashscope' },
-    { label: 'Volcengine (火山引擎)', value: 'volcengine' },
-    { label: 'Zhipu (智谱GLM)', value: 'zhipu' },
+    {
+      get label() {
+        return __t('ui.settings', 'DashScope (阿里百炼)')
+      },
+      value: 'dashscope',
+    },
+    {
+      get label() {
+        return __t('ui.settings', 'Volcengine (火山引擎)')
+      },
+      value: 'volcengine',
+    },
+    {
+      get label() {
+        return __t('ui.settings', 'Zhipu (智谱GLM)')
+      },
+      value: 'zhipu',
+    },
     { label: 'MiniMax', value: 'minimax' },
-    { label: '01.AI (零一万物)', value: 'yi' },
-    { label: 'StepFun (阶跃星辰)', value: 'stepfun' },
-    { label: 'Hunyuan (腾讯混元)', value: 'hunyuan' },
+    {
+      get label() {
+        return __t('ui.settings', '01.AI (零一万物)')
+      },
+      value: 'yi',
+    },
+    {
+      get label() {
+        return __t('ui.settings', 'StepFun (阶跃星辰)')
+      },
+      value: 'stepfun',
+    },
+    {
+      get label() {
+        return __t('ui.settings', 'Hunyuan (腾讯混元)')
+      },
+      value: 'hunyuan',
+    },
     // 本地
-    { label: 'Ollama (本地部署)', value: 'ollama' },
+    {
+      get label() {
+        return __t('ui.settings', 'Ollama (本地部署)')
+      },
+      value: 'ollama',
+    },
     // 自定义
-    { label: '自定义', value: 'custom' },
+    {
+      get label() {
+        return __t('ui.settings', '自定义')
+      },
+      value: 'custom',
+    },
   ])
 
   /**
@@ -261,9 +450,24 @@ export function useModelConfig() {
 
   /** 自定义 provider 的协议格式选项 */
   const customProviderTypeOptions = computed(() => [
-    { label: 'OpenAI 兼容', value: 'openai' },
-    { label: 'Anthropic 兼容', value: 'anthropic' },
-    { label: 'Gemini 兼容', value: 'gemini' },
+    {
+      get label() {
+        return __t('ui.settings', 'OpenAI 兼容')
+      },
+      value: 'openai',
+    },
+    {
+      get label() {
+        return __t('ui.settings', 'Anthropic 兼容')
+      },
+      value: 'anthropic',
+    },
+    {
+      get label() {
+        return __t('ui.settings', 'Gemini 兼容')
+      },
+      value: 'gemini',
+    },
   ])
 
   // ── 远程模型列表 ──
@@ -273,21 +477,6 @@ export function useModelConfig() {
   const isFetchingEmbedding = ref(false)
   const remoteRerankerModels = ref<string[]>([])
   const isFetchingReranker = ref(false)
-
-  /**
-   * 切换 Provider 时自动填充 API Base
-   *
-   * 如果用户还没填过自定义地址，起到引导所用的作用。
-   */
-  function handleProviderChange(provider: string) {
-    if (providerDefaults[provider] && !editorForm.value.apiBase) {
-      editorForm.value.apiBase = providerDefaults[provider]
-    }
-    // 切换非 custom 供应商时清空 providerType（设回默认）
-    if (provider !== 'custom') {
-      editorForm.value.providerType = 'openai'
-    }
-  }
 
   // ── API 操作 ──
 
@@ -300,8 +489,8 @@ export function useModelConfig() {
       models.value = (res.data ?? []).map(toLlmModel)
     } catch (e) {
       error.value = (e as Error).message
-      notify.toast('加载模型列表失败: ' + (e as Error).message, 'error')
-      logger.error('ModelConfig', '加载模型列表失败', e)
+      notify.toast(__t('ui.settings', '加载模型列表失败: ') + (e as Error).message, 'error')
+      logger.error('ModelConfig', __t('logs.frontend.settings', '加载模型列表失败'), e)
     } finally {
       isLoading.value = false
     }
@@ -310,43 +499,36 @@ export function useModelConfig() {
   /**
    * 获取远程服务商可用模型列表
    *
-   * 根据当前编辑表单的 provider/apiKey/apiBase 调用后端查询。
-   * 对于 custom provider，使用 providerType 作为实际协议类型。
+   * 默认使用已保存连接；开启独立覆盖时，使用当前表单中的完整连接参数。
    */
   async function fetchRemoteModels(): Promise<void> {
     const form = editorForm.value
-    const actualProvider =
-      form.provider === 'custom' ? form.providerType || 'openai' : form.provider
-    const apiKey =
-      form.apiKey ||
-      globalConfig.value[form.provider as keyof typeof globalConfig.value]?.apiKey ||
-      ''
-    const apiBase =
-      form.apiBase ||
-      globalConfig.value[form.provider as keyof typeof globalConfig.value]?.apiBase ||
-      undefined
-
-    if (!apiKey) {
-      error.value = '请先填写 API Key 或在全局服务商中配置'
-      notify.toast('请先填写 API Key 或在全局服务商中配置', 'warning')
-      return
-    }
 
     isFetchingRemote.value = true
     remoteModels.value = []
     error.value = null
     try {
-      const res = await modelApi.listRemote({ provider: actualProvider, apiKey, apiBase })
+      const res = await modelApi.listRemote({
+        provider: form.provider,
+        protocol: form.connectionProtocol,
+        apiKey: form.connectionAuthMode === 'none' ? '' : form.apiKey || '',
+        apiBase: form.apiBase,
+        providerConnectionId: form.providerConnectionId || undefined,
+        connectionOverride: form.connectionOverride,
+      })
       remoteModels.value = res.data ?? []
       if (remoteModels.value.length > 0) {
-        notify.toast(`已获取 ${remoteModels.value.length} 个可用模型`, 'success')
+        notify.toast(
+          __t('ui.settings', '已获取 {0} 个可用模型', [remoteModels.value.length]),
+          'success',
+        )
       } else {
-        notify.toast('未获取到可用模型，请检查 API Key 或服务商配置', 'warning')
+        notify.toast(__t('ui.settings', '列表为空，可手动填写模型 ID'), 'info')
       }
     } catch (e) {
       error.value = (e as Error).message
-      notify.toast('获取远程模型列表失败: ' + (e as Error).message, 'error')
-      logger.error('ModelConfig', '获取远程模型列表失败', e)
+      notify.toast(__t('ui.settings', '获取列表失败：') + (e as Error).message, 'warning')
+      logger.error('ModelConfig', __t('logs.frontend.settings', '获取远程模型列表失败'), e)
     } finally {
       isFetchingRemote.value = false
     }
@@ -399,6 +581,7 @@ export function useModelConfig() {
   }
 
   async function openEditor(model: LlmModel | null): Promise<void> {
+    await loadConnections()
     if (model) {
       editingModel.value = model
       isLoading.value = true
@@ -407,7 +590,7 @@ export function useModelConfig() {
         editorForm.value = toLlmModel(response.data ?? (model as ModelConfigItem))
       } catch (e) {
         error.value = (e as Error).message
-        notify.toast('加载模型完整配置失败: ' + (e as Error).message, 'error')
+        notify.toast(__t('ui.settings', '加载模型完整配置失败: ') + (e as Error).message, 'error')
         return
       } finally {
         isLoading.value = false
@@ -434,7 +617,13 @@ export function useModelConfig() {
         apiBase: '',
         apiKey: '',
         providerType: 'openai',
+        providerConnectionId: null,
+        connectionOverride: false,
+        connectionProtocol: 'openai',
+        connectionAuthMode: 'api_key',
       }
+      const first = providerConnections.value[0]
+      if (first) handleConnectionChange(first.id)
     }
     remoteModels.value = []
     isEditorOpen.value = true
@@ -445,15 +634,20 @@ export function useModelConfig() {
     isLoading.value = true
     try {
       const form = editorForm.value
+      if (!form.providerConnectionId && !editingModel.value)
+        throw new Error('请先创建并选择服务商连接')
       if (editingModel.value) {
         // 更新
         await modelApi.update(editingModel.value.id, {
           name: form.name,
           provider: form.provider,
+          providerConnectionId: form.providerConnectionId,
+          connectionOverride: form.connectionOverride,
+          connectionProtocol: form.connectionProtocol,
+          connectionAuthMode: form.connectionAuthMode,
           modelId: form.modelId,
-          apiKey:
-            form.apiKey && form.apiKey !== editingModel.value.apiKey ? form.apiKey : undefined,
-          apiBase: form.apiBase || undefined,
+          apiKey: form.connectionAuthMode === 'none' ? '' : form.apiKey || '',
+          apiBase: form.apiBase || '',
           temperature: form.temperature,
           topP: form.topP,
           maxTokens: form.maxTokens,
@@ -467,15 +661,19 @@ export function useModelConfig() {
           enableVision: form.enableVision,
           enableAudioInput: form.enableAudioInput,
         })
-        notify.toast(`模型 "${form.name}" 已更新`, 'success')
+        notify.toast(__t('ui.settings', '模型 "{0}" 已更新', [form.name]), 'success')
       } else {
         // 创建
         await modelApi.create({
           name: form.name,
           provider: form.provider,
+          providerConnectionId: form.providerConnectionId,
+          connectionOverride: form.connectionOverride,
+          connectionProtocol: form.connectionProtocol,
+          connectionAuthMode: form.connectionAuthMode,
           modelId: form.modelId,
-          apiKey: form.apiKey || '',
-          apiBase: form.apiBase || undefined,
+          apiKey: form.connectionAuthMode === 'none' ? '' : form.apiKey || '',
+          apiBase: form.apiBase || '',
           temperature: form.temperature,
           topP: form.topP,
           maxTokens: form.maxTokens,
@@ -489,14 +687,14 @@ export function useModelConfig() {
           enableVision: form.enableVision,
           enableAudioInput: form.enableAudioInput,
         })
-        notify.toast(`模型 "${form.name}" 已添加`, 'success')
+        notify.toast(__t('ui.settings', '模型 "{0}" 已添加', [form.name]), 'success')
       }
       isEditorOpen.value = false
       await fetchModels()
       window.dispatchEvent(new CustomEvent('infos:model-capabilities-changed'))
     } catch (e) {
       error.value = (e as Error).message
-      notify.toast('保存模型失败: ' + (e as Error).message, 'error')
+      notify.toast(__t('ui.settings', '保存模型失败: ') + (e as Error).message, 'error')
     } finally {
       isLoading.value = false
     }
@@ -525,10 +723,11 @@ export function useModelConfig() {
           await configApi.set(`model.agent.${agentId}`, '')
         }
       }
-      notify.toast('模型已删除', 'success')
+      notify.toast(__t('ui.settings', '模型已删除'), 'success')
+      window.dispatchEvent(new CustomEvent('infos:model-capabilities-changed'))
     } catch (e) {
       error.value = (e as Error).message
-      notify.toast('删除模型失败: ' + (e as Error).message, 'error')
+      notify.toast(__t('ui.settings', '删除模型失败: ') + (e as Error).message, 'error')
     }
   }
 
@@ -544,10 +743,21 @@ export function useModelConfig() {
         item.id === model.id ? { ...item, [field]: enabled } : item,
       )
       const label =
-        field === 'stream' ? '流式输出' : field === 'enableVision' ? '图片输入' : '音频输入'
-      notify.toast(`${label}已${enabled ? '启用' : '关闭'}`, enabled ? 'success' : 'info')
+        field === 'stream'
+          ? __t('ui.settings', '流式输出')
+          : field === 'enableVision'
+            ? __t('ui.settings', '图片输入')
+            : __t('ui.settings', '音频输入')
+      notify.toast(
+        __t('ui.settings', '{0}已{1}', [
+          label,
+          enabled ? __t('ui.settings', '启用') : __t('ui.settings', '关闭'),
+        ]),
+        enabled ? 'success' : 'info',
+      )
+      window.dispatchEvent(new CustomEvent('infos:model-capabilities-changed'))
     } catch (e) {
-      notify.toast('模型配置保存失败: ' + (e as Error).message, 'error')
+      notify.toast(__t('ui.settings', '模型配置保存失败: ') + (e as Error).message, 'error')
     }
   }
 
@@ -556,9 +766,10 @@ export function useModelConfig() {
     try {
       mainModelId.value = modelId
       await configApi.set('model.main', modelId)
-      notify.toast('已设置为主模型', 'success')
+      notify.toast(__t('ui.settings', '已设置为主模型'), 'success')
+      window.dispatchEvent(new CustomEvent('infos:model-capabilities-changed'))
     } catch (e) {
-      notify.toast('主模型设置失败: ' + (e as Error).message, 'error')
+      notify.toast(__t('ui.settings', '主模型设置失败: ') + (e as Error).message, 'error')
     }
   }
 
@@ -567,9 +778,12 @@ export function useModelConfig() {
     try {
       taskAssignments.value[taskSlot] = modelId
       await configApi.set(`model.task.${taskSlot}`, modelId ?? '')
-      notify.toast(modelId ? '已指派任务模型' : '已取消任务指派', modelId ? 'success' : 'info')
+      notify.toast(
+        modelId ? __t('ui.settings', '已指派任务模型') : __t('ui.settings', '已取消任务指派'),
+        modelId ? 'success' : 'info',
+      )
     } catch (e) {
-      notify.toast('任务指派失败: ' + (e as Error).message, 'error')
+      notify.toast(__t('ui.settings', '任务指派失败: ') + (e as Error).message, 'error')
     }
   }
 
@@ -581,29 +795,23 @@ export function useModelConfig() {
     agentAssignments.value[normalizedAgentId] = modelId
     try {
       await configApi.set(`model.agent.${normalizedAgentId}`, modelId ?? '')
-      notify.toast(modelId ? '已指派角色模型' : '已恢复主模型', modelId ? 'success' : 'info')
+      notify.toast(
+        modelId ? __t('ui.settings', '已指派角色模型') : __t('ui.settings', '已恢复主模型'),
+        modelId ? 'success' : 'info',
+      )
     } catch (e) {
       agentAssignments.value[normalizedAgentId] = previous
-      notify.toast('角色指派失败: ' + (e as Error).message, 'error')
+      notify.toast(__t('ui.settings', '角色指派失败: ') + (e as Error).message, 'error')
     }
   }
 
   /** 获取 Embedding 远程模型列表 */
   async function fetchRemoteEmbeddingModels(): Promise<void> {
-    // 优先使用 Embedding 专用配置，fallback 到全局 openai / siliconflow
-    const apiKey =
-      embeddingApiKey.value ||
-      globalConfig.value.openai?.apiKey ||
-      globalConfig.value.siliconflow?.apiKey ||
-      ''
-    const apiBase =
-      embeddingApiBase.value ||
-      globalConfig.value.openai?.apiBase ||
-      globalConfig.value.siliconflow?.apiBase ||
-      undefined
+    const apiKey = embeddingApiKey.value
+    const apiBase = embeddingApiBase.value || undefined
     if (!apiKey) {
-      error.value = '请先填写 Embedding API Key 或在全局服务商中配置'
-      notify.toast('请先填写 Embedding API Key 或在全局服务商中配置', 'warning')
+      error.value = '请先填写 Embedding API Key'
+      notify.toast(error.value, 'warning')
       return
     }
     isFetchingEmbedding.value = true
@@ -614,13 +822,16 @@ export function useModelConfig() {
       remoteEmbeddingModels.value = res.data ?? []
       notify.toast(
         remoteEmbeddingModels.value.length
-          ? `已获取 ${remoteEmbeddingModels.value.length} 个 Embedding 模型`
-          : '服务商返回了空模型列表，请手动填写 Embedding 模型名称',
+          ? __t('ui.settings', '已获取 {0} 个 Embedding 模型', [remoteEmbeddingModels.value.length])
+          : __t('ui.settings', '列表为空，请手动填写模型 ID'),
         remoteEmbeddingModels.value.length ? 'success' : 'warning',
       )
     } catch (e) {
       error.value = (e as Error).message
-      notify.toast('获取 Embedding 模型列表失败: ' + (e as Error).message, 'error')
+      notify.toast(
+        __t('ui.settings', '获取 Embedding 模型列表失败: ') + (e as Error).message,
+        'error',
+      )
     } finally {
       isFetchingEmbedding.value = false
     }
@@ -628,19 +839,11 @@ export function useModelConfig() {
 
   /** 获取 Reranker 远程模型列表 */
   async function fetchRemoteRerankerModels(): Promise<void> {
-    const apiKey =
-      rerankerApiKey.value ||
-      globalConfig.value.openai?.apiKey ||
-      globalConfig.value.siliconflow?.apiKey ||
-      ''
-    const apiBase =
-      rerankerApiBase.value ||
-      globalConfig.value.openai?.apiBase ||
-      globalConfig.value.siliconflow?.apiBase ||
-      undefined
+    const apiKey = rerankerApiKey.value
+    const apiBase = rerankerApiBase.value || undefined
     if (!apiKey) {
-      error.value = '请先填写 Reranker API Key 或在全局服务商中配置'
-      notify.toast('请先填写 Reranker API Key 或在全局服务商中配置', 'warning')
+      error.value = '请先填写 Reranker API Key'
+      notify.toast(error.value, 'warning')
       return
     }
     isFetchingReranker.value = true
@@ -651,13 +854,16 @@ export function useModelConfig() {
       remoteRerankerModels.value = res.data ?? []
       notify.toast(
         remoteRerankerModels.value.length
-          ? `已获取 ${remoteRerankerModels.value.length} 个 Reranker 模型`
-          : '服务商返回了空模型列表，请手动填写 Reranker 模型名称',
+          ? __t('ui.settings', '已获取 {0} 个 Reranker 模型', [remoteRerankerModels.value.length])
+          : __t('ui.settings', '列表为空，请手动填写模型 ID'),
         remoteRerankerModels.value.length ? 'success' : 'warning',
       )
     } catch (e) {
       error.value = (e as Error).message
-      notify.toast('获取 Reranker 模型列表失败: ' + (e as Error).message, 'error')
+      notify.toast(
+        __t('ui.settings', '获取 Reranker 模型列表失败: ') + (e as Error).message,
+        'error',
+      )
     } finally {
       isFetchingReranker.value = false
     }
@@ -667,11 +873,21 @@ export function useModelConfig() {
   async function saveVectorConfig(): Promise<void> {
     if (!embeddingEnabled.value || embeddingSwitchSaving.value) return
     if (embeddingProvider.value !== 'api') {
-      embeddingActivationResult.value = { status: 'error', message: '当前仅支持在线 API Embedding' }
+      embeddingActivationResult.value = {
+        status: 'error',
+        get message() {
+          return __t('ui.settings', '当前仅支持在线 API Embedding')
+        },
+      }
       return
     }
     if (!embeddingModelId.value.trim()) {
-      embeddingActivationResult.value = { status: 'error', message: '请填写 Embedding 模型 ID' }
+      embeddingActivationResult.value = {
+        status: 'error',
+        get message() {
+          return __t('ui.settings', '请填写 Embedding 模型 ID')
+        },
+      }
       return
     }
     isSavingVector.value = true
@@ -696,14 +912,19 @@ export function useModelConfig() {
       embeddingActivationResult.value = {
         status: 'success',
         durationMs: result.durationMs,
-        message: `激活成功：${result.dimension} 维，调用耗时 ${result.durationMs} ms`,
+        get message() {
+          return __t('ui.settings', '激活成功：{0} 维，调用耗时 {1} ms', [
+            result.dimension,
+            result.durationMs,
+          ])
+        },
       }
       notify.toast(embeddingActivationResult.value.message, 'success')
     } catch (e) {
       const message = (e as Error).message || 'Embedding 模型激活失败'
       error.value = message
       embeddingActivationResult.value = { status: 'error', message }
-      notify.toast('Embedding 模型激活失败：' + message, 'error')
+      notify.toast(__t('ui.settings', 'Embedding 模型激活失败：') + message, 'error')
     } finally {
       isSavingVector.value = false
     }
@@ -733,7 +954,7 @@ export function useModelConfig() {
       relayEnabled.value &&
       !visionModels.value.some((model) => model.id === relayModelConfigId.value)
     ) {
-      notify.toast('请选择已启用图片视觉能力的转述模型', 'warning')
+      notify.toast(__t('ui.settings', '请选择已启用图片视觉能力的转述模型'), 'warning')
       return
     }
     isSavingRelay.value = true
@@ -744,54 +965,11 @@ export function useModelConfig() {
         { key: 'multimodalRelay.detail', value: relayDetail.value },
       ])
       window.dispatchEvent(new CustomEvent('infos:model-capabilities-changed'))
-      notify.toast('多模态转述配置已保存', 'success')
+      notify.toast(__t('ui.settings', '多模态转述配置已保存'), 'success')
     } catch (e) {
-      notify.toast('多模态转述配置保存失败: ' + (e as Error).message, 'error')
+      notify.toast(__t('ui.settings', '多模态转述配置保存失败: ') + (e as Error).message, 'error')
     } finally {
       isSavingRelay.value = false
-    }
-  }
-
-  /** 从后端加载全局服务商配置 */
-  async function loadGlobalConfig(): Promise<void> {
-    try {
-      // 收集所有供应商的 key
-      const providers = Object.keys(globalConfig.value) as Array<keyof typeof globalConfig.value>
-      const keys = providers.flatMap((p) => [`global.${p}.apiBase`, `global.${p}.apiKey`])
-      const res = await configApi.batch(keys)
-      const d = res.data ?? {}
-      for (const p of providers) {
-        if (d[`global.${p}.apiBase`])
-          globalConfig.value[p].apiBase = d[`global.${p}.apiBase`] as string
-        if (d[`global.${p}.apiKey`])
-          globalConfig.value[p].apiKey = d[`global.${p}.apiKey`] as string
-      }
-    } catch {
-      // 首次使用，保持默认值
-    }
-  }
-
-  /** 保存全局服务商配置到后端 */
-  async function saveGlobalConfig(): Promise<void> {
-    try {
-      const providers = Object.keys(globalConfig.value) as Array<keyof typeof globalConfig.value>
-      const pairs: Array<[string, string]> = []
-      for (const p of providers) {
-        const cfg = globalConfig.value[p]
-        if (cfg.apiKey) pairs.push([`global.${p}.apiKey`, cfg.apiKey])
-        if (cfg.apiBase) pairs.push([`global.${p}.apiBase`, cfg.apiBase])
-      }
-      // 逐个保存避免并发问题
-      for (const [k, v] of pairs) {
-        await configApi.set(k, v)
-      }
-      const keyCount = pairs.filter(([k]) => k.endsWith('.apiKey')).length
-      notify.toast(`全局服务商配置已保存 (${keyCount} 个 API Key)`, 'success')
-      logger.info('ModelConfig', `全局配置已保存: ${pairs.length} 项`)
-    } catch (e) {
-      error.value = (e as Error).message
-      notify.toast('全局服务商配置保存失败: ' + (e as Error).message, 'error')
-      logger.error('ModelConfig', '全局配置保存失败', e)
     }
   }
 
@@ -832,7 +1010,7 @@ export function useModelConfig() {
       fetchModels(),
       fetchMainModel(),
       fetchTaskAssignments(),
-      loadGlobalConfig(),
+      loadConnections(),
       loadVectorConfig(),
       loadRelayConfig(),
     ])
@@ -841,6 +1019,10 @@ export function useModelConfig() {
   return {
     // LLM
     models,
+    modelTests,
+    testModel,
+    setModelConnection,
+    switchingConnections,
     currentTab,
     isLoading,
     error,
@@ -870,12 +1052,14 @@ export function useModelConfig() {
     isFetchingRemote,
     fetchRemoteModels,
     customProviderTypeOptions,
-    handleProviderChange,
     providerDefaults,
     // 全局配置
     isGlobalOpen,
-    globalConfig,
-    saveGlobalConfig,
+    providerConnections,
+    selectedConnection,
+    loadConnections,
+    handleConnectionChange,
+    setConnectionOverride,
     // 多模态转述
     relayEnabled,
     relayModelConfigId,

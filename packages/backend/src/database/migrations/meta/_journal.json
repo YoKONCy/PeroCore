@@ -120,6 +120,48 @@
       "when": 1792339200000,
       "tag": "0016_thread_character_states",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1792454400000,
+      "tag": "0017_recurring_schedules",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1792540800000,
+      "tag": "0018_conversation_queue",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1792627200000,
+      "tag": "0019_provider_connections",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1792627200001,
+      "tag": "0020_provider_connection_names",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1792627200002,
+      "tag": "0021_thread_model_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1792627200003,
+      "tag": "0022_device_notifications",
+      "breakpoints": true
     }
   ]
 }

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 /**
  * ArcaTitleBar.vue — 界面组件
  *
@@ -42,14 +44,25 @@ onBeforeUnmount(() => unlisten?.())
   <header v-if="isElectron" class="arca-titlebar">
     <div class="arca-titlebar-brand">
       <strong>Arca</strong>
-      <span>办公套件</span>
+      <span>{{ __t('apps.arca.ui', '办公套件') }}</span>
     </div>
     <div class="arca-window-controls">
-      <button type="button" aria-label="最小化" @click="minimize">─</button>
-      <button type="button" :aria-label="maximized ? '还原' : '最大化'" @click="toggleMaximize">
+      <button type="button" :aria-label="__t('apps.arca.ui', '最小化')" @click="minimize">─</button>
+      <button
+        type="button"
+        :aria-label="maximized ? __t('apps.arca.ui', '还原') : __t('apps.arca.ui', '最大化')"
+        @click="toggleMaximize"
+      >
         {{ maximized ? '❐' : '□' }}
       </button>
-      <button class="arca-window-close" type="button" aria-label="关闭" @click="close">×</button>
+      <button
+        class="arca-window-close"
+        type="button"
+        :aria-label="__t('apps.arca.ui', '关闭')"
+        @click="close"
+      >
+        ×
+      </button>
     </div>
   </header>
 </template>

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import { computed, ref, onMounted, watch } from 'vue'
 import type BedrockAvatar from '../avatar/BedrockAvatar.vue'
 import PetModelOption from './PetModelOption.vue'
@@ -12,9 +14,24 @@ import {
 } from '../avatar/lib/avatarDefaults'
 const props = defineProps<{ avatarRef?: InstanceType<typeof BedrockAvatar> | null }>()
 const qualityOptions: Array<{ value: AvatarQuality; label: string }> = [
-  { value: 'economy', label: '节能' },
-  { value: 'balanced', label: '均衡' },
-  { value: 'high', label: '精细' },
+  {
+    value: 'economy',
+    get label() {
+      return __t('ui.pet', '节能')
+    },
+  },
+  {
+    value: 'balanced',
+    get label() {
+      return __t('ui.pet', '均衡')
+    },
+  },
+  {
+    value: 'high',
+    get label() {
+      return __t('ui.pet', '精细')
+    },
+  },
 ]
 const emit = defineEmits<{
   (e: 'model-change', path: string, complete: (success: boolean, message?: string) => void): void
@@ -32,8 +49,22 @@ const avatarAnimList = computed(() => {
 })
 const view = ref<'models' | 'actions'>('models')
 const tabs = computed(() => [
-  { id: 'models' as const, label: '换个样子' },
-  ...(avatarAnimList.value.length ? [{ id: 'actions' as const, label: '动作小剧场' }] : []),
+  {
+    id: 'models' as const,
+    get label() {
+      return __t('ui.pet', '换个样子')
+    },
+  },
+  ...(avatarAnimList.value.length
+    ? [
+        {
+          id: 'actions' as const,
+          get label() {
+            return __t('ui.pet', '动作小剧场')
+          },
+        },
+      ]
+    : []),
 ])
 watch(
   tabs,
@@ -141,7 +172,7 @@ onMounted(scanModels)
 <template>
   <div class="appearance">
     <div class="section-heading">
-      <div class="appearance-tabs" aria-label="互动内容">
+      <div class="appearance-tabs" :aria-label="__t('ui.pet', '互动内容')">
         <button
           v-for="tab in tabs"
           :key="tab.id"
@@ -158,7 +189,7 @@ onMounted(scanModels)
         :disabled="isLoadingModels"
         @click="scanModels"
       >
-        {{ isLoadingModels ? '读取中…' : '刷新' }}
+        {{ isLoadingModels ? __t('ui.pet', '读取中…') : __t('ui.pet', '刷新') }}
       </button>
     </div>
     <div :key="view" class="appearance-view">
@@ -175,11 +206,13 @@ onMounted(scanModels)
             @select="selectModel(model)"
           />
         </div>
-        <p v-if="!isLoadingModels && !availableModels.length" class="muted">还没有其他造型</p>
+        <p v-if="!isLoadingModels && !availableModels.length" class="muted">
+          {{ __t('ui.pet', '还没有其他造型') }}
+        </p>
         <p v-if="modelSwitchError" class="error" role="alert">{{ modelSwitchError }}</p>
         <div class="clothing-details">
-          <h4>画质</h4>
-          <div class="choices" aria-label="桌宠画质">
+          <h4>{{ __t('ui.pet', '画质') }}</h4>
+          <div class="choices" :aria-label="__t('ui.pet', '桌宠画质')">
             <button
               v-for="option in qualityOptions"
               :key="option.value"
@@ -193,7 +226,7 @@ onMounted(scanModels)
           </div>
         </div>
         <div v-if="avatarFeatureButtons.length" class="clothing-details">
-          <h4>穿搭细节</h4>
+          <h4>{{ __t('ui.pet', '穿搭细节') }}</h4>
           <div class="choices">
             <button
               v-for="part in avatarFeatureButtons"

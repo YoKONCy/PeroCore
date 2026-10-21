@@ -1,3 +1,4 @@
+import { t as __t } from '../../../lib/i18n'
 /**
  * Gemini 原生 Provider
  *
@@ -13,6 +14,7 @@
  * @module packages/backend/src/services/llm/providers/geminiProvider
  */
 
+import { providerApiUrl } from './providerUrl'
 import { normalizeTokenUsage, tokenCount } from '../usage'
 import { combinedOutputLimit, fetchLlmResponse } from '../requestPolicy'
 import { geminiReasoningEffort, geminiThinkingConfig } from '../geminiThinking'
@@ -162,25 +164,20 @@ export class GeminiProvider implements LlmProvider {
 
   /** 列出可用模型 */
   async listModels(): Promise<string[]> {
-    try {
-      const base = this.getBase()
-      const url = `${base}/v1beta/models?key=${this.config.apiKey}`
-      const response = await fetch(url, {
-        signal: AbortSignal.timeout(10_000),
-      })
-
-      if (!response.ok) return this.fallbackModels()
-
-      const data = (await response.json()) as {
-        models?: Array<{ name?: string; supportedGenerationMethods?: string[] }>
-      }
-      return (data.models ?? [])
-        .filter((m) => m.supportedGenerationMethods?.includes('generateContent'))
-        .map((m) => (m.name ?? '').replace('models/', ''))
-        .filter(Boolean)
-    } catch {
-      return this.fallbackModels()
+    const base = this.getBase()
+    const url = new URL(providerApiUrl(base, '/models', 'v1beta'))
+    if (this.config.apiKey) url.searchParams.set('key', this.config.apiKey)
+    const response = await fetch(url, {
+      signal: AbortSignal.timeout(10_000),
+    })
+    if (!response.ok) await this.handleError(response, '获取模型列表')
+    const data = (await response.json()) as {
+      models?: Array<{ name?: string; supportedGenerationMethods?: string[] }>
     }
+    return (data.models ?? [])
+      .filter((m) => m.supportedGenerationMethods?.includes('generateContent'))
+      .map((m) => (m.name ?? '').replace('models/', ''))
+      .filter(Boolean)
   }
 
   // ── 内部方法: URL & 请求构建 ──
@@ -198,10 +195,10 @@ export class GeminiProvider implements LlmProvider {
   private buildUrl(method: string, params?: Record<string, string>): string {
     const base = this.getBase()
     const searchParams = new URLSearchParams({
-      key: this.config.apiKey,
+      ...(this.config.apiKey ? { key: this.config.apiKey } : {}),
       ...params,
     })
-    return `${base}/v1beta/models/${this.config.modelId}:${method}?${searchParams}`
+    return `${providerApiUrl(base, `/models/${encodeURIComponent(this.config.modelId)}:${method}`, 'v1beta')}?${searchParams}`
   }
 
   /** 构建请求体 */
@@ -553,7 +550,7 @@ export class GeminiProvider implements LlmProvider {
     const text = await response.text().catch(() => '(无法读取响应体)')
     const retryMs = parseRetryAfterMs(response.headers.get('retry-after'))
 
-    logger.error(`Gemini ${method} 失败`, {
+    logger.error(__t('logs.llm', 'Gemini {0} 失败', [method]), {
       status: response.status,
       body: text.slice(0, 300),
       model: this.config.modelId,
@@ -569,10 +566,5 @@ export class GeminiProvider implements LlmProvider {
         retryAfter: retryMs,
       },
     })
-  }
-
-  /** 回退模型列表 */
-  private fallbackModels(): string[] {
-    return ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-1.5-pro']
   }
 }

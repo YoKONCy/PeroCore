@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import { computed } from 'vue'
 import { useDesktopControl } from '../../composables/useDesktopControl'
 import { PButton } from '../pixel'
@@ -31,16 +33,24 @@ async function resume() {
 <template>
   <section v-if="visible" class="desktop-control-status" role="status" aria-live="polite">
     <div>
-      <strong>{{ !pause && state.phase === 'running' ? '正在操作桌面' : '任务已暂停' }}</strong>
+      <strong>
+        {{
+          !pause && state.phase === 'running'
+            ? __t('ui.desktop', '正在操作桌面')
+            : __t('ui.desktop', '任务已暂停')
+        }}
+      </strong>
       <small>
         {{
           pause?.message ||
           (state.phase === 'running'
-            ? state.targetTitle || '随时操作鼠标键盘即可接管'
+            ? state.targetTitle || __t('ui.desktop', '随时操作鼠标键盘即可接管')
             : state.reason)
         }}
       </small>
-      <small v-if="pause">继续后会核对当前状态，保留已有工作结果。</small>
+      <small v-if="pause">
+        {{ __t('ui.desktop', '继续后会核对当前状态，保留已有工作结果。') }}
+      </small>
       <small v-if="error" role="alert">{{ error }}</small>
     </div>
     <PButton
@@ -49,10 +59,10 @@ async function resume() {
       variant="ghost"
       @click="control('pause')"
     >
-      暂停
+      {{ __t('ui.desktop', '暂停') }}
     </PButton>
     <PButton v-else size="sm" variant="ghost" :disabled="busy" @click="resume">
-      {{ pause ? '继续任务' : '解除桌面暂停' }}
+      {{ pause ? __t('ui.desktop', '继续任务') : __t('ui.desktop', '解除桌面暂停') }}
     </PButton>
   </section>
 </template>

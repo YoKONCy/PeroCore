@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /**
  * ConversationRewindDialog — 全局统一的对话检查点回滚确认框。
  *
@@ -22,29 +24,47 @@ const emit = defineEmits<{
 }>()
 
 const fileActionLabel = {
-  delete_created: '删除新建文件',
-  restore_edited: '恢复编辑前版本',
-  restore_deleted: '恢复已删除文件',
+  get delete_created() {
+    return __t('ui.chat', '删除新建文件')
+  },
+  get restore_edited() {
+    return __t('ui.chat', '恢复编辑前版本')
+  },
+  get restore_deleted() {
+    return __t('ui.chat', '恢复已删除文件')
+  },
   restore_renamed: '恢复原文件名',
-  preserve_changed: '检测到后续修改，将保留',
+  get preserve_changed() {
+    return __t('ui.chat', '检测到后续修改，将保留')
+  },
 } as const
 
 const preservedReasonLabel = {
   content_changed: '检测到后续修改，将保留',
-  history_gap: '变更记录不连续，将保留',
-  incomplete_snapshot: '恢复记录不完整，将保留',
-  unavailable: '无法安全读取，将保留',
+  get history_gap() {
+    return __t('ui.chat', '变更记录不连续，将保留')
+  },
+  get incomplete_snapshot() {
+    return __t('ui.chat', '恢复记录不完整，将保留')
+  },
+  get unavailable() {
+    return __t('ui.chat', '无法安全读取，将保留')
+  },
 } as const
 
 const dialogTitle = computed(() =>
   props.regenerating
-    ? '从这一轮重新生成？'
+    ? __t('ui.chat', '从这一轮重新生成？')
     : props.preview?.wholeThread
-      ? '删除这段会话？'
-      : '回滚到此对话之前？',
+      ? __t('ui.chat', '删除这段会话？')
+      : __t('ui.chat', '回滚到此对话之前？'),
 )
 const confirmText = computed(() =>
-  props.regenerating ? '重新生成' : props.preview?.wholeThread ? '删除会话' : '回滚并撤回',
+  props.regenerating
+    ? __t('ui.chat', '重新生成')
+    : props.preview?.wholeThread
+      ? __t('ui.chat', '删除会话')
+      : __t('ui.chat', '回滚并撤回'),
 )
 </script>
 
@@ -59,35 +79,38 @@ const confirmText = computed(() =>
       <div class="rewind-dialog__summary">
         <div>
           <strong>{{ preview.pairCount }}</strong>
-          <span>轮对话</span>
+          <span>{{ __t('ui.chat', '轮对话') }}</span>
         </div>
         <div v-if="!preview.wholeThread">
           <strong>{{ preview.createdCount }}</strong>
-          <span>新建文件</span>
+          <span>{{ __t('ui.chat', '新建文件') }}</span>
         </div>
         <div v-if="!preview.wholeThread">
           <strong>{{ preview.editedCount }}</strong>
-          <span>恢复文件</span>
+          <span>{{ __t('ui.chat', '恢复文件') }}</span>
         </div>
         <div v-if="!preview.wholeThread" class="is-preserved">
           <strong>{{ preview.preservedCount }}</strong>
-          <span>保留改动</span>
+          <span>{{ __t('ui.chat', '保留改动') }}</span>
         </div>
       </div>
 
       <p class="rewind-dialog__description">
         <template v-if="preview.wholeThread">
-          该会话的全部对话历史与会话清单将被删除，所有文件保持原样。
+          {{ __t('ui.chat', '删除全部会话记录，保留文件。') }}
         </template>
-        <template v-else-if="regenerating">本轮及后续对话将被撤回，再生成新的回复。</template>
+        <template v-else-if="regenerating">
+          {{ __t('ui.chat', '本轮及后续对话将被撤回，再生成新的回复。') }}
+        </template>
         <template v-else>
-          目标轮次及之后的 {{ preview.pairCount }} 轮对话将被删除，工作区将恢复到该检查点之前。
+          {{ __t('ui.chat', '撤回') }} {{ preview.pairCount }}
+          {{ __t('ui.chat', '轮对话，并恢复对应文件。') }}
         </template>
       </p>
 
       <section v-if="preview.files.length" class="rewind-dialog__files">
         <header>
-          <span>工作区变更</span>
+          <span>{{ __t('ui.chat', '工作区变更') }}</span>
           <i>{{ preview.files.length }}</i>
         </header>
         <div class="rewind-dialog__file-list">
@@ -122,12 +145,14 @@ const confirmText = computed(() =>
 
       <div v-else class="rewind-dialog__empty">
         <PixelIcon name="info" size="sm" />
-        <span>本次撤回不会产生文件回滚。</span>
+        <span>{{ __t('ui.chat', '本次撤回不会产生文件回滚。') }}</span>
       </div>
 
       <div v-if="preview.files.length" class="rewind-dialog__warning">
         <PixelIcon name="shield" size="sm" />
-        <span>后续修改、变更记录不连续或恢复记录不完整的文件将被保留。</span>
+        <span>
+          {{ __t('ui.chat', '后续修改、变更记录不连续或恢复记录不完整的文件将被保留。') }}
+        </span>
       </div>
     </div>
 
@@ -138,7 +163,7 @@ const confirmText = computed(() =>
         :disabled="loading"
         @click="emit('update:modelValue', false)"
       >
-        取消
+        {{ __t('ui.chat', '取消') }}
       </PButton>
       <PButton
         :variant="regenerating ? 'primary' : 'danger'"
@@ -149,10 +174,10 @@ const confirmText = computed(() =>
         {{
           loading
             ? regenerating
-              ? '准备中…'
+              ? __t('ui.chat', '准备中…')
               : preview?.wholeThread
-                ? '正在删除…'
-                : '正在回滚…'
+                ? __t('ui.chat', '正在删除…')
+                : __t('ui.chat', '正在回滚…')
             : confirmText
         }}
       </PButton>

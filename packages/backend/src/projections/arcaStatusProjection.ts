@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 import { createHash } from 'node:crypto'
 import type {
   PanelSurfaceProps,
@@ -42,24 +43,28 @@ export function projectArcaStatusSurface(
             revision: 1,
             props: {
               title: 'Arca',
-              subtitle: '语义文档工作站',
+              subtitle: __t('server.projections', '语义文档工作站'),
               fields: [
-                { key: 'ownership', label: '宿主归属', value: status.ownership },
+                {
+                  key: 'ownership',
+                  label: __t('server.projections', '宿主归属'),
+                  value: status.ownership,
+                },
                 {
                   key: 'hostState',
-                  label: 'Host状态',
+                  label: __t('server.projections', 'Host状态'),
                   value: status.hostState,
                   tone: status.hostState === 'running' ? 'success' : 'warning',
                 },
                 {
                   key: 'federation',
-                  label: '联邦连接',
+                  label: __t('server.projections', '联邦连接'),
                   value: status.federation.state,
                   tone: status.federation.state === 'connected' ? 'success' : 'warning',
                 },
                 {
                   key: 'runtime',
-                  label: '托管Runtime',
+                  label: __t('server.projections', '托管Runtime'),
                   value: status.managedRuntimeAvailable
                     ? '可用'
                     : (status.managedRuntimeReason ?? '不可用'),

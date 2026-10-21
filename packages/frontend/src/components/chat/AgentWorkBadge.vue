@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /**
  * AgentWorkBadge — 角色工作状态徽章（M05-B1）
  *
@@ -42,12 +44,12 @@ const visible = computed(() => activeCount.value > 0)
       v-if="visible"
       class="agent-work-badge pixel-border-moe"
       type="button"
-      title="查看任务中心"
+      :title="__t('ui.chat', '查看任务中心')"
       @click="goTaskCenter"
     >
       <span class="badge-dot" aria-hidden="true"></span>
       <PixelIcon name="activity" size="xs" />
-      <span class="badge-text">后台任务进行中 ×{{ activeCount }}</span>
+      <span class="badge-text">{{ __t('ui.chat', '后台任务进行中 ×') }}{{ activeCount }}</span>
       <PixelIcon name="chevron-right" size="xs" />
     </button>
   </Transition>

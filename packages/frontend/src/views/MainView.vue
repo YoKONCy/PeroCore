@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n/index'
+
 /**
  * MainView — AIOS 综合面板
  *
@@ -64,8 +66,14 @@ import { agentInputsApi } from '../api/modules/agentInputsApi'
 import { clearAgentInputDraft } from '../components/agent/agentInputDraft'
 import { logger } from '../lib/logger'
 import ResourcePreviewDialog from '../components/resources/ResourcePreviewDialog.vue'
-import { resourceNavigation } from '../composables/resources/useResources'
+import DesktopOnboarding from '../components/overlays/DesktopOnboarding.vue'
+import {
+  resourceNavigation,
+  previewResource,
+  openResource,
+} from '../composables/resources/useResources'
 import { invoke } from '../utils/ipcAdapter'
+import { useMobileLayout } from '../composables/ui/useMobileLayout'
 
 defineOptions({ name: 'MainView' })
 const TarotTab = defineAsyncComponent(() => import('../components/tarot/TarotTab.vue'))
@@ -73,6 +81,18 @@ const TarotTab = defineAsyncComponent(() => import('../components/tarot/TarotTab
 /** 编译时注入的版本号 */
 const appVersion = __APP_VERSION__
 const showUpdateCenter = ref(false)
+const { isMobile } = useMobileLayout()
+const mobileNavOpen = ref(false)
+const desktopGuideActive = ref(false)
+provide('infos:onboarding-active', desktopGuideActive)
+function closeMobileNav(event: KeyboardEvent) {
+  if (event.key === 'Escape') mobileNavOpen.value = false
+}
+watch(isMobile, () => {
+  mobileNavOpen.value = false
+})
+onMounted(() => window.addEventListener('keydown', closeMobileNav))
+onUnmounted(() => window.removeEventListener('keydown', closeMobileNav))
 const openingWebArca = ref(false)
 const openingWebPictoria = ref(false)
 function showWebAppWaiting(page: Window, applicationName: string): void {
@@ -90,7 +110,7 @@ async function openWebPictoria(): Promise<void> {
   if (openingWebPictoria.value) return
   const page = window.open('about:blank', '_blank')
   if (!page) {
-    notifyStore.toast('请允许打开 Pictoria 画布', 'error')
+    notifyStore.toast(__t('ui.navigation', '请允许打开 Pictoria 画布'), 'error')
     return
   }
   page.opener = null
@@ -110,7 +130,7 @@ async function openWebArca(): Promise<void> {
   if (openingWebArca.value) return
   const page = window.open('about:blank', '_blank')
   if (!page) {
-    notifyStore.toast('请允许打开 Arca 应用页面', 'error')
+    notifyStore.toast(__t('ui.navigation', '请允许打开 Arca 应用页面'), 'error')
     return
   }
   page.opener = null
@@ -217,8 +237,24 @@ const FULL_HEIGHT_TABS = new Set(['chat', 'workspace', 'logs', 'terminal', 'soci
 
 // ── 导航状态 ──
 
-const { currentTab, pendingTab, tabDirection, currentAmbient, theme, toggleTheme, setTab } =
-  useMainNav()
+const {
+  currentTab,
+  pendingTab,
+  tabDirection,
+  currentAmbient,
+  theme,
+  toggleTheme,
+  setTab,
+  navGroups,
+} = useMainNav()
+const mobilePageTitle = computed(
+  () =>
+    navGroups.flatMap((group) => group.items).find((item) => item.id === currentTab.value)?.label ||
+    'infOS',
+)
+watch(currentTab, () => {
+  mobileNavOpen.value = false
+})
 useDesktopToasts(theme)
 const conversationNavigation = useConversationNavigation()
 const taskNavigation = useTaskNavigation()
@@ -265,7 +301,7 @@ function handleBackgroundReady(src: string): void {
 function handleBackgroundError(src: string): void {
   if (src !== appBackground.imageUrl.value) return
   backgroundReadyUrl.value = ''
-  logger.warn('MainView', '应用背景图片加载失败，保留默认页面材质')
+  logger.warn('MainView', __t('logs.frontend.navigation', '应用背景图片加载失败，保留默认页面材质'))
 }
 
 /** 当前激活 Tab 组件 */
@@ -297,6 +333,17 @@ const {
   handleCancel,
   handleQuitApp,
 } = ctx
+const desktopGuideReady = computed(
+  () =>
+    desktopEnabled &&
+    mainSurfaceVisible.value &&
+    isBackendOnline.value &&
+    !isRefreshing.value &&
+    !pendingTab.value &&
+    !agentStore.isLoading &&
+    !threadStore.isLoadingHistory &&
+    desktopState.value.revision >= 0,
+)
 
 /** 全局刷新 */
 async function handleRefresh() {
@@ -307,6 +354,13 @@ async function handleRefresh() {
 
 const gateway = useGateway()
 const { onPush, offPush, subscribe, selectPrincipal, sessionId: gatewaySessionId } = gateway
+const connectionOnline = computed(() => isBackendOnline.value && gateway.isConnected.value)
+const connectionLabel = computed(() => {
+  if (connectionOnline.value) return __t('ui.navigation', '在线')
+  if (gateway.state.value === 'reconnecting') return __t('ui.navigation', '正在重连')
+  if (gateway.state.value === 'connecting') return __t('ui.navigation', '正在连接')
+  return __t('ui.navigation', '离线')
+})
 useRemoteNotifications(gateway)
 const notifyStore = useNotificationStore()
 const agentStore = useAgentStore()
@@ -336,9 +390,23 @@ watch(resourceNavigation, async (request) => {
       else window.open(origin.value, '_blank', 'noopener,noreferrer')
     }
   } catch (error) {
-    notifyStore.toast(error instanceof Error ? error.message : '无法打开资源', { type: 'error' })
+    notifyStore.toast(
+      error instanceof Error ? error.message : __t('ui.navigation', '无法打开资源'),
+      { type: 'error' },
+    )
   }
 })
+watch(
+  () => desktopState.value.homeNavigation?.revision,
+  () => {
+    const item = desktopState.value.homeNavigation?.resource
+    if (!item) return
+    // 导航观察器就绪后再打开资源，首次创建主窗口同样能够接住请求。
+    if (/\.html?$/i.test(item.name) || item.origin?.type === 'arca') openResource(item)
+    else previewResource(item)
+  },
+  { immediate: true },
+)
 let lastSynchronizedAgentId = ''
 watch(
   [gatewaySessionId, () => agentStore.activeAgentId],
@@ -385,7 +453,7 @@ onPush('agent_changed', (payload) => {
   const newId = payload.agentId as string
   if (newId && newId !== agentStore.activeAgentId) {
     agentStore.switchAgent(newId).catch((err: unknown) => {
-      logger.error('MainView', '同步后端角色切换失败', err)
+      logger.error('MainView', __t('logs.frontend.navigation', '同步后端角色切换失败'), err)
     })
   }
 })
@@ -458,14 +526,53 @@ onPush('tool_approval_resolved', handleApprovalResolved)
 onPush('agent_input_requested', handleAgentInputRequested)
 onPush('agent_input_resolved', handleAgentInputResolved)
 
+function handleProactiveMessage(payload: Record<string, unknown>): void {
+  if (payload.threadId !== threadStore.threadId || payload.agentId !== threadStore.agentId) return
+  if (!threadStore.isGenerating)
+    void threadStore
+      .refreshCurrentThread()
+      .catch((error) =>
+        logger.warn(
+          'MainView',
+          __t('logs.frontend.navigation', '主动消息已保存，刷新会话失败'),
+          error,
+        ),
+      )
+}
+onPush('proactive_message', handleProactiveMessage)
+
+let recoveryRefresh: Promise<void> | null = null
+function refreshAfterReconnect(): void {
+  if (document.hidden || recoveryRefresh) return
+  // 补齐断线期间的权威状态，不切换用户当前会话，也不重放已提交的操作。
+  recoveryRefresh = Promise.allSettled([
+    taskCenterStore.refreshActive(),
+    approvalStore.refresh(),
+    refreshPendingAgentInputs(),
+    triggerRefresh(),
+    !threadStore.threadId && !threadStore.isLoadingHistory && agentStore.currentAgent
+      ? threadStore.loadLatestThread(agentStore.activeAgentId, 'desktop')
+      : Promise.resolve(),
+  ])
+    .then(() => undefined)
+    .finally(() => {
+      recoveryRefresh = null
+    })
+}
+window.addEventListener('infos:gateway-ready', refreshAfterReconnect)
+window.addEventListener('infos:gateway-snapshot-required', refreshAfterReconnect)
+
 onUnmounted(() => {
   approvalStore.stopPolling()
+  window.removeEventListener('infos:gateway-ready', refreshAfterReconnect)
+  window.removeEventListener('infos:gateway-snapshot-required', refreshAfterReconnect)
   if (agentInputPollTimer) clearInterval(agentInputPollTimer)
   offPush('tool_approval_requested', handleApprovalRequested)
   offPush('state_update', handleCharacterStateUpdate)
   offPush('tool_approval_resolved', handleApprovalResolved)
   offPush('agent_input_requested', handleAgentInputRequested)
   offPush('agent_input_resolved', handleAgentInputResolved)
+  offPush('proactive_message', handleProactiveMessage)
 })
 
 // ── 环境光样式 ──
@@ -525,7 +632,11 @@ onMounted(() => {
       !threadStore.isGenerating,
   )
   initParticles()
-  void appBackground.load().catch((error) => logger.warn('MainView', '应用背景配置加载失败', error))
+  void appBackground
+    .load()
+    .catch((error) =>
+      logger.warn('MainView', __t('logs.frontend.navigation', '应用背景配置加载失败'), error),
+    )
 
   // 审批属于全局安全基础设施，与当前激活 Tab 无关。
   approvalStore.startPolling()
@@ -539,6 +650,13 @@ onMounted(() => {
     :data-app-background="showsAppBackground ? 'active' : undefined"
     :style="appBackground.style.value"
   >
+    <DesktopOnboarding
+      v-if="desktopEnabled"
+      :ready="desktopGuideReady"
+      :current-tab="currentTab"
+      :navigate="openHomeSection"
+      @active="desktopGuideActive = $event"
+    />
     <AppWallpaper
       v-if="backgroundEnabled"
       :src="appBackground.imageUrl.value"
@@ -566,13 +684,46 @@ onMounted(() => {
       role="tabpanel"
       :aria-labelledby="desktopEnabled ? 'desktop-tab-home' : undefined"
     >
+      <header v-if="isMobile" class="main-mobile-header">
+        <button
+          :aria-label="__t('ui.navigation', '打开应用导航')"
+          aria-controls="mobile-main-navigation"
+          :aria-expanded="mobileNavOpen"
+          @click="mobileNavOpen = !mobileNavOpen"
+        >
+          <PixelIcon name="menu" size="sm" />
+        </button>
+        <strong>{{ mobilePageTitle }}</strong>
+        <button :aria-label="__t('ui.navigation', '系统设定')" @click="setTab('user_settings')">
+          <PixelIcon name="settings" size="sm" />
+        </button>
+      </header>
       <div class="main-view-body">
         <!-- 左侧导航 -->
-        <MainNav :show-theme-toggle="!desktopEnabled" />
+        <button
+          v-if="isMobile && mobileNavOpen"
+          class="mobile-navigation-backdrop"
+          :aria-label="__t('ui.navigation', '关闭应用导航')"
+          @click="mobileNavOpen = false"
+        />
+        <div
+          id="mobile-main-navigation"
+          class="main-nav-layer"
+          :class="{ 'main-nav-layer--open': mobileNavOpen }"
+          :inert="isMobile && !mobileNavOpen"
+        >
+          <MainNav
+            :expanded="isMobile"
+            :tutorial="desktopGuideActive"
+            :show-theme-toggle="!desktopEnabled"
+            @navigate="mobileNavOpen = false"
+          />
+        </div>
 
         <!-- 右侧内容区 -->
         <main
           class="main-content"
+          :inert="isMobile && mobileNavOpen"
           :class="{
             'main-content--full': isFullHeightTab,
           }"
@@ -600,13 +751,14 @@ onMounted(() => {
             :identity="currentTab"
             :pending="!!pendingTab"
             :direction="tabDirection"
-            label="正在切换页面"
+            :label="__t('ui.navigation', '正在切换页面')"
           >
             <KeepAlive :include="cachedTabNames" :max="4">
               <component
                 :is="activeTabComponent"
                 v-if="activeTabComponent"
                 :key="currentTab"
+                :data-onboarding-tab="currentTab"
                 :data-dashboard-scope="isDashboardTab ? '' : undefined"
                 :class="[
                   'main-tab-content',
@@ -626,32 +778,34 @@ onMounted(() => {
         <div class="main-statusbar-left">
           <span
             class="main-status-dot"
-            :class="isBackendOnline ? 'main-status-dot--online' : 'main-status-dot--offline'"
+            :class="connectionOnline ? 'main-status-dot--online' : 'main-status-dot--offline'"
           />
           <span class="main-status-text">
-            {{ isBackendOnline ? '在线' : '离线' }}
+            {{ connectionLabel }}
           </span>
           <span class="main-status-divider" />
-          <span class="main-status-text">{{ agentStore.currentAgent?.name || '助手' }}</span>
+          <span class="main-status-text">
+            {{ agentStore.currentAgent?.name || __t('ui.navigation', '助手') }}
+          </span>
         </div>
 
         <div class="main-statusbar-right">
           <button
-            v-if="!desktopEnabled"
+            v-if="!desktopEnabled && !isMobile"
             class="main-statusbar-btn"
             :disabled="openingWebPictoria"
-            title="打开 Pictoria 画布"
-            aria-label="打开 Pictoria 画布"
+            :title="__t('ui.navigation', '打开 Pictoria 画布')"
+            :aria-label="__t('ui.navigation', '打开 Pictoria 画布')"
             @click="openWebPictoria"
           >
             <PixelIcon name="image" size="xs" />
           </button>
           <button
-            v-if="!desktopEnabled"
+            v-if="!desktopEnabled && !isMobile"
             class="main-statusbar-btn"
             :disabled="openingWebArca"
-            title="打开 Arca 应用"
-            aria-label="打开 Arca 应用"
+            :title="__t('ui.navigation', '打开 Arca 应用')"
+            :aria-label="__t('ui.navigation', '打开 Arca 应用')"
             @click="openWebArca"
           >
             <PixelIcon name="book" size="xs" />
@@ -659,7 +813,7 @@ onMounted(() => {
           <button
             class="main-statusbar-btn"
             :disabled="isRefreshing"
-            title="刷新"
+            :title="__t('ui.navigation', '刷新')"
             @click="handleRefresh"
           >
             <PixelIcon name="refresh" size="xs" :animation="isRefreshing ? 'spin' : ''" />
@@ -668,7 +822,7 @@ onMounted(() => {
           <button
             v-if="isElectron()"
             class="main-statusbar-btn main-statusbar-btn--danger"
-            title="退出"
+            :title="__t('ui.navigation', '退出')"
             @click="handleQuitApp"
           >
             <PixelIcon name="power" size="xs" />
@@ -697,7 +851,7 @@ onMounted(() => {
         fill
         :identity="desktopActiveTab.id"
         :pending="desktopOpening && !desktopOpeningApplication"
-        label="正在打开"
+        :label="__t('ui.navigation', '正在打开')"
       >
         <DesktopNewTab
           v-if="desktopActiveTab.kind === 'new'"
@@ -729,28 +883,28 @@ onMounted(() => {
               !!desktopActiveTab.loading &&
               !desktopActiveTab.error
             "
-            :label="`正在打开 ${desktopActiveTab.title}`"
+            :label="__t('ui.navigation', '正在打开 {0}', [desktopActiveTab.title])"
           >
             <div v-if="desktopActiveTab.error" class="desktop-surface-feedback" role="alert">
               <PixelIcon name="alert" size="lg" />
-              <strong>这个页面暂时无法打开</strong>
+              <strong>{{ __t('ui.navigation', '这个页面暂时无法打开') }}</strong>
               <p>{{ desktopActiveTab.error }}</p>
               <button
                 v-if="desktopActiveTab.kind === 'browser'"
                 type="button"
                 @click="desktopShell.browserAction('reload')"
               >
-                重新加载
+                {{ __t('ui.navigation', '重新加载') }}
               </button>
               <button
                 v-else-if="desktopActiveTab.appId"
                 type="button"
                 @click="desktopShell.openApplication(desktopActiveTab.appId)"
               >
-                重新打开
+                {{ __t('ui.navigation', '重新打开') }}
               </button>
               <button v-else type="button" @click="desktopShell.close(desktopActiveTab.id)">
-                关闭标签页
+                {{ __t('ui.navigation', '关闭标签页') }}
               </button>
             </div>
           </SurfaceTransition>
@@ -830,6 +984,40 @@ onMounted(() => {
   overflow: hidden;
   position: relative;
   min-height: 0;
+}
+.main-nav-layer {
+  display: contents;
+}
+.main-mobile-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: env(safe-area-inset-top) 8px 0;
+  min-height: 48px;
+  border-bottom: 1px solid var(--ui-border-default);
+  background: var(--ui-bg-surface);
+}
+.main-mobile-header strong {
+  flex: 1;
+  font-size: 14px;
+}
+.main-mobile-header button {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  color: var(--ui-text-primary);
+  background: transparent;
+  cursor: pointer;
+}
+.mobile-navigation-backdrop {
+  position: absolute;
+  z-index: 89;
+  inset: 0;
+  background: #0008;
+  border: 0;
 }
 
 .main-home-surface,

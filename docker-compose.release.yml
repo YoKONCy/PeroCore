@@ -5,8 +5,8 @@ services:
     init: true
     stop_grace_period: 30s
     ports:
-      - '${INFOS_PORT:-9120}:9120'
-      - '${INFOS_CAPABILITY_PORT:-9121}:9121'
+      - '${INFOS_BACKEND_BIND:-127.0.0.1}:${INFOS_PORT:-9120}:9120'
+      - '${INFOS_BACKEND_BIND:-127.0.0.1}:${INFOS_CAPABILITY_PORT:-9121}:9121'
     volumes:
       - infos-data:/app/data
       - infos-workspaces:/app/workspaces
@@ -22,6 +22,8 @@ services:
       PERO_LOG_LEVEL: '${INFOS_LOG_LEVEL:-3}'
       INFOS_DOCKER: '1'
       INFOS_API_TOKEN: '${INFOS_API_TOKEN:-}'
+      INFOS_PUBLIC_URL: '${INFOS_PUBLIC_URL:-}'
+      INFOS_WEB_PORT: '${INFOS_WEB_PORT:-3000}'
     healthcheck:
       test:
         - CMD

@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * 配置 API 路由
  *
@@ -22,7 +23,13 @@ import type { AppContext } from '../container'
 import { createLogger, setLogLevel, parseLogLevel } from '../lib/logger'
 import { AppError } from '../lib/appError'
 import { EmbeddingService } from '../services/embedding/embeddingService'
-import { EMBEDDING_ENABLED_KEY, MEMORY_BACKGROUND_ENABLED_KEY } from '@infos/shared'
+import { LANGUAGE_CONFIG_KEY, normalizeLocale, SUPPORTED_LOCALES } from '@infos/shared/i18n'
+import { getLocale, setLocale } from '../lib/i18n'
+import {
+  EMBEDDING_ENABLED_KEY,
+  MEMORY_BACKGROUND_ENABLED_KEY,
+  WHOLESOME_MODE_KEY,
+} from '@infos/shared'
 import {
   MEMORY_RUNTIME_CONFIG_KEY,
   loadMemoryRuntimeConfig,
@@ -40,13 +47,17 @@ const logger = createLogger('ConfigRouter')
  * @param value 配置值（日志级别标签，如 "debug"）
  */
 function applyLogLevelHotReload(key: string, value: string): void {
+  if (key === LANGUAGE_CONFIG_KEY) {
+    setLocale(normalizeLocale(value))
+    return
+  }
   if (key !== 'system.logLevel') return
   const num = parseLogLevel(value)
   if (num != null) {
     setLogLevel(num)
-    logger.info(`日志级别已热更新: ${value} (level=${num})`)
+    logger.info(__t('logs.routers', '日志级别已热更新: {0} (level={1})', [value, num]))
   } else {
-    logger.warn(`无效的日志级别: "${value}"，忽略变更（保持当前级别）`)
+    logger.warn(__t('logs.routers', '无效的日志级别: "{0}"，忽略变更（保持当前级别）', [value]))
   }
 }
 
@@ -90,10 +101,16 @@ const importConfigSchema = z.object({
     .record(z.string())
     .refine(
       (data) =>
-        [EMBEDDING_ENABLED_KEY, MEMORY_BACKGROUND_ENABLED_KEY].every(
+        [EMBEDDING_ENABLED_KEY, MEMORY_BACKGROUND_ENABLED_KEY, WHOLESOME_MODE_KEY].every(
           (key) => data[key] === undefined || data[key] === 'true' || data[key] === 'false',
         ),
       { message: '开关配置必须为 true 或 false' },
+    )
+    .refine(
+      (data) =>
+        data[LANGUAGE_CONFIG_KEY] === undefined ||
+        (SUPPORTED_LOCALES as readonly string[]).includes(data[LANGUAGE_CONFIG_KEY]!),
+      { message: '仅支持简体中文、繁體中文和 English' },
     ),
   /** 是否覆盖已有 key (默认 true) */
   overwrite: z.boolean().default(true),
@@ -121,6 +138,7 @@ export function createConfigRouter(ctx: AppContext) {
     if (!apiKey) throw new AppError('CONFIG_ERROR', { message: 'Embedding API Key 不能为空' })
 
     const candidate = new EmbeddingService({
+      enabled: true,
       apiBase,
       apiKey,
       model: input.model,
@@ -164,7 +182,7 @@ export function createConfigRouter(ctx: AppContext) {
 
     return c.json({
       code: 'OK',
-      message: 'Embedding 模型已激活并保存',
+      message: __t('server.routers', 'Embedding 模型已激活并保存'),
       data: {
         model: input.model,
         dimension: vector.length,
@@ -179,7 +197,7 @@ export function createConfigRouter(ctx: AppContext) {
     const entries = await ctx.configRepo.listAll(prefix)
     return c.json({
       code: 'OK',
-      message: '获取成功',
+      message: __t('server.routers', '获取成功'),
       data: { items: entries, total: entries.length },
     })
   })
@@ -192,11 +210,11 @@ export function createConfigRouter(ctx: AppContext) {
       // 找不到配置时返回 200 OK + null，避免触发后端 Hono logger 的 404 WARN
       return c.json({
         code: 'NOT_CONFIGURED',
-        message: `配置 "${key}" 未设置`,
+        message: __t('server.routers', '配置 "{0}" 未设置', [key]),
         data: { key, value: null },
       })
     }
-    return c.json({ code: 'OK', message: '获取成功', data: { key, value } })
+    return c.json({ code: 'OK', message: __t('server.routers', '获取成功'), data: { key, value } })
   })
 
   // PUT /api/configs — 设置配置
@@ -214,14 +232,19 @@ export function createConfigRouter(ctx: AppContext) {
     // 检测是否需要触发服务热更新
     for (const { prefix, method } of HOT_RELOAD_MAP) {
       if (key.startsWith(prefix)) {
-        logger.info(`检测到配置变更: ${key}，触发 ${method}`)
+        logger.info(__t('logs.routers', '检测到配置变更: {0}，触发 {1}', [key, method]))
         await ctx[method]()
         break
       }
     }
 
     await ctx.appManager?.notifyConfigChanged?.([key])
-    return c.json({ code: 'OK', message: '配置已更新', data: { key, value } })
+    if (key === LANGUAGE_CONFIG_KEY) await ctx.gatewayHub.pushStateUpdate({ language: getLocale() })
+    return c.json({
+      code: 'OK',
+      message: __t('server.routers', '配置已更新'),
+      data: { key, value },
+    })
   })
 
   // DELETE /api/configs/:key — 删除配置 (B6-3)
@@ -229,16 +252,21 @@ export function createConfigRouter(ctx: AppContext) {
     const key = c.req.param('key')
     const existing = await ctx.configRepo.get(key)
     if (existing == null) {
-      return c.json({ code: 'NOT_FOUND', message: `配置 "${key}" 不存在` }, 404)
+      return c.json(
+        { code: 'NOT_FOUND', message: __t('server.routers', '配置 "{0}" 不存在', [key]) },
+        404,
+      )
     }
     await ctx.configRepo.delete(key)
+    if (key === LANGUAGE_CONFIG_KEY) setLocale('zh-CN')
     for (const { prefix, method } of HOT_RELOAD_MAP) if (key.startsWith(prefix)) await ctx[method]()
     if (key === MEMORY_RUNTIME_CONFIG_KEY)
       ctx.eventMemoryService.syncAdvancedRetrievalConfig(
         await loadMemoryRuntimeConfig(ctx.configRepo),
       )
     await ctx.appManager?.notifyConfigChanged?.([key])
-    return c.json({ code: 'OK', message: `配置 "${key}" 已删除` })
+    if (key === LANGUAGE_CONFIG_KEY) await ctx.gatewayHub.pushStateUpdate({ language: getLocale() })
+    return c.json({ code: 'OK', message: __t('server.routers', '配置 "{0}" 已删除', [key]) })
   })
 
   // POST /api/configs/batch — 批量获取
@@ -248,7 +276,7 @@ export function createConfigRouter(ctx: AppContext) {
     for (const key of keys) {
       results[key] = (await ctx.configRepo.get(key)) ?? null
     }
-    return c.json({ code: 'OK', message: '批量获取成功', data: results })
+    return c.json({ code: 'OK', message: __t('server.routers', '批量获取成功'), data: results })
   })
 
   // PUT /api/configs/batch — 批量设置 (B6-3)
@@ -273,7 +301,7 @@ export function createConfigRouter(ctx: AppContext) {
       )
     }
     for (const method of pendingReloads) {
-      logger.info(`批量配置变更，触发 ${method}`)
+      logger.info(__t('logs.routers', '批量配置变更，触发 {0}', [method]))
       await ctx[
         method as keyof Pick<
           AppContext,
@@ -286,9 +314,11 @@ export function createConfigRouter(ctx: AppContext) {
     }
 
     await ctx.appManager?.notifyConfigChanged?.(items.map((item) => item.key))
+    if (items.some((item) => item.key === LANGUAGE_CONFIG_KEY))
+      await ctx.gatewayHub.pushStateUpdate({ language: getLocale() })
     return c.json({
       code: 'OK',
-      message: `已更新 ${items.length} 项配置`,
+      message: __t('server.routers', '已更新 {0} 项配置', [items.length]),
       data: { count: items.length },
     })
   })
@@ -302,7 +332,7 @@ export function createConfigRouter(ctx: AppContext) {
     }
     return c.json({
       code: 'OK',
-      message: `已导出 ${entries.length} 项配置`,
+      message: __t('server.routers', '已导出 {0} 项配置', [entries.length]),
       data,
     })
   })
@@ -341,9 +371,11 @@ export function createConfigRouter(ctx: AppContext) {
     )
     for (const method of reloads) await ctx[method]()
     await ctx.appManager?.notifyConfigChanged?.(changedKeys)
+    if (changedKeys.includes(LANGUAGE_CONFIG_KEY))
+      await ctx.gatewayHub.pushStateUpdate({ language: getLocale() })
     return c.json({
       code: 'OK',
-      message: `导入完成: ${imported} 项写入, ${skipped} 项跳过`,
+      message: __t('server.routers', '导入完成: {0} 项写入, {1} 项跳过', [imported, skipped]),
       data: { imported, skipped },
     })
   })

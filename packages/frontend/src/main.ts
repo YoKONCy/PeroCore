@@ -1,3 +1,4 @@
+import { t as __t } from './i18n/index'
 /**
  * 前端应用入口
  *
@@ -60,7 +61,7 @@ function mountMainApp(): void {
   app.config.errorHandler = (err) => {
     if (err instanceof ApiError) {
       const severity = ERROR_UI_MAP[err.code] ?? ErrorSeverity.TOAST
-      const title = ERROR_TITLE_MAP[err.code] ?? '错误'
+      const title = ERROR_TITLE_MAP[err.code] ?? __t('ui.common', '错误')
 
       if (severity === ErrorSeverity.SILENT) {
         // 静默错误仅记日志
@@ -71,8 +72,13 @@ function mountMainApp(): void {
       }
     } else {
       const message = err instanceof Error ? err.message : String(err)
-      logger.error('VueErrorHandler', '未捕获的前端运行时异常', err)
-      notificationStore.toast(message || '发生未知错误', { type: 'error', title: '内部错误' })
+      logger.error('VueErrorHandler', __t('logs.frontend.common', '未捕获的前端运行时异常'), err)
+      notificationStore.toast(message || __t('ui.common', '发生未知错误'), {
+        type: 'error',
+        get title() {
+          return __t('ui.common', '内部错误')
+        },
+      })
     }
   }
 
@@ -80,7 +86,7 @@ function mountMainApp(): void {
 
   listen('system-error', (event: unknown) => {
     let msg = ''
-    let title = '系统错误'
+    let title = __t('ui.common', '系统错误')
 
     if (typeof event === 'string') {
       msg = event

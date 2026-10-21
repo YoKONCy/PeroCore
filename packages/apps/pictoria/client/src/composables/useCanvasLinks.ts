@@ -1,3 +1,4 @@
+import { t as __t } from '../i18n'
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import Ajv from 'ajv'
 import type {
@@ -533,7 +534,8 @@ export function useCanvasLinks(
         const name = String(
           problem?.params.missingProperty || problem?.instancePath.split('/')[1] || '',
         )
-        const label = current.inputSchema.properties?.[name]?.title || name || '输入'
+        const label =
+          current.inputSchema.properties?.[name]?.title || name || __t('apps.pictoria.ui', '输入')
         const messages: Record<string, string> = {
           required: `请填写${label}`,
           minLength: `${label}不能为空`,

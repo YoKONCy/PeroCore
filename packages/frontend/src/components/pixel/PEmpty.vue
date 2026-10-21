@@ -1,9 +1,12 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /**
  * PEmpty — 像素风空状态
  *
  */
 import PixelIcon from './PixelIcon.vue'
+import { computed } from 'vue'
 
 interface Props {
   description?: string
@@ -11,10 +14,11 @@ interface Props {
   showPaw?: boolean
 }
 
-withDefaults(defineProps<Props>(), {
-  description: '这里空空如也喵...',
+const props = withDefaults(defineProps<Props>(), {
+  description: undefined,
   showPaw: true,
 })
+const displayDescription = computed(() => props.description ?? __t('ui.pixel', '这里空空如也喵...'))
 </script>
 
 <template>
@@ -31,7 +35,7 @@ withDefaults(defineProps<Props>(), {
 
     <!-- 文字 -->
     <div class="p-empty-text">
-      <p class="p-empty-desc">{{ description }}</p>
+      <p class="p-empty-desc">{{ displayDescription }}</p>
       <div class="p-empty-hint">
         <span class="p-empty-dot" />
         <span class="p-empty-hint-text">NO DATA FOUND</span>

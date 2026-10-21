@@ -1,3 +1,4 @@
+import { t as __t } from './i18n'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createReadStream, existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
@@ -144,7 +145,10 @@ export class BrowserSurface {
     ) {
       res.writeHead(401, { 'content-type': 'application/json' })
       res.end(
-        JSON.stringify({ code: 'UNAUTHORIZED', message: '请使用 Pictoria 后台输出的画布链接连接' }),
+        JSON.stringify({
+          code: 'UNAUTHORIZED',
+          message: __t('apps.pictoria.ui', '请使用 Pictoria 后台输出的画布链接连接'),
+        }),
       )
       return true
     }
@@ -227,7 +231,7 @@ export class BrowserSurface {
       res.end(
         JSON.stringify({
           code: 'ERROR',
-          message: error instanceof Error ? error.message : '画布请求失败',
+          message: error instanceof Error ? error.message : __t('apps.pictoria.ui', '画布请求失败'),
         }),
       )
     }

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { and, asc, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 import type {
   ConversationCoverage,
@@ -17,6 +18,7 @@ import {
   eventMemoryTimers,
   eventNoteCoverages,
   eventNotes,
+  threadMessages,
 } from '../database/schema'
 
 const parse = <T>(value: string): T => JSON.parse(value) as T
@@ -359,6 +361,14 @@ export class EventNoteRepository {
       .where(eq(eventMemoryCoverageClaims.ownerId, ownerId))
   }
 
+  /** 长正文分批处理中续租，避免其他任务把仍在执行的占用当成崩溃遗留。 */
+  async renewCoverageClaim(ownerId: string): Promise<void> {
+    await this.db
+      .update(eventMemoryCoverageClaims)
+      .set({ claimedAt: new Date().toISOString() })
+      .where(eq(eventMemoryCoverageClaims.ownerId, ownerId))
+  }
+
   async commitCoverageUnderClaim(coverage: ConversationCoverage, ownerId: string): Promise<void> {
     this.privacy?.assertPayload(
       'memory',
@@ -417,7 +427,7 @@ export class EventNoteRepository {
     if (!targets.size) return
     await this.db.transaction((tx) => {
       const rows = tx
-        .select({ id: eventNoteCoverages.id, pairIdsJson: eventNoteCoverages.pairIdsJson })
+        .select()
         .from(eventNoteCoverages)
         .where(
           and(eq(eventNoteCoverages.threadId, threadId), isNull(eventNoteCoverages.invalidatedAt)),
@@ -429,6 +439,34 @@ export class EventNoteRepository {
           tx.update(eventNoteCoverages)
             .set({ invalidatedAt })
             .where(eq(eventNoteCoverages.id, row.id))
+            .run()
+          const retained = parse<string[]>(row.pairIdsJson).filter((pairId) => !targets.has(pairId))
+          if (!retained.length) continue
+          const originalMessageIds = new Set(parse<string[]>(row.messageIdsJson))
+          const retainedMessageIds = tx
+            .select({ id: threadMessages.id })
+            .from(threadMessages)
+            .where(
+              and(
+                eq(threadMessages.threadId, threadId),
+                inArray(threadMessages.pairId, retained),
+                eq(threadMessages.status, 'active'),
+              ),
+            )
+            .all()
+            .map((message) => String(message.id))
+            .filter((id) => originalMessageIds.has(id))
+          // 整体事件仍按原规则失效，但未变轮次保留“已经审阅”的结论，不能被重新凑批。
+          tx.insert(eventNoteCoverages)
+            .values({
+              ...row,
+              id: randomUUID(),
+              pairIdsJson: JSON.stringify(retained),
+              messageIdsJson: JSON.stringify(retainedMessageIds),
+              outcome: 'reviewed_no_event',
+              eventNoteIdsJson: '[]',
+              invalidatedAt: null,
+            })
             .run()
         }
       }

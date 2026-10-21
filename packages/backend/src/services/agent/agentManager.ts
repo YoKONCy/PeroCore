@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * Agent Manager — 多 Agent 配置管理
  *
@@ -15,6 +16,7 @@
  */
 
 import path from 'node:path'
+import { createHash } from 'node:crypto'
 import {
   existsSync,
   readdirSync,
@@ -32,6 +34,13 @@ import type { PetStateService } from './petStateService'
 import { createLogger } from '../../lib/logger'
 
 const logger = createLogger('AgentManager')
+
+/** 旧版官方头像指纹，仅识别未被用户更换的默认资源副本。 */
+const LEGACY_BUILTIN_AVATAR_SHA256: Readonly<Record<string, string>> = {
+  pero: '23bc63e925972e716098d69fc529e58653e83d69cc7ab2e9a2412005f3cdb22e',
+  nana: '78583973e0532d3943833803de713c8e0866f0303f120f1fef30d353fd9f2d8c',
+  tsukinaga: 'af312b624567d25a93ed802cbf8ab99619d55ecfb6b12b521aaf45912559a8f1',
+}
 
 /**
  * 新建自定义角色的默认能力矩阵（CapabilityGate fail-closed）
@@ -230,7 +239,7 @@ export class AgentManager {
       this.defaultAgentId = this.agents.keys().next().value!
     }
 
-    logger.info(`已加载 ${this.agents.size} 个 Agent`)
+    logger.info(__t('logs.agent', '已加载 {0} 个 Agent', [this.agents.size]))
   }
 
   /** 将当前生效的官方或用户角色导出为客户端可落盘的版本化资源包。 */
@@ -251,6 +260,18 @@ export class AgentManager {
       }
     }
     collect(sourceDir)
+    // 用户副本沿用旧默认头像时，导出当前生效的新资源，避免移动客户端再次导入旧图。
+    if (profile.avatarPath && path.dirname(profile.avatarPath) !== sourceDir) {
+      const avatarNames = new Set(['avatar.png', 'avatar.jpg', 'avatar.webp'])
+      for (let index = files.length - 1; index >= 0; index--) {
+        const file = files[index]
+        if (file && avatarNames.has(file.path)) files.splice(index, 1)
+      }
+      files.push({
+        path: path.basename(profile.avatarPath),
+        contentBase64: readFileSync(profile.avatarPath).toString('base64'),
+      })
+    }
     files.sort((left, right) => left.path.localeCompare(right.path))
     if (!files.some((item) => item.path === 'agent.json' || item.path === 'config.json')) {
       throw new Error(`Agent "${agentId}" 缺少角色清单`)
@@ -401,7 +422,7 @@ export class AgentManager {
     const updated = this.loadAgentConfig(id, agentDir, configPath)
     this.agents.set(id, updated)
 
-    logger.info(`已更新 Agent 配置: ${id}`)
+    logger.info(__t('logs.agent', '已更新 Agent 配置: {0}', [id]))
     return updated
   }
 
@@ -437,7 +458,7 @@ export class AgentManager {
     if (!existsSync(targetConfigPath)) {
       mkdirSync(targetDir, { recursive: true })
       this.copyDir(sourceDir, targetDir)
-      logger.info(`内置角色已创建用户副本: ${id} → ${targetDir}`)
+      logger.info(__t('logs.agent', '内置角色已创建用户副本: {0} → {1}', [id, targetDir]))
     }
 
     // 将内存中该 Agent 的读写路径切换到副本并重新加载
@@ -558,7 +579,7 @@ export class AgentManager {
           }
         }
       } catch (err) {
-        logger.warn(`合并会话动态台词失败: ${err}`)
+        logger.warn(__t('logs.agent', '合并会话动态台词失败: {0}', [err]))
       }
     }
 
@@ -597,11 +618,11 @@ export class AgentManager {
   enableAgent(agentId: string): boolean {
     const id = agentId.toLowerCase()
     if (!this.agents.has(id)) {
-      logger.warn(`无法启用未知 Agent: ${agentId}`)
+      logger.warn(__t('logs.agent', '无法启用未知 Agent: {0}', [agentId]))
       return false
     }
     this.enabledAgents.add(id)
-    logger.info(`Agent 已启用: ${id}`)
+    logger.info(__t('logs.agent', 'Agent 已启用: {0}', [id]))
     return true
   }
 
@@ -609,11 +630,11 @@ export class AgentManager {
   disableAgent(agentId: string): boolean {
     const id = agentId.toLowerCase()
     if (id === this.defaultAgentId) {
-      logger.warn(`不能禁用主角色: ${id}`)
+      logger.warn(__t('logs.agent', '不能禁用主角色: {0}', [id]))
       return false
     }
     this.enabledAgents.delete(id)
-    logger.info(`Agent 已禁用: ${id}`)
+    logger.info(__t('logs.agent', 'Agent 已禁用: {0}', [id]))
     return true
   }
 
@@ -706,7 +727,7 @@ export class AgentManager {
     this.agents.set(agentId, profile)
     this.enabledAgents.add(agentId)
 
-    logger.info(`创建自定义 Agent: ${opts.name} (${agentId})`)
+    logger.info(__t('logs.agent', '创建自定义 Agent: {0} ({1})', [opts.name, agentId]))
     return profile
   }
 
@@ -743,7 +764,7 @@ export class AgentManager {
     this.agents.delete(id)
     this.enabledAgents.delete(id)
 
-    logger.info(`已删除 Agent: ${id}`)
+    logger.info(__t('logs.agent', '已删除 Agent: {0}', [id]))
   }
 
   /** 判断 Agent 是否为用户自定义 (非内置) */
@@ -780,9 +801,9 @@ export class AgentManager {
       const profile = this.loadAgentConfig(id, agentDir, configPath)
       this.agents.set(profile.id, profile)
       this.ensureWorkspaceDir(profile.id)
-      logger.debug(`已加载 Agent: ${profile.name} (${profile.id})`)
+      logger.debug(__t('logs.agent', '已加载 Agent: {0} ({1})', [profile.name, profile.id]))
     } catch (err) {
-      logger.warn(`加载 Agent ${id} 失败`, { error: err })
+      logger.warn(__t('logs.agent', '加载 Agent {0} 失败', [id]), { error: err })
     }
   }
 
@@ -915,7 +936,26 @@ export class AgentManager {
   private findAvatar(agentDir: string): string | null {
     for (const name of ['avatar.png', 'avatar.jpg', 'avatar.webp', 'icon.png']) {
       const filePath = path.join(agentDir, name)
-      if (existsSync(filePath)) return filePath
+      if (!existsSync(filePath)) continue
+
+      const id = path.basename(agentDir).toLowerCase()
+      const legacyHash = LEGACY_BUILTIN_AVATAR_SHA256[id]
+      if (legacyHash) {
+        const builtinAvatar = path.join(
+          this.pathResolver.resolve('@app/backend/src/assets/agents'),
+          id,
+          'avatar.png',
+        )
+        // 只切换与旧官方文件逐字节一致的资源，不写入用户目录或覆盖自定义头像。
+        if (
+          filePath !== builtinAvatar &&
+          existsSync(builtinAvatar) &&
+          createHash('sha256').update(readFileSync(filePath)).digest('hex') === legacyHash
+        ) {
+          return builtinAvatar
+        }
+      }
+      return filePath
     }
     return null
   }
@@ -934,7 +974,7 @@ export class AgentManager {
 
     const profile = this.agents.get(agentId.toLowerCase())
     if (profile) profile.avatarPath = avatarPath
-    logger.info(`Agent 头像已保存: ${agentId}`)
+    logger.info(__t('logs.agent', 'Agent 头像已保存: {0}', [agentId]))
   }
 
   /** 只发布实际存在的头像资源，无头像或已删除的角色不返回地址。 */
@@ -942,9 +982,18 @@ export class AgentManager {
     const agent = this.agents.get(agentId.toLowerCase())
     if (!agent?.avatarPath) return undefined
     try {
-      return statSync(agent.avatarPath).isFile()
-        ? `/agents/${encodeURIComponent(agent.id)}/avatar`
-        : undefined
+      const stat = statSync(agent.avatarPath)
+      if (!stat.isFile()) return undefined
+      const url = `/agents/${encodeURIComponent(agent.id)}/avatar`
+      const builtinAvatar = path.join(
+        this.pathResolver.resolve('@app/backend/src/assets/agents'),
+        agent.id,
+        'avatar.png',
+      )
+      // 默认资源更新后切换地址，避免浏览器继续复用旧头像的一小时缓存。
+      return agent.avatarPath === builtinAvatar
+        ? `${url}?v=${stat.size.toString(36)}-${Math.trunc(stat.mtimeMs).toString(36)}`
+        : url
     } catch {
       return undefined
     }

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import { onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue'
 import { pttVirtualKeys, type PetControlSettings } from '@infos/shared'
 import { usePetControls } from '../../composables/pet/usePetControls'
@@ -31,10 +33,30 @@ const shortcuts: Array<{
   >
   label: string
 }> = [
-  { key: 'toggleVoiceShortcut', label: '开启 / 关闭语音' },
-  { key: 'stopSpeechShortcut', label: '停止朗读' },
-  { key: 'openConversationShortcut', label: '查看主应用对话' },
-  { key: 'togglePetShortcut', label: '显示 / 隐藏桌宠' },
+  {
+    key: 'toggleVoiceShortcut',
+    get label() {
+      return __t('ui.pet', '开启 / 关闭语音')
+    },
+  },
+  {
+    key: 'stopSpeechShortcut',
+    get label() {
+      return __t('ui.pet', '停止朗读')
+    },
+  },
+  {
+    key: 'openConversationShortcut',
+    get label() {
+      return __t('ui.pet', '查看主应用对话')
+    },
+  },
+  {
+    key: 'togglePetShortcut',
+    get label() {
+      return __t('ui.pet', '显示 / 隐藏桌宠')
+    },
+  },
 ]
 async function setCapturing(active: boolean): Promise<boolean> {
   try {
@@ -156,12 +178,14 @@ onBeforeUnmount(() => {
   <PCard class="pet-control-settings" padding="lg" pixel>
     <h3>
       <PixelIcon name="mic" size="sm" />
-      桌宠语音与快捷键
+      {{ __t('ui.pet', '桌宠语音与快捷键') }}
     </h3>
-    <p class="intro">按住说话，松开发送。完整回复留在主应用，桌宠只播报独立的简短口语答复。</p>
+    <p class="intro">
+      {{ __t('ui.pet', '按住说话，松开发送。完整回复留在主应用，桌宠只播报独立的简短口语答复。') }}
+    </p>
     <div class="settings-grid">
       <label>
-        输入方式
+        {{ __t('ui.pet', '输入方式') }}
         <select
           :value="settings.voiceMode"
           :disabled="!loaded"
@@ -172,13 +196,13 @@ onBeforeUnmount(() => {
             })
           "
         >
-          <option value="off">关闭麦克风</option>
-          <option value="ptt">按住说话</option>
-          <option value="vad">自动感应</option>
+          <option value="off">{{ __t('ui.pet', '关闭麦克风') }}</option>
+          <option value="ptt">{{ __t('ui.pet', '按住说话') }}</option>
+          <option value="vad">{{ __t('ui.pet', '自动感应') }}</option>
         </select>
       </label>
       <div class="shortcut-field">
-        <span id="pet-ptt-label">按住说话绑定</span>
+        <span id="pet-ptt-label">{{ __t('ui.pet', '按住说话绑定') }}</span>
         <button
           type="button"
           class="shortcut-record"
@@ -193,7 +217,9 @@ onBeforeUnmount(() => {
           @blur="cancelCapture"
         >
           <span v-if="capturing === 'pttBinding'" class="record-prompt" role="status">
-            {{ captureReady ? '按下按键或侧键 · Esc 取消' : '准备录入…' }}
+            {{
+              captureReady ? __t('ui.pet', '按下按键或侧键 · Esc 取消') : __t('ui.pet', '准备录入…')
+            }}
           </span>
           <span v-else class="shortcut-keys">
             <kbd v-for="(key, index) in petShortcutLabels(settings.pttBinding)" :key="index">
@@ -204,14 +230,14 @@ onBeforeUnmount(() => {
         </button>
       </div>
       <label>
-        麦克风
+        {{ __t('ui.pet', '麦克风') }}
         <select
           :value="settings.microphoneId"
           @change="update({ microphoneId: ($event.target as HTMLSelectElement).value })"
         >
-          <option value="">系统默认设备</option>
+          <option value="">{{ __t('ui.pet', '系统默认设备') }}</option>
           <option v-for="device in devices" :key="device.deviceId" :value="device.deviceId">
-            {{ device.label || '麦克风' }}
+            {{ device.label || __t('ui.pet', '麦克风') }}
           </option>
           <option
             v-if="
@@ -219,12 +245,12 @@ onBeforeUnmount(() => {
             "
             :value="settings.microphoneId"
           >
-            已选择的麦克风
+            {{ __t('ui.pet', '已选择的麦克风') }}
           </option>
         </select>
       </label>
       <button class="device-refresh" type="button" @click="listMicrophones">
-        授权并刷新麦克风
+        {{ __t('ui.pet', '授权并刷新麦克风') }}
       </button>
       <div v-for="shortcut in shortcuts" :key="shortcut.key" class="shortcut-field">
         <span :id="`pet-${shortcut.key}-label`">{{ shortcut.label }}</span>
@@ -241,14 +267,16 @@ onBeforeUnmount(() => {
             @blur="cancelCapture"
           >
             <span v-if="capturing === shortcut.key" class="record-prompt" role="status">
-              {{ captureReady ? '按下组合键 · Esc 取消' : '准备录入…' }}
+              {{
+                captureReady ? __t('ui.pet', '按下组合键 · Esc 取消') : __t('ui.pet', '准备录入…')
+              }}
             </span>
             <span v-else-if="settings[shortcut.key]" class="shortcut-keys">
               <kbd v-for="(key, index) in petShortcutLabels(settings[shortcut.key])" :key="index">
                 {{ key }}
               </kbd>
             </span>
-            <span v-else class="shortcut-empty">未设置 · 点击录入</span>
+            <span v-else class="shortcut-empty">{{ __t('ui.pet', '未设置 · 点击录入') }}</span>
             <PixelIcon name="edit" size="xs" aria-hidden="true" />
           </button>
           <button
@@ -256,8 +284,8 @@ onBeforeUnmount(() => {
             type="button"
             class="shortcut-clear"
             :disabled="!loaded || !desktop || saving"
-            :aria-label="`清除${shortcut.label}快捷键`"
-            title="清除快捷键"
+            :aria-label="__t('ui.pet', '清除{0}快捷键', [shortcut.label])"
+            :title="__t('ui.pet', '清除快捷键')"
             @click="clearBinding(shortcut.key)"
           >
             <PixelIcon name="close" size="xs" aria-hidden="true" />
@@ -265,7 +293,9 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </div>
-    <p class="hint shortcut-hint">点击绑定后按下按键，Esc 取消；清除快捷键可禁用对应操作。</p>
+    <p class="hint shortcut-hint">
+      {{ __t('ui.pet', '点击绑定后按下按键，Esc 取消；清除快捷键可禁用对应操作。') }}
+    </p>
     <div class="switches">
       <label>
         <input
@@ -273,7 +303,7 @@ onBeforeUnmount(() => {
           :checked="settings.speechEnabled"
           @change="update({ speechEnabled: ($event.target as HTMLInputElement).checked })"
         />
-        播报口语答复
+        {{ __t('ui.pet', '播报口语答复') }}
       </label>
       <label>
         <input
@@ -281,15 +311,14 @@ onBeforeUnmount(() => {
           :checked="settings.subtitlesEnabled"
           @change="update({ subtitlesEnabled: ($event.target as HTMLInputElement).checked })"
         />
-        显示短句字幕
+        {{ __t('ui.pet', '显示短句字幕') }}
       </label>
     </div>
     <p class="hint">
-      Windows 桌面端支持失焦时按住说话和鼠标侧键。语音开启后麦克风保持就绪；录音时可按 Esc
-      丢弃。自动感应会持续监听。
+      {{ __t('ui.pet', 'Windows 支持全局按住说话；Esc 取消录音。自动感应会持续监听。') }}
     </p>
     <p v-if="loaded && !supported" class="warning">
-      当前环境不支持全局按住说话，仍可使用桌宠面板的按住按钮。
+      {{ __t('ui.pet', '当前环境不支持全局按住说话，仍可使用桌宠面板的按住按钮。') }}
     </p>
     <p v-if="captureError || error || deviceError" class="warning" role="alert">
       {{ captureError || error || deviceError }}

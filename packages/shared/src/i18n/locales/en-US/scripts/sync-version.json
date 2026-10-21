@@ -1,0 +1,17 @@
+{
+  "[版本同步] ❌ 根 package.json 不存在！预期路径:": "[Version synchronization] ❌ The root package.json does not exist! Expected path:",
+  "\n[版本同步] 🎯 唯一事实来源 → package.json: {0}": "[Version synchronization] 🎯 Single source of truth → package.json: {0}",
+  "[版本同步] ⏭️  {0} 不存在，跳过可选同步": "[Version synchronization] ⏭️ {0} does not exist, skip optional synchronization",
+  "[版本同步] ✅ {0}: {1} / {2}": "[Version Synchronization] ✅ {0}: {1} / {2}",
+  "[版本同步] ⏭️  {0} 本地私有嵌套仓库未检出，跳过": "[Version synchronization] ⏭️ {0} local private nested warehouse is not checked out, skipped",
+  "[版本同步] ✅ {0}: {1} → {2}": "[Version synchronization] ✅ {0}: {1} → {2}",
+  "[版本同步] ⏭️  {0} 当前无 {1}，跳过可选同步": "[Version Synchronization] ⏭️ {0} Currently no {1}, skip optional synchronization",
+  "[版本同步] ✅ {0} {1} → {2}": "[Version synchronization] ✅ {0} {1} → {2}",
+  "\n── 📦 子包 package.json ──": "── 📦 Subpackage package.json ──",
+  "\n── 🧩 应用与扩展清单 ──": "── 🧩 Application and extension list ──",
+  "\n── 🖥️  后端源码 ──": "── 🖥️ Backend source code ──",
+  "\n── 📖 当前文档与 Wiki 展示 ──": "── 📖 Current document and wiki display ──",
+  "[版本同步] ❌ 发现 {0} 个文件版本不一致，请运行 pnpm version:sync": "[Version Synchronization] ❌ It is found that the versions of {0} files are inconsistent, please run pnpm version:sync",
+  "[版本同步] ✨ 全部 {0} 个检查点已是最新 ({1})，无需更新": "[Version Synchronization] ✨ All {0} checkpoints are already up to date ({1}), no need to update",
+  "[版本同步] 🎉 检查 {0} 个点，已同步 {1} 个文件到 {2}": "[Version Synchronization] 🎉 Checked {0} points, synchronized {1} files to {2}"
+}

@@ -1,3 +1,4 @@
+import { t as __t } from './i18n'
 /**
  * ImageCacheManager — 社交图片本地缓存
  *
@@ -47,7 +48,7 @@ export class ImageCacheManager {
     if (this.initialized) return
     if (!fs.existsSync(this.config.cacheDir)) {
       fs.mkdirSync(this.config.cacheDir, { recursive: true })
-      logger.info(`缓存目录已创建: ${this.config.cacheDir}`)
+      logger.info(__t('apps.social.logs', '缓存目录已创建: {0}', [this.config.cacheDir]))
     }
     this.initialized = true
   }
@@ -102,7 +103,7 @@ export class ImageCacheManager {
 
         const resp = await fetch(url, { signal: controller.signal, headers })
         if (!resp.ok) {
-          logger.warn(`下载图片失败 ${url}: HTTP ${resp.status}`)
+          logger.warn(__t('apps.social.logs', '下载图片失败 {0}: HTTP {1}', [url, resp.status]))
           return null
         }
 
@@ -117,7 +118,7 @@ export class ImageCacheManager {
         clearTimeout(timeout)
       }
     } catch (err) {
-      logger.warn(`下载图片错误: ${err}`)
+      logger.warn(__t('apps.social.logs', '下载图片错误: {0}', [err]))
       return null
     }
   }
@@ -143,7 +144,7 @@ export class ImageCacheManager {
               ? 'image/webp'
               : undefined
       if (!mime) {
-        logger.warn('图片缓存内容为空或格式不可识别，已跳过视觉输入')
+        logger.warn(__t('apps.social.logs', '图片缓存内容为空或格式不可识别，已跳过视觉输入'))
         return null
       }
       return `data:${mime};base64,${data.toString('base64')}`
@@ -184,7 +185,7 @@ export class ImageCacheManager {
         }
       }
 
-      logger.debug(`缓存清理: 删除了 ${toDelete} 个旧文件`)
+      logger.debug(__t('apps.social.logs', '缓存清理: 删除了 {0} 个旧文件', [toDelete]))
     } catch {
       // 清理失败不影响主流程
     }

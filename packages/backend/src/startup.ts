@@ -1,3 +1,4 @@
+import { t as __t } from './lib/i18n'
 /**
  * 公共启动模块
  *
@@ -29,6 +30,8 @@ import { DistributedSyncService } from './services/distributed/distributedSyncSe
 import { registerProcessGuards, onShutdown } from './lib/processGuards'
 import { setupGatewayWebSocket } from './services/gateway/wsUpgrade'
 import { initTelemetry, shutdownTelemetry } from './lib/telemetry'
+import { setLocale } from './lib/i18n'
+import { LANGUAGE_CONFIG_KEY } from '@infos/shared/i18n'
 
 // ─────────────────────────────────────────────
 // 类型定义
@@ -93,6 +96,11 @@ export async function startServer(options: StartServerOptions): Promise<void> {
   // 4. 初始化 DI 容器（同步阶段）
   const config = createDefaultConfig()
   const ctx = await createAppContext(config)
+  setLocale(
+    (await ctx.configRepo.get(LANGUAGE_CONFIG_KEY)) ??
+      process.env.INFOS_LANGUAGE ??
+      process.env.LANG,
+  )
 
   // 4. 异步初始化（工具注册 + 扩展加载 + 资产扫描）
   await initAppContext(ctx)
@@ -105,9 +113,16 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     const num = parseLogLevel(configuredLogLevel)
     if (num != null) {
       setLogLevel(num)
-      logger.info(`已应用配置的日志级别: ${configuredLogLevel} (level=${num})`)
+      logger.info(
+        __t('logs.startup.ts', '已应用配置的日志级别: {0} (level={1})', [configuredLogLevel, num]),
+      )
     } else {
-      logger.warn(`配置的日志级别无效: "${configuredLogLevel}"，保持默认 (level=${getLogLevel()})`)
+      logger.warn(
+        __t('logs.startup.ts', '配置的日志级别无效: "{0}"，保持默认 (level={1})', [
+          configuredLogLevel,
+          getLogLevel(),
+        ]),
+      )
     }
   }
 
@@ -127,7 +142,13 @@ export async function startServer(options: StartServerOptions): Promise<void> {
   await autoLaunchSocialApp(ctx)
 
   // 7. 启动 HTTP 业务服务器（:9120）
-  logger.info(`${processName} 启动中... → http://${SERVER_HOST}:${SERVER_PORT}`)
+  logger.info(
+    __t('logs.startup.ts', '{0} 启动中... → http://{1}:{2}', [
+      processName,
+      SERVER_HOST,
+      SERVER_PORT,
+    ]),
+  )
 
   const server = serve(
     {
@@ -140,7 +161,13 @@ export async function startServer(options: StartServerOptions): Promise<void> {
         onHttpReady(info.address, info.port)
       } else {
         // 默认回退：使用 info 日志
-        logger.info(`${processName} 已就绪 → http://${info.address}:${info.port}`)
+        logger.info(
+          __t('logs.startup.ts', '{0} 已就绪 → http://{1}:{2}', [
+            processName,
+            info.address,
+            info.port,
+          ]),
+        )
       }
     },
   )
@@ -150,28 +177,71 @@ export async function startServer(options: StartServerOptions): Promise<void> {
   setupGatewayWebSocket(server as Server, ctx.gatewayHub, ctx)
   ctx.gatewayHub.startHeartbeat()
 
+  await ctx.clientAccess.attachListener(async (port) => {
+    const lan = serve({ fetch: app.fetch, hostname: '0.0.0.0', port }) as Server
+    await new Promise<void>((resolve, reject) => {
+      if (lan.listening) return resolve()
+      const onError = (error: Error) => {
+        lan.off('listening', onReady)
+        reject(error)
+      }
+      const onReady = () => {
+        lan.off('error', onError)
+        resolve()
+      }
+      lan.once('listening', onReady)
+      lan.once('error', onError)
+    })
+    lan.on('error', (error) =>
+      logger.error(__t('logs.startup.ts', '局域网监听错误：{0}', [error.message])),
+    )
+    const closeSockets = setupGatewayWebSocket(lan, ctx.gatewayHub, ctx, false)
+    logger.info(
+      __t('logs.startup.ts', '局域网网页入口已开放，端口 {0}；所有业务请求均需要设备鉴权', [port]),
+    )
+    return async () => {
+      closeSockets()
+      lan.closeAllConnections()
+      await new Promise<void>((resolve) => lan.close(() => resolve()))
+    }
+  })
+  // 首次纯 Web 启动可从服务端控制台取得短期管理配对码；已有设备不会重复生成。
+  if (!process.env.INFOS_API_TOKEN && ctx.clientAccess.status().devices.length === 0) {
+    const pairing = ctx.clientAccess.createPairing(true)
+    logger.info(
+      __t('logs.startup.ts', '首次 Web 管理配对码：{0}（五分钟内有效，仅可使用一次）', [
+        pairing.code,
+      ]),
+    )
+  }
+
   // 9. 启动 CapabilityBridge WS 服务端（能力通道 :9121）
   // 9. 启动 Node Capability Transport。
   const capabilityBridgePort = Number(process.env.PERO_CAPABILITY_PORT ?? 9121)
   try {
     await ctx.capabilityBridge.start(capabilityBridgePort)
-    logger.info(`CapabilityBridge 已启动，监听端口 ${capabilityBridgePort}`)
+    logger.info(
+      __t('logs.startup.ts', 'CapabilityBridge 已启动，监听端口 {0}', [capabilityBridgePort]),
+    )
   } catch (err) {
-    logger.error(`CapabilityBridge 启动失败（平台能力将不可用）: ${err}`)
+    logger.error(
+      __t('logs.startup.ts', 'CapabilityBridge 启动失败（平台能力将不可用）: {0}', [err]),
+    )
   }
 
   // 10. 注册优雅退出回调
   onShutdown(async () => {
-    logger.info(`${processName} 正在关闭资源...`)
+    logger.info(__t('logs.startup.ts', '{0} 正在关闭资源...', [processName]))
+    await ctx.clientAccess.dispose()
     try {
       await ctx.appManager.shutdown()
     } catch (err) {
-      logger.warn(`Social宿主关闭失败: ${err}`)
+      logger.warn(__t('logs.startup.ts', 'Social宿主关闭失败: {0}', [err]))
     }
     try {
       await ctx.capabilityBridge.stop()
     } catch (err) {
-      logger.warn(`CapabilityBridge 关闭失败: ${err}`)
+      logger.warn(__t('logs.startup.ts', 'CapabilityBridge 关闭失败: {0}', [err]))
     }
     if (onExtraShutdown) {
       await onExtraShutdown()
@@ -179,20 +249,20 @@ export async function startServer(options: StartServerOptions): Promise<void> {
     try {
       await ctx.kernelLifecycle.dispose()
     } catch (err) {
-      logger.warn(`Kernel 生命周期释放失败: ${err}`)
+      logger.warn(__t('logs.startup.ts', 'Kernel 生命周期释放失败: {0}', [err]))
     }
     await shutdownTelemetry()
     try {
       ctx.storeRegistry.closeAll()
     } catch (err) {
-      logger.warn(`TriviumDB Store关闭失败: ${err}`)
+      logger.warn(__t('logs.startup.ts', 'TriviumDB Store关闭失败: {0}', [err]))
     }
     try {
       closeDrizzleConnection(ctx.db)
     } catch (err) {
-      logger.warn(`数据库关闭失败: ${err}`)
+      logger.warn(__t('logs.startup.ts', '数据库关闭失败: {0}', [err]))
     }
-    logger.info(`${processName} 资源清理完成`)
+    logger.info(__t('logs.startup.ts', '{0} 资源清理完成', [processName]))
   })
 }
 
@@ -214,7 +284,7 @@ export async function startServer(options: StartServerOptions): Promise<void> {
  * 失败不阻塞主启动流程（catch 后仅 warn）。
  */
 async function autoLaunchSocialApp(ctx: import('./container').AppContext): Promise<void> {
-  logger.info('=== [autoLaunchSocialApp] 开始自动启动社交应用 ===')
+  logger.info(__t('logs.startup.ts', '=== [autoLaunchSocialApp] 开始自动启动社交应用 ==='))
   try {
     // 0. 清理孤儿实例（上次运行残留的 running/launching 状态，内存中已不存在）
     // 必须在 listInstances 检查之前调用，否则会误判旧实例仍在运行
@@ -236,12 +306,12 @@ async function autoLaunchSocialApp(ctx: import('./container').AppContext): Promi
         ? path.resolve(appRoot, 'apps', 'social')
         : path.resolve(startupDir, '..', '..', 'apps', 'social')
 
-      logger.info(`正在自动安装内置社交应用: ${socialAppDir}`)
+      logger.info(__t('logs.startup.ts', '正在自动安装内置社交应用: {0}', [socialAppDir]))
       const { warnings } = await ctx.appManager.install(socialAppDir)
       if (warnings.length > 0) {
-        logger.warn(`社交应用安装警告: ${warnings.join('; ')}`)
+        logger.warn(__t('logs.startup.ts', '社交应用安装警告: {0}', [warnings.join('; ')]))
       }
-      logger.success('内置社交应用已安装')
+      logger.success(__t('logs.startup.ts', '内置社交应用已安装'))
     }
 
     // 2. 检查是否已有 running 实例（避免重复 launch）
@@ -250,20 +320,29 @@ async function autoLaunchSocialApp(ctx: import('./container').AppContext): Promi
       status: 'running',
     })
     if (instances.length > 0) {
-      logger.info(`社交应用已在运行 (instanceId=${instances[0]!.instanceId})，跳过自动启动`)
+      logger.info(
+        __t('logs.startup.ts', '社交应用已在运行 (instanceId={0})，跳过自动启动', [
+          instances[0]!.instanceId,
+        ]),
+      )
       return
     }
 
     // 3. 启动社交应用实例
-    logger.info('正在自动启动社交应用...')
+    logger.info(__t('logs.startup.ts', '正在自动启动社交应用...'))
     const instanceId = await ctx.appManager.launch({
       appId: SOCIAL_APP_ID,
       hostAgentId,
       launchedBy: 'system-autostart',
     })
-    logger.success(`社交应用已自动启动 (instanceId=${instanceId}, hostAgent=${hostAgentId})`)
+    logger.success(
+      __t('logs.startup.ts', '社交应用已自动启动 (instanceId={0}, hostAgent={1})', [
+        instanceId,
+        hostAgentId,
+      ]),
+    )
   } catch (err) {
     // 失败不阻塞主启动流程
-    logger.warn(`社交应用自动启动失败（不影响主服务）: ${err}`)
+    logger.warn(__t('logs.startup.ts', '社交应用自动启动失败（不影响主服务）: {0}', [err]))
   }
 }

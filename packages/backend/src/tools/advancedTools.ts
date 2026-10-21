@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * 高级工具抽屉。
  *
@@ -66,14 +67,19 @@ export function availableToolDefinitions<T extends { name: string }>(tools: T[])
 
 const PACKAGE_DESCRIPTIONS = {
   browser: {
-    label: '浏览器操作',
-    description:
+    label: __t('server.tools', '浏览器操作'),
+    description: __t(
+      'server.tools',
       '打开网站或预览工作区 HTML/Three.js 页面、截图检查渲染效果、填写表单和管理网页；不抢占用户桌面输入',
+    ),
   },
-  computerUse: { label: '桌面操作', description: '操作桌面软件的鼠标、键盘和界面控件' },
+  computerUse: {
+    label: __t('server.tools', '桌面操作'),
+    description: __t('server.tools', '操作桌面软件的鼠标、键盘和界面控件'),
+  },
   remoteTerminal: {
-    label: '远程终端',
-    description: '在已连接且获授权的远程节点创建终端、运行命令和等待结果',
+    label: __t('server.tools', '远程终端'),
+    description: __t('server.tools', '在已连接且获授权的远程节点创建终端、运行命令和等待结果'),
   },
 }
 

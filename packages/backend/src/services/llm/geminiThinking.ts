@@ -1,4 +1,5 @@
 import type { ChatOptions, ReasoningEffort } from './types'
+import { normalizeReasoningEffort } from '@infos/shared'
 
 /** Gemini 2.5 使用预算；Gemini 4 Argon 使用等级，不能把等级当成固定思考长度。 */
 export function geminiThinkingFamily(modelId: string): 'budget' | 'level' | undefined {
@@ -12,8 +13,7 @@ export function geminiReasoningEffort(
   modelId: string,
   effort?: ReasoningEffort,
 ): ReasoningEffort | undefined {
-  if (geminiThinkingFamily(modelId) !== 'level' || !effort) return effort
-  return effort === 'off' ? 'low' : effort === 'xhigh' || effort === 'max' ? 'high' : effort
+  return normalizeReasoningEffort(modelId, effort)
 }
 
 export function geminiThinkingConfig(

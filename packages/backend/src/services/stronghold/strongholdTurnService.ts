@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * strongholdTurnService — 领域服务
  *
@@ -156,7 +157,10 @@ export class StrongholdTurnService {
               if (typeof id === 'string') summonedAgentIds.push(id)
             }
           } catch {
-            logger.warn('忽略无法解析的据点传唤工具结果', { agentId, roomId })
+            logger.warn(__t('logs.stronghold', '忽略无法解析的据点传唤工具结果'), {
+              agentId,
+              roomId,
+            })
           }
         }
       },
@@ -202,7 +206,7 @@ export class StrongholdTurnService {
       role: 'assistant',
       timestamp: message.timestamp,
     })
-    logger.info('据点Agent回合已完成', { roomId, agentId })
+    logger.info(__t('logs.stronghold', '据点Agent回合已完成'), { roomId, agentId })
     return { summonedAgentIds: [...new Set(summonedAgentIds)], summonReason }
   }
 

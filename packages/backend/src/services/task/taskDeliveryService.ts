@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 import { and, eq, isNull, lte, or, sql, inArray } from 'drizzle-orm'
 import type { KernelEventEnvelope, TaskDeliveryPort, TaskOrigin } from '@infos/shared'
 import type { DrizzleDb } from '../../database'
@@ -309,6 +310,12 @@ export class TaskDeliveryService {
               important: true,
               notificationId: row.id,
               createdAt: task.completedAt ?? row.createdAt,
+              target: {
+                kind: 'task',
+                agentId: task.agentId,
+                taskId: task.id,
+                threadId: task.targetThreadId ?? undefined,
+              },
               level:
                 task.status === 'completed'
                   ? 'success'
@@ -327,7 +334,7 @@ export class TaskDeliveryService {
               Date.now() + Math.min(60_000, 1000 * 2 ** row.attempts),
             ).toISOString(),
           })
-          logger.warn(`任务结果投递失败: ${row.id}, ${error}`)
+          logger.warn(__t('logs.task', '任务结果投递失败: {0}, {1}', [row.id, error]))
         }
       }
     } finally {

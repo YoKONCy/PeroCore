@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 import type { ToolRegistry } from '../agent/toolRegistry'
 import type { McpClientManager } from './mcpClientManager'
 import { bridgeMcpTools, getMcpToolNames } from './mcpToolBridge'
@@ -28,7 +29,11 @@ export class McpRegistrySynchronizer {
     }
     this.registered = next
     logger.info(
-      `MCP Registry已同步: 当前=${next.size}, 更新=${registered.length}, 移除=${removed.length}`,
+      __t('logs.mcp', 'MCP Registry已同步: 当前={0}, 更新={1}, 移除={2}', [
+        next.size,
+        registered.length,
+        removed.length,
+      ]),
     )
     return { registered, removed }
   }

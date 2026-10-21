@@ -1,0 +1,20 @@
+{
+  "设备状态": "Device status",
+  "未提供": "Unavailable",
+  "内存": "Memory",
+  "系统盘": "System disk",
+  "助手任务": "Agent tasks",
+  "暂无进行中的任务": "No active tasks",
+  "排队中": "Queued",
+  "运行中": "Running",
+  "已暂停": "Paused",
+  "等待条件": "Waiting",
+  "等待输入": "Awaiting input",
+  "需要处理": "Needs attention",
+  "{0} · {1} 核心": "{0} · {1} cores",
+  "{0} · 显存 {1} / {2}": "{0} · VRAM {1} / {2}",
+  "设备未提供 GPU 指标": "GPU metrics unavailable",
+  "设备未提供磁盘指标": "Disk metrics unavailable",
+  "运行 {0}h {1}m": "Uptime {0}h {1}m",
+  "infOS · 设备快照": "infOS · Device snapshot"
+}

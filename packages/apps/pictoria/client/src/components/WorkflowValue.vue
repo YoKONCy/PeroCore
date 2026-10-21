@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 import { computed, reactive, ref, watch } from 'vue'
 import type { Asset, FieldSchema } from '../types'
 import PictoriaSelect from './PictoriaSelect.vue'
@@ -93,7 +95,7 @@ watch(
   <div class="workflow-value">
     <button v-if="(asset || assets) && owner" class="text-button" @click="libraryOpen = true">
       <Icon name="image" :size="14" />
-      资源库
+      {{ __t('apps.pictoria.ui', '资源库') }}
     </button>
     <AssetLibraryPicker
       v-if="libraryOpen && owner"
@@ -121,12 +123,12 @@ watch(
       <PictoriaSelect
         :model-value="singleAssetId"
         :options="choices.map((item) => ({ value: item.id, label: item.meta?.title || item.name }))"
-        placeholder="选择素材"
+        :placeholder="__t('apps.pictoria.ui', '选择素材')"
         @update:model-value="chooseExisting"
       />
       <button class="text-button" @click="emit('upload')">
         <Icon name="upload" :size="13" />
-        上传
+        {{ __t('apps.pictoria.ui', '上传') }}
       </button>
     </template>
     <template v-else-if="assets">
@@ -144,20 +146,25 @@ watch(
             item.assetId
           }}
         </span>
-        <button class="icon-button" :disabled="!index" aria-label="向前" @click="move(index, -1)">
+        <button
+          class="icon-button"
+          :disabled="!index"
+          :aria-label="__t('apps.pictoria.ui', '向前')"
+          @click="move(index, -1)"
+        >
           <Icon name="chevron" class="workflow-left" :size="12" />
         </button>
         <button
           class="icon-button"
           :disabled="index === references.length - 1"
-          aria-label="向后"
+          :aria-label="__t('apps.pictoria.ui', '向后')"
           @click="move(index, 1)"
         >
           <Icon name="chevron" :size="12" />
         </button>
         <button
           class="icon-button"
-          aria-label="移除"
+          :aria-label="__t('apps.pictoria.ui', '移除')"
           @click="
             emit(
               'update:modelValue',
@@ -171,12 +178,12 @@ watch(
       <PictoriaSelect
         model-value=""
         :options="choices.map((item) => ({ value: item.id, label: item.name }))"
-        placeholder="添加素材"
+        :placeholder="__t('apps.pictoria.ui', '添加素材')"
         @update:model-value="chooseExisting"
       />
       <button class="text-button" @click="emit('upload')">
         <Icon name="upload" :size="13" />
-        上传
+        {{ __t('apps.pictoria.ui', '上传') }}
       </button>
     </template>
     <label v-else-if="schema?.type === 'boolean'" class="workflow-checkbox">
@@ -185,7 +192,7 @@ watch(
         :checked="Boolean(modelValue)"
         @change="emit('update:modelValue', ($event.target as HTMLInputElement).checked)"
       />
-      开启
+      {{ __t('apps.pictoria.ui', '开启') }}
     </label>
     <input
       v-else-if="['number', 'integer'].includes(schema?.type || '')"
@@ -217,7 +224,7 @@ watch(
       :value="(modelValue as string) || ''"
       :maxlength="schema?.maxLength || 64000"
       rows="3"
-      placeholder="填写内容"
+      :placeholder="__t('apps.pictoria.ui', '填写内容')"
       @input="emit('update:modelValue', ($event.target as HTMLTextAreaElement).value)"
     />
   </div>

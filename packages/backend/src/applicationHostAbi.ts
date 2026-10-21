@@ -22,6 +22,10 @@ export type {
   ChatCompletion,
 } from './services/llm/types'
 export { modelOutputReservation } from './services/llm/requestPolicy'
+export { appendNativeReasoning } from './services/llm/reasoning'
+export { safeModelDiagnostic, modelNetworkDetails } from './services/llm/diagnostics'
+export { retryableLlmError } from './services/llm/retryPolicy'
+export { ToolLoopGuard, ToolLoopError } from './services/agent/toolLoopGuard'
 export { desktopCheckpointMessages as promptMessagesForPersistence } from './services/agent/reactLoop'
 export {
   canonicalTools,

@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * BackgroundScheduler — Agent 后台任务调度器（M05 §4.2）
  *
@@ -233,7 +234,9 @@ export class BackgroundScheduler {
       }
     })
     this.agentInputs?.onResolved(() => {
-      void this.wakeWaitingTasks().catch((error) => logger.warn('回答唤醒失败: ' + error))
+      void this.wakeWaitingTasks().catch((error) =>
+        logger.warn(__t('logs.task', '回答唤醒失败: ') + error),
+      )
     })
     this.scheduler.subscribe((snapshot) => {
       if (snapshot.descriptor.taskId) this.queueSchedulerEvent(snapshot.descriptor.taskId)
@@ -267,7 +270,7 @@ export class BackgroundScheduler {
         listener({ type, task: info })
       } catch (err) {
         // 单个订阅者失败不影响其他订阅者与主流程
-        logger.warn(`任务事件订阅者异常 (${type}): ${err}`)
+        logger.warn(__t('logs.task', '任务事件订阅者异常 ({0}): {1}', [type, err]))
       }
     }
   }
@@ -321,16 +324,27 @@ export class BackgroundScheduler {
       throw new AppError('VALIDATION_ERROR', { message: '截止时间必须在未来' })
     const title = input.title?.trim() || input.instruction.slice(0, 24)
     const completionAction = input.completionAction ?? 'notify'
+    const origin = input.targetThreadId
+      ? await this.threadService.getThread(input.targetThreadId)
+      : null
+    if (
+      input.requestedBy === 'scheduler' &&
+      input.targetThreadId &&
+      (!origin ||
+        origin.agentId !== input.agentId ||
+        origin.channel !== 'desktop' ||
+        origin.purpose !== 'conversation')
+    )
+      throw new AppError('INVALID_PARAMETER', { message: '定时任务来源会话已失效，请重新安排' })
     let targetThreadId: string | null = null
     if (completionAction === 'send_to_chat') {
       if (!input.targetThreadId) {
         throw new AppError('INVALID_PARAMETER', { message: '发送到对话时必须提供目标 Thread' })
       }
-      const targetThread = await this.threadService.getThread(input.targetThreadId)
-      if (!targetThread || targetThread.purpose !== 'conversation') {
+      if (!origin || origin.purpose !== 'conversation') {
         throw new AppError('INVALID_PARAMETER', { message: '目标 Thread 不存在或不是普通对话' })
       }
-      targetThreadId = targetThread.id
+      targetThreadId = origin.id
     }
 
     // 1. 创建任务专属 Thread（purpose=background_task，与普通聊天历史隔离，M05 §3.2）
@@ -338,21 +352,20 @@ export class BackgroundScheduler {
     const thread = await this.threadService.createThread({
       agentId: input.agentId,
       channel: input.channel ?? 'desktop',
-      title: `[任务] ${title}`,
+      title: __t('server.task', '[任务] {0}', [title]),
       purpose: 'background_task',
       interactionMode: 'work',
     })
     // 派发时复制来源会话的执行模式；后续会话切换不追溯改变已派发任务。
-    if (input.targetThreadId) {
-      const origin = await this.threadService.getThread(input.targetThreadId)
-      if (
-        origin &&
-        origin.status === 'active' &&
-        origin.agentId === input.agentId &&
-        origin.channel === thread.channel
-      ) {
-        await this.threadService.updateExecutionMode(thread.id, origin.executionMode)
-      }
+    if (
+      origin &&
+      origin.status === 'active' &&
+      origin.agentId === input.agentId &&
+      origin.channel === thread.channel
+    ) {
+      await this.threadService.updateExecutionMode(thread.id, origin.executionMode)
+      await this.threadService.updateInteractionMode(thread.id, origin.interactionMode)
+      await this.threadService.updateDisabledTools(thread.id, origin.disabledTools)
     }
 
     // 2. 入库（queued）
@@ -378,7 +391,13 @@ export class BackgroundScheduler {
       }),
     })
 
-    logger.info(`后台任务已派发: id=${taskId}, agent=${input.agentId}, title="${title}"`)
+    logger.info(
+      __t('logs.task', '后台任务已派发: id={0}, agent={1}, title="{2}"', [
+        taskId,
+        input.agentId,
+        title,
+      ]),
+    )
     this.emit('background_task_created', task)
 
     // 3. 提交统一Kernel Scheduler；同一Agent通过resourceKey保持串行。
@@ -463,7 +482,9 @@ export class BackgroundScheduler {
       })
       this.taskExecutions.set(taskId, snapshot.descriptor.executionId)
     } catch (error) {
-      logger.error(`后台任务提交Kernel Scheduler失败: id=${taskId}, 原因=${error}`)
+      logger.error(
+        __t('logs.task', '后台任务提交Kernel Scheduler失败: id={0}, 原因={1}', [taskId, error]),
+      )
       await this.repo.transition(taskId, 'queued', 'failed', {
         completedAt: this.localNow(),
         errorMessage: error instanceof Error ? error.message : String(error),
@@ -535,10 +556,14 @@ export class BackgroundScheduler {
           resumePromptVariables = checkpoint.promptVariables
           resumedToolCount = checkpoint.toolCalls?.length ?? checkpoint.toolCallCount ?? 0
           logger.info(
-            `后台任务 ${taskId} 从 checkpoint 恢复：${initialMessages.length} 条消息，${resumedToolCount} 次工具调用`,
+            __t('logs.task', '后台任务 {0} 从 checkpoint 恢复：{1} 条消息，{2} 次工具调用', [
+              taskId,
+              initialMessages.length,
+              resumedToolCount,
+            ]),
           )
         } catch (parseErr) {
-          logger.warn(`后台任务 checkpoint 解析失败，从头开始: ${parseErr}`)
+          logger.warn(__t('logs.task', '后台任务 checkpoint 解析失败，从头开始: {0}', [parseErr]))
           initialMessages = []
         }
       }
@@ -604,7 +629,9 @@ export class BackgroundScheduler {
         return
       }
       if (runningTask && !runningTask.checkpointJson) {
-        logger.warn(`后台任务 ${taskId} 在首个工具检查点前中断，将无法半程续跑`)
+        logger.warn(
+          __t('logs.task', '后台任务 {0} 在首个工具检查点前中断，将无法半程续跑', [taskId]),
+        )
       }
 
       const state = readTaskLifecycle(runningTask.lifecycleJson, runningTask.instruction)
@@ -625,7 +652,7 @@ export class BackgroundScheduler {
         },
         revision,
       )
-      logger.warn('后台任务执行中断: ' + taskId + ', ' + message)
+      logger.warn(__t('logs.task', '后台任务执行中断: ') + taskId + ', ' + message)
       const failed = await this.repo.findById(taskId)
       if (failed)
         this.emit(
@@ -644,7 +671,9 @@ export class BackgroundScheduler {
       // 条件等待保留任务受管进程；终态、阻塞或用户暂停时回收。
       if (!current || !['queued', 'waiting', 'waiting_input'].includes(current.status))
         await disposeTaskExecution(taskId, { preserveApprovals: true }).catch((error) => {
-          logger.warn(`后台任务执行会话清理失败: id=${taskId}, 原因=${error}`)
+          logger.warn(
+            __t('logs.task', '后台任务执行会话清理失败: id={0}, 原因={1}', [taskId, error]),
+          )
         })
     }
   }
@@ -1221,7 +1250,7 @@ export class BackgroundScheduler {
     await this.repo.delete(id)
     await this.planService?.retainDeletedTask(task)
     this.taskExecutions.delete(id)
-    logger.info(`后台任务已删除: id=${id}`)
+    logger.info(__t('logs.task', '后台任务已删除: id={0}', [id]))
   }
 
   /** 重启后保留待处理问题，只读任务自动继续，其他中断现场等待核验。 */

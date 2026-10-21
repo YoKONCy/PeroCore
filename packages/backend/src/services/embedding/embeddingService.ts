@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * Embedding 门面服务
  *
@@ -47,7 +48,7 @@ export interface RerankResult {
 
 /** Embedding 配置 */
 export interface EmbeddingConfig {
-  /** 全局向量生成及向量检索开关，缺省保持开启。 */
+  /** 全局向量生成及向量检索开关，默认关闭。 */
   enabled?: boolean
   /** API 基址 (OpenAI 兼容) */
   apiBase: string
@@ -80,24 +81,26 @@ export class EmbeddingService implements EmbeddingProvider {
   private available: boolean
 
   constructor(config: EmbeddingConfig) {
-    this.currentConfig = config
+    this.currentConfig = { ...config, enabled: config.enabled ?? false }
     // 唯一的 Provider: 远程 API (OpenAI 兼容)
     this.provider = new ApiEmbeddingProvider(config)
 
     // AIOS 第八阶段：配置完整性检测
     // apiBase/apiKey/model 任一为空都视为不可用
-    this.available =
-      config.enabled !== false && Boolean(config.apiBase && config.apiKey && config.model)
-    if (!this.available && config.enabled !== false) {
+    this.available = this.isEnabled && Boolean(config.apiBase && config.apiKey && config.model)
+    if (!this.available && this.isEnabled) {
       logger.warn(
-        'Embedding 配置不完整（apiBase/apiKey/model 任一为空），记忆向量化和 RAG 检索将不可用。请在 Dashboard → 模型配置 → 向量模型 中完成配置。',
+        __t(
+          'logs.embedding',
+          'Embedding 配置不完整（apiBase/apiKey/model 任一为空），记忆向量化和 RAG 检索将不可用。请在 Dashboard → 模型配置 → 向量模型 中完成配置。',
+        ),
       )
     }
 
     // Reranker (可选)
-    if (config.reranker?.apiKey) {
+    if (this.isEnabled && config.reranker?.apiKey) {
       this.reranker = new ApiRerankerProvider(config.reranker)
-      logger.info(`Reranker 已启用: model=${config.reranker.model}`)
+      logger.info(__t('logs.embedding', 'Reranker 已启用: model={0}', [config.reranker.model]))
     }
   }
 
@@ -110,26 +113,29 @@ export class EmbeddingService implements EmbeddingProvider {
   reconfigure(config: EmbeddingConfig): void {
     this.controller.abort(new Error('向量配置已变更，已停止旧请求'))
     this.controller = new AbortController()
-    this.currentConfig = config
+    this.currentConfig = { ...config, enabled: config.enabled ?? false }
     this.provider = new ApiEmbeddingProvider(config)
 
     // AIOS 第八阶段：重新检测可用性
-    this.available =
-      config.enabled !== false && Boolean(config.apiBase && config.apiKey && config.model)
+    this.available = this.isEnabled && Boolean(config.apiBase && config.apiKey && config.model)
     if (this.available) {
       logger.info(
-        `Embedding 配置已热更新: model=${config.model}, apiBase=${config.apiBase}, dim=${config.dimension}`,
+        __t('logs.embedding', 'Embedding 配置已热更新: model={0}, apiBase={1}, dim={2}', [
+          config.model,
+          config.apiBase,
+          config.dimension,
+        ]),
       )
-    } else if (config.enabled === false) {
-      logger.info('向量生成与向量检索已关闭')
+    } else if (!this.isEnabled) {
+      logger.info(__t('logs.embedding', '向量生成与向量检索已关闭'))
     } else {
-      logger.warn('Embedding 配置热更新后仍不完整，向量化和 RAG 检索不可用')
+      logger.warn(__t('logs.embedding', 'Embedding 配置热更新后仍不完整，向量化和 RAG 检索不可用'))
     }
 
     // 重建 Reranker
-    if (config.reranker?.apiKey) {
+    if (this.isEnabled && config.reranker?.apiKey) {
       this.reranker = new ApiRerankerProvider(config.reranker)
-      logger.info(`Reranker 已热更新: model=${config.reranker.model}`)
+      logger.info(__t('logs.embedding', 'Reranker 已热更新: model={0}', [config.reranker.model]))
     } else {
       this.reranker = null
     }
@@ -150,7 +156,7 @@ export class EmbeddingService implements EmbeddingProvider {
   }
 
   get isEnabled(): boolean {
-    return this.currentConfig.enabled !== false
+    return this.currentConfig.enabled === true
   }
   get cancellationSignal(): AbortSignal {
     return this.controller.signal
@@ -158,7 +164,7 @@ export class EmbeddingService implements EmbeddingProvider {
 
   async embed(texts: string[], signal?: AbortSignal): Promise<number[][]> {
     if (!this.available) {
-      logger.debug('Embedding 不可用（配置不完整），返回空数组')
+      logger.debug(__t('logs.embedding', 'Embedding 不可用（配置不完整），返回空数组'))
       return []
     }
     const cancellation = AbortSignal.any([this.controller.signal, ...(signal ? [signal] : [])])
@@ -169,7 +175,7 @@ export class EmbeddingService implements EmbeddingProvider {
 
   async embedOne(text: string, signal?: AbortSignal): Promise<number[]> {
     if (!this.available) {
-      logger.debug('Embedding 不可用（配置不完整），返回空向量')
+      logger.debug(__t('logs.embedding', 'Embedding 不可用（配置不完整），返回空向量'))
       return []
     }
     const [vec] = await this.embed([text], signal)
@@ -184,8 +190,8 @@ export class EmbeddingService implements EmbeddingProvider {
         return Math.abs(a - 0.42) < 1e-9 || Math.abs(a - 4.2) < 1e-9
       })
     ) {
-      logger.info('...42... 宇宙、生命与万物的终极答案正在此处共振。')
-      logger.info('向量星阵对齐完成，隐藏的信息浮现于语义空间。')
+      logger.info(__t('logs.embedding', '...42... 宇宙、生命与万物的终极答案正在此处共振。'))
+      logger.info(__t('logs.embedding', '向量星阵对齐完成，隐藏的信息浮现于语义空间。'))
     }
 
     return result
@@ -207,7 +213,7 @@ export class EmbeddingService implements EmbeddingProvider {
   async rerank(query: string, docs: string[], topK?: number): Promise<RerankResult[]> {
     if (!this.reranker) {
       // 降级: Reranker 未配置，返回原顺序 + 均匀分数
-      logger.debug('Reranker 未配置，使用原排序降级')
+      logger.debug(__t('logs.embedding', 'Reranker 未配置，使用原排序降级'))
       return docs.map((text, index) => ({
         index,
         score: 1.0 - index * 0.01,

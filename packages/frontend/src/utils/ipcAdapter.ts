@@ -1,3 +1,5 @@
+import { t as __t } from '../i18n/index'
+import { copyClientText } from '../lib/clientPlatform'
 /**
  * @file IPC 适配层 — 前端唯一允许感知运行环境的文件
  * @description 遵循 07_DUAL_DEPLOYMENT.md 严格隔离原则:
@@ -95,7 +97,10 @@ export async function invoke(cmd: string, args?: unknown): Promise<unknown> {
 
   // 本机资产扫描: 不可用
   if (cmd.startsWith('scan-3d')) {
-    logger.warn('ipcAdapter', `本机资产扫描在浏览器模式不可用: ${cmd}`)
+    logger.warn(
+      'ipcAdapter',
+      __t('logs.frontend.ipcAdapter', '本机资产扫描在浏览器模式不可用: {0}', [cmd]),
+    )
     return null
   }
 
@@ -117,7 +122,10 @@ export async function invoke(cmd: string, args?: unknown): Promise<unknown> {
     cmd === 'napcat-status' ||
     cmd === 'ensure-napcat-config'
   ) {
-    logger.warn('ipcAdapter', `NapCat 在浏览器模式不可用: ${cmd}`)
+    logger.warn(
+      'ipcAdapter',
+      __t('logs.frontend.ipcAdapter', 'NapCat 在浏览器模式不可用: {0}', [cmd]),
+    )
     return null
   }
 
@@ -128,7 +136,10 @@ export async function invoke(cmd: string, args?: unknown): Promise<unknown> {
     cmd === 'read-clipboard-image' ||
     cmd === 'write-clipboard-image'
   ) {
-    logger.warn('ipcAdapter', `桌面感知功能在浏览器模式不可用: ${cmd}`)
+    logger.warn(
+      'ipcAdapter',
+      __t('logs.frontend.ipcAdapter', '桌面感知功能在浏览器模式不可用: {0}', [cmd]),
+    )
     return null
   }
 
@@ -143,7 +154,7 @@ export async function invoke(cmd: string, args?: unknown): Promise<unknown> {
   }
   if (cmd === 'write-clipboard') {
     try {
-      await navigator.clipboard.writeText(args as string)
+      await copyClientText(args as string)
     } catch {
       // 权限未授予
     }
@@ -157,18 +168,24 @@ export async function invoke(cmd: string, args?: unknown): Promise<unknown> {
 
   // 后端管理: 在 Docker 模式下后端独立运行，不需要通过 Electron 管理
   if (cmd === 'start-backend' || cmd === 'stop-backend') {
-    logger.info('ipcAdapter', `Docker 模式下后端独立运行，跳过: ${cmd}`)
+    logger.info(
+      'ipcAdapter',
+      __t('logs.frontend.ipcAdapter', 'Docker 模式下后端独立运行，跳过: {0}', [cmd]),
+    )
     return null
   }
 
   // 后端日志: Docker 模式可通过 HTTP API 获取
   if (cmd === 'get-backend-logs') {
-    logger.info('ipcAdapter', 'Docker 模式请通过 HTTP API 获取日志')
+    logger.info(
+      'ipcAdapter',
+      __t('logs.frontend.ipcAdapter', 'Docker 模式请通过 HTTP API 获取日志'),
+    )
     return []
   }
 
   // 未知通道: 打印警告
-  logger.warn('ipcAdapter', `未处理的 IPC 通道: ${cmd}`)
+  logger.warn('ipcAdapter', __t('logs.frontend.ipcAdapter', '未处理的 IPC 通道: {0}', [cmd]))
   return null
 }
 

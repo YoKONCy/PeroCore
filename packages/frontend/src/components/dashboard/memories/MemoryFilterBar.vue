@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../../i18n/index'
+
 /**
  * MemoryFilterBar — 记忆档案过滤工作台
  *
@@ -51,7 +53,12 @@ const order = defineModel<ArchiveOrder>('order', { required: true })
 const showAdvanced = ref(false)
 
 const channelOptions = computed(() => [
-  { label: '全部来源', value: 'all' },
+  {
+    get label() {
+      return __t('ui.settings', '全部来源')
+    },
+    value: 'all',
+  },
   ...props.facets.channels.map((item) => ({
     label: `${item.value} (${item.count})`,
     value: item.value,
@@ -59,20 +66,60 @@ const channelOptions = computed(() => [
 ])
 
 const modeOptions = [
-  { label: '全部模式', value: 'all' },
-  { label: '主动记事', value: 'active' },
-  { label: '后台炼化', value: 'background' },
+  {
+    get label() {
+      return __t('ui.settings', '全部模式')
+    },
+    value: 'all',
+  },
+  {
+    get label() {
+      return __t('ui.settings', '主动记事')
+    },
+    value: 'active',
+  },
+  {
+    get label() {
+      return __t('ui.settings', '后台炼化')
+    },
+    value: 'background',
+  },
 ]
 
 const sortOptions = [
-  { label: '事件时间', value: 'eventAt' },
-  { label: '记录时间', value: 'createdAt' },
-  { label: '重要度', value: 'importance' },
+  {
+    get label() {
+      return __t('ui.settings', '事件时间')
+    },
+    value: 'eventAt',
+  },
+  {
+    get label() {
+      return __t('ui.settings', '记录时间')
+    },
+    value: 'createdAt',
+  },
+  {
+    get label() {
+      return __t('ui.settings', '重要度')
+    },
+    value: 'importance',
+  },
 ]
 
 const orderOptions = [
-  { label: '降序', value: 'desc' },
-  { label: '升序', value: 'asc' },
+  {
+    get label() {
+      return __t('ui.settings', '降序')
+    },
+    value: 'desc',
+  },
+  {
+    get label() {
+      return __t('ui.settings', '升序')
+    },
+    value: 'asc',
+  },
 ]
 
 function toggleValue(list: string[], value: string): string[] {
@@ -82,16 +129,46 @@ function toggleValue(list: string[], value: string): string[] {
 const entitySections = computed(
   () =>
     [
-      { key: 'topics', label: '主题', values: props.facets.topics, model: topics },
+      {
+        key: 'topics',
+        get label() {
+          return __t('ui.settings', '主题')
+        },
+        values: props.facets.topics,
+        model: topics,
+      },
       {
         key: 'participants',
-        label: '人物',
+        get label() {
+          return __t('ui.settings', '人物')
+        },
         values: props.facets.participants,
         model: participants,
       },
-      { key: 'places', label: '地点', values: props.facets.places, model: places },
-      { key: 'objects', label: '物品', values: props.facets.objects, model: objects },
-      { key: 'tones', label: '情绪', values: props.facets.tones, model: tones },
+      {
+        key: 'places',
+        get label() {
+          return __t('ui.settings', '地点')
+        },
+        values: props.facets.places,
+        model: places,
+      },
+      {
+        key: 'objects',
+        get label() {
+          return __t('ui.settings', '物品')
+        },
+        values: props.facets.objects,
+        model: objects,
+      },
+      {
+        key: 'tones',
+        get label() {
+          return __t('ui.settings', '情绪')
+        },
+        values: props.facets.tones,
+        model: tones,
+      },
     ] as const,
 )
 </script>
@@ -103,12 +180,12 @@ const entitySections = computed(
       <div class="filter-field filter-search">
         <label class="filter-label">
           <span class="filter-dot" />
-          搜索
+          {{ __t('ui.settings', '搜索') }}
           <span class="filter-label-en">Search</span>
         </label>
         <PInput
           v-model="searchQuery"
-          placeholder="叙事 / 主题 / 人物 / 地点 / 物品..."
+          :placeholder="__t('ui.settings', '叙事 / 主题 / 人物 / 地点 / 物品...')"
           class="!text-sm"
         />
       </div>
@@ -116,7 +193,7 @@ const entitySections = computed(
       <div class="filter-field">
         <label class="filter-label">
           <span class="filter-dot" />
-          角色
+          {{ __t('ui.settings', '角色') }}
         </label>
         <PSelect v-model="agent" :options="agentOptions" />
       </div>
@@ -124,7 +201,7 @@ const entitySections = computed(
       <div class="filter-field">
         <label class="filter-label">
           <span class="filter-dot" />
-          来源
+          {{ __t('ui.settings', '来源') }}
         </label>
         <PSelect v-model="channel" :options="channelOptions" />
       </div>
@@ -132,7 +209,7 @@ const entitySections = computed(
       <div class="filter-field">
         <label class="filter-label">
           <span class="filter-dot" />
-          模式
+          {{ __t('ui.settings', '模式') }}
         </label>
         <PSelect v-model="mode" :options="modeOptions" />
       </div>
@@ -140,7 +217,7 @@ const entitySections = computed(
       <div class="filter-field">
         <label class="filter-label">
           <span class="filter-dot" />
-          排序
+          {{ __t('ui.settings', '排序') }}
         </label>
         <PSelect v-model="sort" :options="sortOptions" />
       </div>
@@ -148,7 +225,7 @@ const entitySections = computed(
       <div class="filter-field">
         <label class="filter-label">
           <span class="filter-dot" />
-          顺序
+          {{ __t('ui.settings', '顺序') }}
         </label>
         <PSelect v-model="order" :options="orderOptions" />
       </div>
@@ -156,11 +233,11 @@ const entitySections = computed(
       <div class="filter-actions">
         <PButton variant="ghost" size="sm" @click="showAdvanced = !showAdvanced">
           <PixelIcon :name="showAdvanced ? 'chevron-up' : 'chevron-down'" size="xs" />
-          高级过滤
+          {{ __t('ui.settings', '高级过滤') }}
         </PButton>
         <PButton variant="secondary" size="sm" :loading="isLoading" @click="emit('refresh')">
           <span class="filter-refresh-icon"><PixelIcon name="refresh" size="xs" /></span>
-          刷新
+          {{ __t('ui.settings', '刷新') }}
         </PButton>
       </div>
     </div>
@@ -168,27 +245,27 @@ const entitySections = computed(
     <!-- 第二排：高级过滤 -->
     <div v-if="showAdvanced" class="filter-advanced">
       <div class="adv-section">
-        <div class="adv-title">重要度区间</div>
+        <div class="adv-title">{{ __t('ui.settings', '重要度区间') }}</div>
         <div class="adv-slider-row">
-          <span class="adv-slider-label">最小 {{ importanceMin }}</span>
+          <span class="adv-slider-label">{{ __t('ui.settings', '最小') }} {{ importanceMin }}</span>
           <PSlider v-model="importanceMin" :min="0" :max="10" :step="1" class="adv-slider" />
           <span class="adv-slider-value">{{ importanceMin }}</span>
         </div>
         <div class="adv-slider-row">
-          <span class="adv-slider-label">最大 {{ importanceMax }}</span>
+          <span class="adv-slider-label">{{ __t('ui.settings', '最大') }} {{ importanceMax }}</span>
           <PSlider v-model="importanceMax" :min="0" :max="10" :step="1" class="adv-slider" />
           <span class="adv-slider-value">{{ importanceMax }}</span>
         </div>
       </div>
 
       <div class="adv-section">
-        <div class="adv-title">事件时间范围</div>
+        <div class="adv-title">{{ __t('ui.settings', '事件时间范围') }}</div>
         <div class="adv-date-row">
           <input v-model="eventAtFrom" type="date" class="adv-date" />
           <span class="adv-date-sep">~</span>
           <input v-model="eventAtTo" type="date" class="adv-date" />
         </div>
-        <div class="adv-title adv-title-gap">记录时间范围</div>
+        <div class="adv-title adv-title-gap">{{ __t('ui.settings', '记录时间范围') }}</div>
         <div class="adv-date-row">
           <input v-model="createdAtFrom" type="date" class="adv-date" />
           <span class="adv-date-sep">~</span>
@@ -218,15 +295,15 @@ const entitySections = computed(
 
     <!-- Chips 行 -->
     <div v-if="chips.length" class="filter-chips">
-      <span class="chips-label">当前筛选</span>
+      <span class="chips-label">{{ __t('ui.settings', '当前筛选') }}</span>
       <button v-for="chip in chips" :key="chip.key" class="chip" @click="chip.remove()">
         {{ chip.label }}
         <PixelIcon name="close" size="xs" class="chip-close" />
       </button>
       <PButton variant="ghost" size="sm" class="chips-clear" @click="emit('clear')">
-        清空全部
+        {{ __t('ui.settings', '清空全部') }}
       </PButton>
-      <span class="chips-count">{{ total }} 条结果</span>
+      <span class="chips-count">{{ total }} {{ __t('ui.settings', '条结果') }}</span>
     </div>
   </div>
 </template>

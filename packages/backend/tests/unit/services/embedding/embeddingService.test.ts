@@ -8,6 +8,7 @@ import {
 } from '@infos/backend/services/embedding/embeddingService'
 
 const embeddingConfig: EmbeddingConfig = {
+  enabled: true,
   apiBase: 'https://example.test/v1/',
   apiKey: 'embedding-key',
   model: 'embedding-model',
@@ -185,6 +186,37 @@ describe('ApiRerankerProvider', () => {
 })
 
 describe('EmbeddingService', () => {
+  it('未设置向量开关时默认关闭，完整的模型和重排配置也不会触发请求', async () => {
+    const config: EmbeddingConfig = {
+      apiBase: embeddingConfig.apiBase,
+      apiKey: embeddingConfig.apiKey,
+      model: embeddingConfig.model,
+      dimension: embeddingConfig.dimension,
+      reranker: {
+        apiBase: 'https://rerank.test',
+        apiKey: 'rerank-key',
+        model: 'rerank-model',
+        defaultTopK: 1,
+      },
+    }
+    const service = new EmbeddingService(config)
+    expect(service.isEnabled).toBe(false)
+    expect(service.getConfig().enabled).toBe(false)
+    expect(service.isAvailable).toBe(false)
+    expect(service.hasReranker).toBe(false)
+    expect(await service.embedOne('文本')).toEqual([])
+    await service.rerank('问题', ['文档'])
+    expect(fetch).not.toHaveBeenCalled()
+
+    service.reconfigure({ ...config, enabled: true })
+    expect(service.isAvailable).toBe(true)
+    expect(service.hasReranker).toBe(true)
+    service.reconfigure(config)
+    expect(service.getConfig().enabled).toBe(false)
+    expect(service.isAvailable).toBe(false)
+    expect(service.hasReranker).toBe(false)
+  })
+
   it('关闭向量后不发送请求，并保留模型配置供重新开启使用', async () => {
     vi.stubGlobal('fetch', vi.fn())
     const service = new EmbeddingService({ ...embeddingConfig, enabled: false })

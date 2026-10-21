@@ -10,6 +10,7 @@
  */
 
 import type { ApiResponse } from '@infos/shared'
+import { getLocale } from '@infos/shared/i18n'
 
 /**
  * Electron 模式下后端服务根地址。
@@ -17,10 +18,10 @@ import type { ApiResponse } from '@infos/shared'
  * 所有 localhost:9120 引用**必须**使用此常量，
  * 禁止在其他文件中硬编码端口号 (S05 §3)。
  *
- * TODO(AIOS-Phase7): 第七阶段 Daemon 独立时改为从环境变量/配置读取，
- * 不再硬编码 localhost:9120。Daemon 可作为系统服务运行在任意端口。
+ * 原生客户端由主进程提供当前 Daemon 地址，兼容自定义端口。
  */
-export const ELECTRON_BACKEND_ORIGIN = 'http://localhost:9120'
+export const ELECTRON_BACKEND_ORIGIN =
+  (typeof window !== 'undefined' && window.electron?.backendOrigin?.()) || 'http://localhost:9120'
 
 export function isElectronRuntime(): boolean {
   return (
@@ -52,9 +53,33 @@ export function setWebServerOrigin(origin: string, token = ''): void {
   else sessionStorage.removeItem(WEB_SERVER_TOKEN_KEY)
 }
 
+export function clearWebClientCredential(): void {
+  if (!isElectronRuntime()) sessionStorage.removeItem(WEB_SERVER_TOKEN_KEY)
+}
+
+export function getClientToken(): string {
+  if (isElectronRuntime()) return window.electron?.clientCredential?.() || ''
+  return typeof sessionStorage === 'undefined'
+    ? ''
+    : sessionStorage.getItem(WEB_SERVER_TOKEN_KEY) || ''
+}
+
+/** 普通请求、SSE 和二进制上传共用凭据与未授权通知。 */
+export async function clientFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(options.headers)
+  if (!headers.has('Accept-Language')) headers.set('Accept-Language', getLocale())
+  const token = getClientToken()
+  if (token) headers.set('Authorization', 'Bearer ' + token)
+  const response = await fetch(url, { ...options, headers, credentials: 'include' })
+  if (response.status === 401 && typeof window !== 'undefined')
+    window.dispatchEvent(new Event('infos:unauthorized'))
+  return response
+}
+
 export function getGatewayWsUrl(): string {
   if (isElectronRuntime()) {
-    return `${ELECTRON_BACKEND_ORIGIN.replace(/^http/, 'ws')}/ws/gateway`
+    const token = getClientToken()
+    return `${ELECTRON_BACKEND_ORIGIN.replace(/^http/, 'ws')}/ws/gateway${token ? `?token=${encodeURIComponent(token)}` : ''}`
   }
 
   const origin = getWebServerOrigin()
@@ -83,26 +108,18 @@ export interface Transport {
 // ─────────────────────────────────────────────
 
 class HttpTransport implements Transport {
-  constructor(private baseUrl: string) {}
-
   async request<T>(endpoint: string, options?: RequestInit): Promise<ApiResponse<T>> {
-    const configuredToken =
-      !isElectronRuntime() && typeof sessionStorage !== 'undefined'
-        ? sessionStorage.getItem(WEB_SERVER_TOKEN_KEY)
-        : null
-    const headers: HeadersInit =
-      options?.body instanceof FormData
-        ? {
-            ...(configuredToken ? { Authorization: `Bearer ${configuredToken}` } : {}),
-            ...options?.headers,
-          }
-        : {
-            'Content-Type': 'application/json',
-            ...(configuredToken ? { Authorization: `Bearer ${configuredToken}` } : {}),
-            ...options?.headers,
-          }
-    const res = await fetch(`${this.baseUrl}/api${endpoint}`, {
+    const headers = new Headers(options?.headers)
+    if (!(options?.body instanceof FormData) && !headers.has('Content-Type'))
+      headers.set('Content-Type', 'application/json')
+    const method = (options?.method ?? 'GET').toUpperCase()
+    // 状态、历史与审批读取不能在网络切换后无限挂起；流式请求与写操作沿用各自的生命周期。
+    const signal =
+      options?.signal ??
+      (method === 'GET' || method === 'HEAD' ? AbortSignal.timeout(15_000) : undefined)
+    const res = await clientFetch(`${getWebServerOrigin()}/api${endpoint}`, {
       ...options,
+      signal,
       headers,
     })
 
@@ -118,15 +135,9 @@ class HttpTransport implements Transport {
     return res.json()
   }
 
-  async invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
-    // 无 Electron 时，走 HTTP 替代
-    const res = await fetch(`${this.baseUrl}/api/ipc/${channel}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(args),
-    })
-    const body = await res.json()
-    return body.data as T
+  async invoke<T>(channel: string, ..._args: unknown[]): Promise<T> {
+    // 原生能力没有虚构的 /api/ipc 映射，业务功能应使用其明确的服务端接口。
+    throw new Error(`浏览器客户端不提供本机窗口接口：${channel}`)
   }
 }
 
@@ -134,31 +145,8 @@ class HttpTransport implements Transport {
 // Electron 模式
 // ─────────────────────────────────────────────
 
-class ElectronTransport implements Transport {
-  async request<T>(endpoint: string, options?: RequestInit): Promise<ApiResponse<T>> {
-    const headers: HeadersInit =
-      options?.body instanceof FormData
-        ? { ...options?.headers }
-        : { 'Content-Type': 'application/json', ...options?.headers }
-    // 业务 API 照样走 HTTP (localhost:9120)
-    const res = await fetch(`${ELECTRON_BACKEND_ORIGIN}/api${endpoint}`, {
-      ...options,
-      headers,
-    })
-
-    if (!res.ok) {
-      // 与 HttpTransport 一致的错误降级处理
-      const body = await res.json().catch(() => ({
-        code: 'NETWORK_ERROR',
-        message: `HTTP ${res.status} ${res.statusText}`,
-      }))
-      return body as ApiResponse<T>
-    }
-
-    return res.json()
-  }
-
-  async invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
+class ElectronTransport extends HttpTransport {
+  override async invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
     // Electron 专属能力走 IPC
     return (
       window as unknown as {
@@ -175,7 +163,7 @@ class ElectronTransport implements Transport {
 /** 当前 Transport 实例 (单例) */
 export const transport: Transport = isElectronRuntime()
   ? new ElectronTransport()
-  : new HttpTransport(getWebServerOrigin())
+  : new HttpTransport()
 
 /**
  * 获取 API 根路径 (含 /api 前缀)
@@ -197,7 +185,18 @@ export function getApiResourceUrl(endpoint: string, query: URLSearchParams): str
       ? sessionStorage.getItem(WEB_SERVER_TOKEN_KEY)
       : null
   if (token) params.set('token', token)
-  return `${getApiBaseUrl()}${endpoint}?${params}`
+  const suffix = params.toString()
+  return `${getApiBaseUrl()}${endpoint}${suffix ? `?${suffix}` : ''}`
+}
+
+/** PDF Range 等由库直接发出的请求，凭据只允许传给当前业务服务端。 */
+export function getApiResourceHeaders(url: string): Record<string, string> {
+  const base = new URL(getApiBaseUrl())
+  const target = new URL(url, base)
+  const token = getClientToken()
+  return token && target.origin === base.origin && target.pathname.startsWith('/api/')
+    ? { Authorization: `Bearer ${token}` }
+    : {}
 }
 
 /** 非 JSON 资源读取仍集中经过通信层，保留取消与鉴权。 */
@@ -206,7 +205,7 @@ export async function requestApiResource(
   query: URLSearchParams,
   signal?: AbortSignal,
 ) {
-  const response = await fetch(getApiResourceUrl(endpoint, query), { signal })
+  const response = await clientFetch(getApiResourceUrl(endpoint, query), { signal })
   if (!response.ok) {
     const body = await response.json().catch(() => null)
     throw new Error(body?.message || `文件读取失败（HTTP ${response.status}）`)
@@ -219,13 +218,7 @@ export async function requestApiBinary(
   endpoint: string,
   options: RequestInit,
 ): Promise<ArrayBuffer> {
-  const headers = new Headers(options.headers)
-  const token =
-    !isElectronRuntime() && typeof sessionStorage !== 'undefined'
-      ? sessionStorage.getItem(WEB_SERVER_TOKEN_KEY)
-      : null
-  if (token) headers.set('Authorization', `Bearer ${token}`)
-  const response = await fetch(`${getApiBaseUrl()}${endpoint}`, { ...options, headers })
+  const response = await clientFetch(`${getApiBaseUrl()}${endpoint}`, options)
   if (!response.ok) {
     const body = await response.json().catch(() => null)
     throw new Error(body?.message || `语音请求失败（HTTP ${response.status}）`)

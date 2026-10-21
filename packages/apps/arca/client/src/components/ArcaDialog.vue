@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 import { nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
 import { openDialogs } from '../services/dialogState'
 import { activateSurface, retireSurface } from '../services/surfaceMotion'
@@ -95,7 +97,7 @@ onBeforeUnmount(release)
             <button
               class="icon-button"
               type="button"
-              aria-label="关闭对话框"
+              :aria-label="__t('apps.arca.ui', '关闭对话框')"
               :disabled="busy"
               @click="close"
             >

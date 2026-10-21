@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../../i18n/index'
+
 /** ToolCardRead — 文件读取审计面板；历史记录只显示审计元数据，不伪装成持久正文查看器。 */
 import { computed } from 'vue'
 const props = defineProps<{ args: string; result?: string; isError?: boolean }>()
@@ -12,7 +14,9 @@ function parse(raw?: string): Record<string, unknown> {
 const args = computed(() => parse(props.args))
 const result = computed(() => parse(props.result))
 const path = computed(() =>
-  String(args.value.path ?? args.value.file_path ?? result.value.path ?? '未知文件'),
+  String(
+    args.value.path ?? args.value.file_path ?? result.value.path ?? __t('ui.tools', '未知文件'),
+  ),
 )
 const name = computed(() => path.value.replaceAll('\\', '/').split('/').pop() || path.value)
 const content = computed(() =>
@@ -56,7 +60,7 @@ const range = computed(() => {
           <dd>{{ result.totalLines }}</dd>
         </div>
       </dl>
-      <p>文件正文仅存在于当次 Agent 执行内存，历史轨迹不长期保存。</p>
+      <p>{{ __t('ui.tools', '文件正文仅存在于当次 Agent 执行内存，历史轨迹不长期保存。') }}</p>
     </div>
     <div v-else-if="lines.length && content" class="read-code">
       <div v-for="(line, index) in lines" :key="index">

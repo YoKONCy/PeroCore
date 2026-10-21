@@ -17,16 +17,17 @@ import { createEmbeddedSurfaceMotion } from './surfaceMotion'
 
 const embedded = process.argv.includes('--infos-embedded-app')
 const toastOverlay = process.argv.includes('--infos-toast-overlay')
-const toastInvokes = new Set(['desktop-toasts:get-state'])
-const toastEvents = new Set(['desktop-toasts:changed', 'desktop-toasts:active'])
+const toastInvokes = new Set(['desktop-toasts:get-state', 'i18n:get-language'])
+const toastEvents = new Set(['desktop-toasts:changed', 'desktop-toasts:active', 'i18n:changed'])
 const applicationInvokes = new Set([
+  'i18n:get-language',
   'desktop-tabs:get-theme',
   'window-close',
   'arca-host:control',
   'arca-host:request',
   'pictoria:request',
 ])
-const applicationEvents = new Set(['desktop-shell:theme-changed'])
+const applicationEvents = new Set(['desktop-shell:theme-changed', 'i18n:changed'])
 
 if (embedded) {
   const motion = createEmbeddedSurfaceMotion()
@@ -40,6 +41,11 @@ if (embedded) {
 contextBridge.exposeInMainWorld('electron', {
   embedded,
   toastOverlay,
+  /** 只有主应用页面可取安装实例凭据，子应用和通知层不开放。 */
+  clientCredential: () =>
+    embedded || toastOverlay ? '' : ipcRenderer.sendSync('client-access:credential'),
+  backendOrigin: () =>
+    embedded || toastOverlay ? '' : ipcRenderer.sendSync('client-access:credential', 'origin'),
   /**
    * 调用主进程 (请求/响应式 IPC)
    * 对应 ipcMain.handle()

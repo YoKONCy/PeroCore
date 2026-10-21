@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * strongholdOps — 据点空间管理工具
  *
@@ -74,7 +75,7 @@ export const strongholdMoveToRoomTool: BuiltinTool = {
         return JSON.stringify({
           error: `找不到名为 "${roomName}" 的房间`,
           available_rooms: names,
-          hint: `可用房间: ${names}`,
+          hint: __t('server.tools', '可用房间: {0}', [names]),
         })
       }
 
@@ -86,7 +87,7 @@ export const strongholdMoveToRoomTool: BuiltinTool = {
 
       return JSON.stringify({
         success: true,
-        message: `已移动到 "${roomName}"`,
+        message: __t('server.tools', '已移动到 "{0}"', [roomName]),
         room: {
           name: room.name,
           description: room.description,
@@ -96,7 +97,7 @@ export const strongholdMoveToRoomTool: BuiltinTool = {
       })
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err)
-      logger.error(`移动到房间失败: ${errMsg}`)
+      logger.error(__t('logs.tools', '移动到房间失败: {0}', [errMsg]))
       return JSON.stringify({ error: `移动失败: ${errMsg}` })
     }
   },
@@ -223,7 +224,7 @@ export const strongholdSetEnvironmentTool: BuiltinTool = {
 
       return JSON.stringify({
         success: true,
-        message: `已将 "${room.name}" 的 ${key} 调整为 ${value}`,
+        message: __t('server.tools', '已将 "{0}" 的 {1} 调整为 {2}', [room.name, key, value]),
         current_environment: env,
       })
     } catch (err) {
@@ -271,7 +272,7 @@ export const strongholdSummonAgentsTool: BuiltinTool = {
       success: true,
       queued_agent_ids: accepted,
       rejected,
-      message: `已请求${accepted.join('、')}在当前角色发言后依次接话。`,
+      message: __t('server.tools', '已请求{0}在当前角色发言后依次接话。', [accepted.join('、')]),
     })
   },
 }
@@ -291,7 +292,13 @@ export const strongholdCallButlerTool: BuiltinTool = {
       const room = await service.getAgentLocation(ctx.agentId)
       if (!room) return JSON.stringify({ error: '调用 Agent 当前没有所在房间。' })
 
-      logger.info(`管家收到来自 ${ctx.agentId} 的请求（房间: ${room.name}）: ${request}`)
+      logger.info(
+        __t('logs.tools', '管家收到来自 {0} 的请求（房间: {1}）: {2}', [
+          ctx.agentId,
+          room.name,
+          request,
+        ]),
+      )
       const result = await _butlerService.execute({
         roomId: room.id,
         command: request,

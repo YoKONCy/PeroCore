@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * 资产联邦化注册表
  *
@@ -79,7 +80,7 @@ export class AssetRegistry {
   async scanAll(): Promise<void> {
     if (this.scanned) return
 
-    logger.info('开始全量资产扫描...')
+    logger.info(__t('logs.core', '开始全量资产扫描...'))
     this.assets.clear()
     this.typeIndex.clear()
 
@@ -101,7 +102,7 @@ export class AssetRegistry {
     this.scanDir(this.pathResolver.resolve('@data/skills'), 'local')
 
     this.scanned = true
-    logger.success(`资产扫描完成，共索引 ${this.assets.size} 个资产`)
+    logger.success(__t('logs.core', '资产扫描完成，共索引 {0} 个资产', [this.assets.size]))
   }
 
   /** 强制重新扫描 (B6-4) */
@@ -185,7 +186,7 @@ export class AssetRegistry {
         }
       }
     } catch (err) {
-      logger.warn(`扫描资产目录失败: ${dirPath}`, { error: err })
+      logger.warn(__t('logs.core', '扫描资产目录失败: {0}', [dirPath]), { error: err })
     }
   }
 
@@ -231,7 +232,7 @@ export class AssetRegistry {
           config: raw,
         }
       } catch (err) {
-        logger.warn(`无法解析 ${filename}: ${filePath}`, { error: err })
+        logger.warn(__t('logs.core', '无法解析 {0}: {1}', [filename, filePath]), { error: err })
       }
     }
 
@@ -242,7 +243,9 @@ export class AssetRegistry {
   private registerAsset(meta: AssetMetadata): void {
     const existing = this.assets.get(meta.assetId)
     if (existing) {
-      logger.debug(`资产覆盖: ${meta.assetId} (${existing.source} → ${meta.source})`)
+      logger.debug(
+        __t('logs.core', '资产覆盖: {0} ({1} → {2})', [meta.assetId, existing.source, meta.source]),
+      )
     }
 
     this.assets.set(meta.assetId, meta)

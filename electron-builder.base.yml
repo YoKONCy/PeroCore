@@ -42,6 +42,11 @@ asarUnpack:
 
 # 后端构建产物 + 运行时资源
 extraResources:
+  # 主应用 Web 入口独立供 Daemon 发布，不依赖 Electron 的 file 协议。
+  - from: dist/renderer
+    to: frontend
+    filter:
+      - '**/*'
   - from: packages/frontend/src/assets/fonts/zpix.ttf
     to: status-card/zpix.ttf
   - from: packages/backend/dist

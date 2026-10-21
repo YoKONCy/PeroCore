@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 import { nextTick, ref, watch } from 'vue'
 import Icon from './PictoriaIcon.vue'
 const props = defineProps<{ title: string; text: string; selected?: boolean }>()
@@ -15,7 +17,10 @@ async function edit() {
   input.value?.focus()
 }
 function save() {
-  emit('save', { title: titleDraft.value.trim() || '备注', text: textDraft.value.trim() })
+  emit('save', {
+    title: titleDraft.value.trim() || __t('apps.pictoria.ui', '备注'),
+    text: textDraft.value.trim(),
+  })
   editing.value = false
 }
 watch(
@@ -34,8 +39,8 @@ watch(
         type="button"
         class="icon-button"
         data-ui
-        title="编辑备注"
-        aria-label="编辑备注"
+        :title="__t('apps.pictoria.ui', '编辑备注')"
+        :aria-label="__t('apps.pictoria.ui', '编辑备注')"
         @pointerdown.stop
         @click="edit"
       >
@@ -45,8 +50,8 @@ watch(
         type="button"
         class="icon-button note-card-delete"
         data-ui
-        title="删除备注"
-        aria-label="删除备注"
+        :title="__t('apps.pictoria.ui', '删除备注')"
+        :aria-label="__t('apps.pictoria.ui', '删除备注')"
         @pointerdown.stop
         @click="emit('remove')"
       >
@@ -65,15 +70,27 @@ watch(
         @keydown.ctrl.enter.prevent.stop="save"
         @keydown.meta.enter.prevent.stop="save"
       >
-        <input ref="input" v-model="titleDraft" maxlength="100" aria-label="备注标题" />
-        <textarea v-model="textDraft" maxlength="4000" rows="6" aria-label="备注内容" />
+        <input
+          ref="input"
+          v-model="titleDraft"
+          maxlength="100"
+          :aria-label="__t('apps.pictoria.ui', '备注标题')"
+        />
+        <textarea
+          v-model="textDraft"
+          maxlength="4000"
+          rows="6"
+          :aria-label="__t('apps.pictoria.ui', '备注内容')"
+        />
         <footer>
           <button type="button" class="text-button danger-button" @click="emit('remove')">
-            删除
+            {{ __t('apps.pictoria.ui', '删除') }}
           </button>
           <span />
-          <button type="button" class="text-button" @click="editing = false">取消</button>
-          <button type="submit" class="create-button">保存</button>
+          <button type="button" class="text-button" @click="editing = false">
+            {{ __t('apps.pictoria.ui', '取消') }}
+          </button>
+          <button type="submit" class="create-button">{{ __t('apps.pictoria.ui', '保存') }}</button>
         </footer>
       </form>
     </Transition>

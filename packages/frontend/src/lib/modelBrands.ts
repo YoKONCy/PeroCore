@@ -1,3 +1,4 @@
+import { t as __t } from '../i18n/index'
 interface BrandDefinition {
   label: string
   asset: string
@@ -14,7 +15,12 @@ export const MODEL_BRANDS = {
   deepseek: { label: 'DeepSeek', asset: 'deepseek-color.svg' },
   glm: { label: 'GLM', asset: 'zai.svg', mono: true },
   zai: { label: 'Z.ai', asset: 'zai.svg', mono: true },
-  zhipu: { label: '智谱', asset: 'zhipu-color.svg' },
+  zhipu: {
+    get label() {
+      return __t('ui.modelBrands', '智谱')
+    },
+    asset: 'zhipu-color.svg',
+  },
   kimi: { label: 'Kimi', asset: 'kimi.svg', mono: true },
   moonshot: { label: 'Moonshot', asset: 'moonshot.svg', mono: true },
   minimax: { label: 'MiniMax', asset: 'minimax-color.svg' },
@@ -22,28 +28,90 @@ export const MODEL_BRANDS = {
   xai: { label: 'xAI', asset: 'xai.svg', mono: true },
   agnes: { label: 'Agnes', asset: 'agnesai.svg', mono: true },
   qwen: { label: 'Qwen', asset: 'qwen-color.svg' },
-  doubao: { label: '豆包', asset: 'doubao-color.svg' },
-  hunyuan: { label: '腾讯混元', asset: 'hunyuan-color.svg' },
+  doubao: {
+    get label() {
+      return __t('ui.modelBrands', '豆包')
+    },
+    asset: 'doubao-color.svg',
+  },
+  hunyuan: {
+    get label() {
+      return __t('ui.modelBrands', '腾讯混元')
+    },
+    asset: 'hunyuan-color.svg',
+  },
   mistral: { label: 'Mistral', asset: 'mistral-color.svg' },
   groq: { label: 'Groq', asset: 'groq.svg', mono: true },
-  siliconflow: { label: '硅基流动', asset: 'siliconcloud-color.svg' },
-  bailian: { label: '阿里百炼', asset: 'bailian-color.svg' },
-  volcengine: { label: '火山引擎', asset: 'volcengine-color.svg' },
+  siliconflow: {
+    get label() {
+      return __t('ui.modelBrands', '硅基流动')
+    },
+    asset: 'siliconcloud-color.svg',
+  },
+  bailian: {
+    get label() {
+      return __t('ui.modelBrands', '阿里百炼')
+    },
+    asset: 'bailian-color.svg',
+  },
+  volcengine: {
+    get label() {
+      return __t('ui.modelBrands', '火山引擎')
+    },
+    asset: 'volcengine-color.svg',
+  },
   ollama: { label: 'Ollama', asset: 'ollama.svg', mono: true },
-  yi: { label: '零一万物', asset: 'yi.svg', mono: true },
-  stepfun: { label: '阶跃星辰', asset: 'stepfun-color.svg' },
+  yi: {
+    get label() {
+      return __t('ui.modelBrands', '零一万物')
+    },
+    asset: 'yi.svg',
+    mono: true,
+  },
+  stepfun: {
+    get label() {
+      return __t('ui.modelBrands', '阶跃星辰')
+    },
+    asset: 'stepfun-color.svg',
+  },
   llama: { label: 'Meta / Llama', asset: 'meta-color.svg' },
   gemma: { label: 'Gemma', asset: 'gemma-color.svg' },
   cohere: { label: 'Cohere', asset: 'cohere-color.svg' },
   openrouter: { label: 'OpenRouter', asset: 'openrouter.svg', mono: true },
-  baai: { label: '智源 / BGE', asset: 'baai.svg', mono: true },
+  baai: {
+    get label() {
+      return __t('ui.modelBrands', '智源 / BGE')
+    },
+    asset: 'baai.svg',
+    mono: true,
+  },
   jina: { label: 'Jina', asset: 'jina.svg', mono: true },
   nvidia: { label: 'NVIDIA', asset: 'nvidia-color.svg' },
   longcat: { label: 'LongCat', asset: 'longcat.svg', mono: true },
-  baichuan: { label: '百川', asset: 'baichuan-color.svg' },
-  internlm: { label: '书生 / InternLM', asset: 'internlm-color.svg' },
-  wenxin: { label: '文心 / ERNIE', asset: 'wenxin-color.svg' },
-  spark: { label: '讯飞星火', asset: 'spark-color.svg' },
+  baichuan: {
+    get label() {
+      return __t('ui.modelBrands', '百川')
+    },
+    asset: 'baichuan-color.svg',
+  },
+  internlm: {
+    get label() {
+      return __t('ui.modelBrands', '书生 / InternLM')
+    },
+    asset: 'internlm-color.svg',
+  },
+  wenxin: {
+    get label() {
+      return __t('ui.modelBrands', '文心 / ERNIE')
+    },
+    asset: 'wenxin-color.svg',
+  },
+  spark: {
+    get label() {
+      return __t('ui.modelBrands', '讯飞星火')
+    },
+    asset: 'spark-color.svg',
+  },
 } as const satisfies Record<string, BrandDefinition>
 
 export type ModelBrandId = keyof typeof MODEL_BRANDS
@@ -86,13 +154,24 @@ const modelRules: Array<[ModelBrandId, RegExp]> = [
   ['spark', /^spark(?:[-_.]|\d|$)/],
 ]
 
-/** 只按模型 ID 识别，不从用户自定义昵称或兼容协议猜测模型品牌。 */
+/** 识别模型 ID 中的系列名，兼容路由前缀、渠道标签和全角标点。 */
 export function resolveModelBrand(modelId?: string): ModelBrandId | undefined {
-  const id = (modelId?.trim().toLowerCase().split('/').at(-1) ?? '').replace(
-    /^(?:(?:us|eu|apac|global)\.)?anthropic\./,
-    '',
-  )
-  return modelRules.find(([, pattern]) => pattern.test(id))?.[0]
+  const normalized = modelId?.normalize('NFKC').trim().toLowerCase() ?? ''
+  const id = (normalized.split('/').filter(Boolean).at(-1) ?? '')
+    // 标签只在后面还有模型名时移除，避免把整个括号内的模型名丢掉。
+    .replace(/^(?:(?:\[[^\]]*\]|\([^)]*\)|【[^】]*】)\s*)+(?=\S)/u, '')
+    .replace(/[\s:‐‑‒–—−]+/g, '-')
+
+  const direct = modelRules.find(([, pattern]) => pattern.test(id))?.[0]
+  if (direct) return direct
+
+  // 只从词边界尝试，不把 mygemini、notgpt 等普通字符串认成模型系列。
+  for (const match of id.matchAll(/(?:^|[^a-z0-9])([a-z])/g)) {
+    const candidate = id.slice(match.index + match[0].length - 1)
+    const brand = modelRules.find(([, pattern]) => pattern.test(candidate))?.[0]
+    if (brand) return brand
+  }
+  return undefined
 }
 
 const providerBrands: Record<string, ModelBrandId> = {

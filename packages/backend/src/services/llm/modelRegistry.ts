@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * 模型注册表
  *
@@ -8,11 +9,14 @@
  */
 
 import { eq, and } from 'drizzle-orm'
-import { aiModelConfigs } from '../../database/schema'
+import { aiModelConfigs, configs } from '../../database/schema'
+import { modelFallbackIds, modelFallbackKey } from './modelFallbacks'
 import type { DrizzleDb } from '../../database'
 import type { ModelConfig } from './llmService'
 import { createLogger } from '../../lib/logger'
 import { AppError } from '../../lib/appError'
+import { ProviderConnectionRepository } from '../../repositories/providerConnection.repo'
+import { resolveModelConnection } from './modelConnection'
 
 const logger = createLogger('ModelRegistry')
 
@@ -87,12 +91,16 @@ export class ModelRegistry {
       })
     }
 
-    const config = this.rowToConfig(row)
+    const config = await this.rowToConfig(row)
 
     // 写入缓存
     this.cache.set(cacheKey, { config, expiresAt: Date.now() + this.cacheTtl })
 
-    logger.debug(`获取模型配置`, { purpose, model: config.modelId, provider: config.provider })
+    logger.debug(__t('logs.llm', '获取模型配置'), {
+      purpose,
+      model: config.modelId,
+      provider: config.provider,
+    })
     return config
   }
 
@@ -126,7 +134,7 @@ export class ModelRegistry {
    */
   invalidateCache(): void {
     this.cache.clear()
-    logger.debug('模型缓存已清空')
+    logger.debug(__t('logs.llm', '模型缓存已清空'))
   }
 
   /**
@@ -139,12 +147,34 @@ export class ModelRegistry {
   // ── 内部方法 ──
 
   /** 数据库行 → ModelConfig */
-  private rowToConfig(row: ModelRow): ModelConfig {
+  private async rowToConfig(row: ModelRow, withFallbacks = true): Promise<ModelConfig> {
+    const connection = await resolveModelConnection(
+      row,
+      (id) => new ProviderConnectionRepository(this.db).findById(id),
+      async (key) =>
+        (await this.db.select().from(configs).where(eq(configs.key, key)).get())?.value,
+    )
+    const fallbackModels: ModelConfig[] = []
+    if (withFallbacks) {
+      const raw = await this.db
+        .select()
+        .from(configs)
+        .where(eq(configs.key, modelFallbackKey(row.id)))
+        .get()
+      for (const id of modelFallbackIds(raw?.value, row.id)) {
+        const candidate = await this.db
+          .select()
+          .from(aiModelConfigs)
+          .where(eq(aiModelConfigs.id, id))
+          .get()
+        if (candidate) fallbackModels.push(await this.rowToConfig(candidate, false))
+      }
+    }
     return {
-      provider: row.provider ?? 'openai',
+      configId: row.id,
+      fallbackModels,
+      ...connection,
       modelId: row.modelId,
-      apiKey: row.apiKey ?? '',
-      apiBase: row.apiBase ?? undefined,
       temperature: row.temperature ?? undefined,
       topP: row.topP ?? undefined,
       maxTokens: row.maxTokens ?? undefined,

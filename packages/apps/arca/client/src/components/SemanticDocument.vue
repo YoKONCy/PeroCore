@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 /**
  * SemanticDocument.vue — 界面组件
  *
@@ -100,13 +102,25 @@ function handleKeydown(node: DocumentNode, event: KeyboardEvent) {
 
 function typeLabel(node: DocumentNode): string {
   const labels: Record<string, string> = {
-    heading: '标题',
-    paragraph: '正文',
-    quote: '引用',
+    get heading() {
+      return __t('apps.arca.ui', '标题')
+    },
+    get paragraph() {
+      return __t('apps.arca.ui', '正文')
+    },
+    get quote() {
+      return __t('apps.arca.ui', '引用')
+    },
     'code-block': '代码',
-    'list-item': '列表',
-    citation: '引用源',
-    'table-cell': '单元格',
+    get 'list-item'() {
+      return __t('apps.arca.ui', '列表')
+    },
+    get citation() {
+      return __t('apps.arca.ui', '引用源')
+    },
+    get 'table-cell'() {
+      return __t('apps.arca.ui', '单元格')
+    },
   }
   return labels[node.type] ?? node.type
 }
@@ -128,7 +142,11 @@ function menuAction(
 </script>
 
 <template>
-  <article class="semantic-document" :data-mode="mode ?? 'create'" aria-label="语义文稿">
+  <article
+    class="semantic-document"
+    :data-mode="mode ?? 'create'"
+    :aria-label="__t('apps.arca.ui', '语义文稿')"
+  >
     <section
       v-for="node in ordered"
       :key="node.nodeId"
@@ -145,7 +163,7 @@ function menuAction(
         <button
           v-if="mode === 'create' && writable"
           type="button"
-          title="块操作"
+          :title="__t('apps.arca.ui', '块操作')"
           @mousedown.prevent
           @click.stop="menuNodeId = menuNodeId === node.nodeId ? undefined : node.nodeId"
         >
@@ -154,7 +172,7 @@ function menuAction(
         <button
           v-if="mode === 'create' && writable"
           type="button"
-          title="在后方插入正文"
+          :title="__t('apps.arca.ui', '在后方插入正文')"
           @mousedown.prevent
           @click.stop="emit('insert', node, 'paragraph')"
         >
@@ -188,7 +206,11 @@ function menuAction(
         :class="`document-${node.type}`"
         :contenteditable="editable(node) ? 'plaintext-only' : 'false'"
         :tabindex="editable(node) ? 0 : undefined"
-        :data-placeholder="node.type === 'heading' ? '写下标题' : '输入内容 · Ctrl+Enter提交'"
+        :data-placeholder="
+          node.type === 'heading'
+            ? __t('apps.arca.ui', '写下标题')
+            : __t('apps.arca.ui', '输入内容 · Ctrl+Enter提交')
+        "
         :spellcheck="node.type !== 'code-block'"
         @input="update(node, $event)"
         @blur="commit(node)"
@@ -199,7 +221,9 @@ function menuAction(
         {{ renderedValue(node) }}
       </component>
       <div v-else-if="node.type === 'table'" class="document-table" role="table" />
-      <div v-else-if="node.type === 'asset'" class="document-asset">资源节点</div>
+      <div v-else-if="node.type === 'asset'" class="document-asset">
+        {{ __t('apps.arca.ui', '资源节点') }}
+      </div>
 
       <div
         v-if="menuNodeId === node.nodeId && mode === 'create' && writable"
@@ -207,15 +231,31 @@ function menuAction(
         contenteditable="false"
         @click.stop
       >
-        <button @click="menuAction(node, { kind: 'insert', type: 'paragraph' })">插入正文</button>
-        <button @click="menuAction(node, { kind: 'insert', type: 'heading' })">插入标题</button>
-        <button @click="menuAction(node, { kind: 'insert', type: 'quote' })">插入引用</button>
-        <button @click="menuAction(node, { kind: 'insert', type: 'code-block' })">插入代码</button>
+        <button @click="menuAction(node, { kind: 'insert', type: 'paragraph' })">
+          {{ __t('apps.arca.ui', '插入正文') }}
+        </button>
+        <button @click="menuAction(node, { kind: 'insert', type: 'heading' })">
+          {{ __t('apps.arca.ui', '插入标题') }}
+        </button>
+        <button @click="menuAction(node, { kind: 'insert', type: 'quote' })">
+          {{ __t('apps.arca.ui', '插入引用') }}
+        </button>
+        <button @click="menuAction(node, { kind: 'insert', type: 'code-block' })">
+          {{ __t('apps.arca.ui', '插入代码') }}
+        </button>
         <hr />
-        <button @click="menuAction(node, { kind: 'move', edge: 'start' })">移到章节开头</button>
-        <button @click="menuAction(node, { kind: 'move', edge: 'end' })">移到章节末尾</button>
-        <button @click="menuAction(node, { kind: 'comment' })">添加评论</button>
-        <button class="danger" @click="menuAction(node, { kind: 'delete' })">删除块</button>
+        <button @click="menuAction(node, { kind: 'move', edge: 'start' })">
+          {{ __t('apps.arca.ui', '移到章节开头') }}
+        </button>
+        <button @click="menuAction(node, { kind: 'move', edge: 'end' })">
+          {{ __t('apps.arca.ui', '移到章节末尾') }}
+        </button>
+        <button @click="menuAction(node, { kind: 'comment' })">
+          {{ __t('apps.arca.ui', '添加评论') }}
+        </button>
+        <button class="danger" @click="menuAction(node, { kind: 'delete' })">
+          {{ __t('apps.arca.ui', '删除块') }}
+        </button>
       </div>
 
       <button
@@ -223,7 +263,7 @@ function menuAction(
         class="block-collaborate"
         type="button"
         contenteditable="false"
-        title="让协作者处理这个语义块"
+        :title="__t('apps.arca.ui', '让协作者处理这个语义块')"
         @mousedown.prevent
         @click.stop="emit('collaborate', node.nodeId)"
       >

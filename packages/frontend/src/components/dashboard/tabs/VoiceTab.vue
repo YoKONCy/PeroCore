@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../../i18n/index'
+
 /**
  * VoiceTab — 语音功能 Tab (F1-4)
  *
@@ -30,32 +32,113 @@ const ttsApiBase = ref('')
 const ttsApiKey = ref('')
 
 const ttsProviderOptions = [
-  { label: 'Edge TTS (免费，推荐)', value: 'edge_tts' },
+  {
+    get label() {
+      return __t('ui.settings', 'Edge TTS (免费，推荐)')
+    },
+    value: 'edge_tts',
+  },
   { label: 'OpenAI TTS', value: 'openai' },
   { label: 'Azure Speech', value: 'azure' },
-  { label: '本地 (Piper) — 待实现', value: 'local', disabled: true },
+  {
+    get label() {
+      return __t('ui.settings', '本地 (Piper) — 待实现')
+    },
+    value: 'local',
+    disabled: true,
+  },
 ]
 
 // Edge TTS 常用中文音色
 const edgeVoiceOptions = [
-  { label: '晓伊 (活泼女声，默认)', value: 'zh-CN-XiaoyiNeural' },
-  { label: '晓晓 (自然女声)', value: 'zh-CN-XiaoxiaoNeural' },
-  { label: '晓萱 (温柔女声)', value: 'zh-CN-XiaoxuanNeural' },
-  { label: '晓墨 (甜美女声)', value: 'zh-CN-XiaomoNeural' },
-  { label: '晓辰 (活力女声)', value: 'zh-CN-XiaochenNeural' },
-  { label: '晓涵 (沉稳女声)', value: 'zh-CN-XiaohanNeural' },
-  { label: '云溪 (男声)', value: 'zh-CN-YunxiNeural' },
-  { label: '云健 (男声)', value: 'zh-CN-YunjianNeural' },
+  {
+    get label() {
+      return __t('ui.settings', '晓伊 (活泼女声，默认)')
+    },
+    value: 'zh-CN-XiaoyiNeural',
+  },
+  {
+    get label() {
+      return __t('ui.settings', '晓晓 (自然女声)')
+    },
+    value: 'zh-CN-XiaoxiaoNeural',
+  },
+  {
+    get label() {
+      return __t('ui.settings', '晓萱 (温柔女声)')
+    },
+    value: 'zh-CN-XiaoxuanNeural',
+  },
+  {
+    get label() {
+      return __t('ui.settings', '晓墨 (甜美女声)')
+    },
+    value: 'zh-CN-XiaomoNeural',
+  },
+  {
+    get label() {
+      return __t('ui.settings', '晓辰 (活力女声)')
+    },
+    value: 'zh-CN-XiaochenNeural',
+  },
+  {
+    get label() {
+      return __t('ui.settings', '晓涵 (沉稳女声)')
+    },
+    value: 'zh-CN-XiaohanNeural',
+  },
+  {
+    get label() {
+      return __t('ui.settings', '云溪 (男声)')
+    },
+    value: 'zh-CN-YunxiNeural',
+  },
+  {
+    get label() {
+      return __t('ui.settings', '云健 (男声)')
+    },
+    value: 'zh-CN-YunjianNeural',
+  },
 ]
 
 // OpenAI TTS 音色
 const openaiVoiceOptions = [
-  { label: 'Shimmer (自然女声)', value: 'shimmer' },
-  { label: 'Nova (活泼女声)', value: 'nova' },
-  { label: 'Alloy (中性)', value: 'alloy' },
-  { label: 'Echo (男声)', value: 'echo' },
-  { label: 'Fable (英式男声)', value: 'fable' },
-  { label: 'Onyx (深沉男声)', value: 'onyx' },
+  {
+    get label() {
+      return __t('ui.settings', 'Shimmer (自然女声)')
+    },
+    value: 'shimmer',
+  },
+  {
+    get label() {
+      return __t('ui.settings', 'Nova (活泼女声)')
+    },
+    value: 'nova',
+  },
+  {
+    get label() {
+      return __t('ui.settings', 'Alloy (中性)')
+    },
+    value: 'alloy',
+  },
+  {
+    get label() {
+      return __t('ui.settings', 'Echo (男声)')
+    },
+    value: 'echo',
+  },
+  {
+    get label() {
+      return __t('ui.settings', 'Fable (英式男声)')
+    },
+    value: 'fable',
+  },
+  {
+    get label() {
+      return __t('ui.settings', 'Onyx (深沉男声)')
+    },
+    value: 'onyx',
+  },
 ]
 
 // 根据当前 Provider 动态显示对应的音色列表
@@ -101,10 +184,25 @@ async function fetchRemoteAsrModels() {
 }
 
 const asrLanguageOptions = [
-  { label: '简体中文', value: 'zh-CN' },
+  {
+    get label() {
+      return __t('ui.settings', '简体中文')
+    },
+    value: 'zh-CN',
+  },
   { label: 'English', value: 'en-US' },
-  { label: '日本語', value: 'ja-JP' },
-  { label: '自动检测', value: 'auto' },
+  {
+    get label() {
+      return __t('ui.settings', '日本語')
+    },
+    value: 'ja-JP',
+  },
+  {
+    get label() {
+      return __t('ui.settings', '自动检测')
+    },
+    value: 'auto',
+  },
 ]
 
 // ── 加载 / 自动保存 ──
@@ -182,7 +280,9 @@ async function testTts() {
   try {
     // 调用后端 /api/voice/tts 合成
     const audioBuffer = await voiceApi.synthesize({
-      text: '主人你好呀！这是佩洛的语音测试喵~',
+      get text() {
+        return __t('ui.settings', '主人你好呀！这是佩洛的语音测试喵~')
+      },
       voice: ttsVoice.value,
       speed: ttsSpeed.value,
     })
@@ -228,7 +328,7 @@ onMounted(loadVoiceConfig)
         >
           <PixelIcon name="mic" size="md" />
         </span>
-        <span>语音功能</span>
+        <span>{{ __t('ui.settings', '语音功能') }}</span>
         <span class="opacity-0 group-hover/header:opacity-100 transition-opacity duration-500">
           <PixelIcon name="sparkle" size="xs" />
         </span>
@@ -253,9 +353,11 @@ onMounted(loadVoiceConfig)
             </div>
             <div>
               <h3 class="text-base font-black text-[var(--ui-text-primary)] font-pixel">
-                语音合成 TTS
+                {{ __t('ui.settings', '语音合成 TTS') }}
               </h3>
-              <p class="text-xs text-slate-400 mt-0.5">让助手用声音回复你</p>
+              <p class="text-xs text-slate-400 mt-0.5">
+                {{ __t('ui.settings', '让助手用声音回复你') }}
+              </p>
             </div>
           </div>
           <PSwitch v-model="ttsEnabled" />
@@ -275,7 +377,7 @@ onMounted(loadVoiceConfig)
               <label
                 class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel"
               >
-                声音
+                {{ __t('ui.settings', '声音') }}
               </label>
               <PSelect v-model="ttsVoice" :options="ttsVoiceOptions" />
             </div>
@@ -285,19 +387,23 @@ onMounted(loadVoiceConfig)
                 <label
                   class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel"
                 >
-                  语速 Rate
+                  {{ __t('ui.settings', '语速 Rate') }}
                 </label>
                 <PInput v-model="ttsRate" placeholder="+25%" />
-                <span class="text-[10px] text-slate-400">如 +25%, -10%, +0%</span>
+                <span class="text-[10px] text-slate-400">
+                  {{ __t('ui.settings', '如 +25%, -10%, +0%') }}
+                </span>
               </div>
               <div class="flex flex-col gap-1.5">
                 <label
                   class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel"
                 >
-                  音调 Pitch
+                  {{ __t('ui.settings', '音调 Pitch') }}
                 </label>
                 <PInput v-model="ttsEdgePitch" placeholder="+5Hz" />
-                <span class="text-[10px] text-slate-400">如 +5Hz, -2Hz, +0Hz</span>
+                <span class="text-[10px] text-slate-400">
+                  {{ __t('ui.settings', '如 +5Hz, -2Hz, +0Hz') }}
+                </span>
               </div>
             </template>
 
@@ -307,7 +413,7 @@ onMounted(loadVoiceConfig)
                 <label
                   class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel"
                 >
-                  语速 ({{ ttsSpeed.toFixed(1) }}x)
+                  {{ __t('ui.settings', '语速 (') }}{{ ttsSpeed.toFixed(1) }}x)
                 </label>
                 <PSlider v-model="ttsSpeed" :min="0.5" :max="2.0" :step="0.1" />
               </div>
@@ -317,7 +423,10 @@ onMounted(loadVoiceConfig)
                 >
                   API Base
                 </label>
-                <PInput v-model="ttsApiBase" placeholder="留空则使用全局配置" />
+                <PInput
+                  v-model="ttsApiBase"
+                  :placeholder="__t('ui.settings', '留空则使用全局配置')"
+                />
               </div>
               <div class="flex flex-col gap-1.5">
                 <label
@@ -325,7 +434,11 @@ onMounted(loadVoiceConfig)
                 >
                   API Key
                 </label>
-                <PInput v-model="ttsApiKey" type="password" placeholder="留空则使用全局配置" />
+                <PInput
+                  v-model="ttsApiKey"
+                  type="password"
+                  :placeholder="__t('ui.settings', '留空则使用全局配置')"
+                />
               </div>
             </template>
           </div>
@@ -334,7 +447,7 @@ onMounted(loadVoiceConfig)
           <div class="mt-4 pt-4 border-t border-slate-100 flex items-center gap-3">
             <PButton variant="ghost" :loading="isTestPlaying" @click="testTts">
               <PixelIcon :name="isTestPlaying ? 'refresh' : 'mic'" size="xs" />
-              {{ isTestPlaying ? '播放中...' : '试听效果' }}
+              {{ isTestPlaying ? __t('ui.settings', '播放中...') : __t('ui.settings', '试听效果') }}
             </PButton>
             <span v-if="testError" class="text-xs text-rose-500">{{ testError }}</span>
           </div>
@@ -354,8 +467,12 @@ onMounted(loadVoiceConfig)
               <PixelIcon name="mic" size="sm" />
             </div>
             <div>
-              <h3 class="text-base font-black text-slate-800 font-pixel">语音识别 ASR</h3>
-              <p class="text-xs text-slate-400 mt-0.5">用语音与助手对话</p>
+              <h3 class="text-base font-black text-slate-800 font-pixel">
+                {{ __t('ui.settings', '语音识别 ASR') }}
+              </h3>
+              <p class="text-xs text-slate-400 mt-0.5">
+                {{ __t('ui.settings', '用语音与助手对话') }}
+              </p>
             </div>
           </div>
           <PSwitch v-model="asrEnabled" />
@@ -372,7 +489,7 @@ onMounted(loadVoiceConfig)
               </label>
               <PInput v-model="asrApiBase" placeholder="https://api.siliconflow.cn/v1" />
               <p class="text-[10px] text-slate-400 italic">
-                * 任何兼容 /audio/transcriptions 的接口均可
+                {{ __t('ui.settings', '* 任何兼容 /audio/transcriptions 的接口均可') }}
               </p>
             </div>
             <!-- API Key -->
@@ -389,7 +506,7 @@ onMounted(loadVoiceConfig)
               <label
                 class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel flex items-center justify-between"
               >
-                模型
+                {{ __t('ui.settings', '模型') }}
                 <PButton
                   variant="ghost"
                   size="sm"
@@ -397,18 +514,21 @@ onMounted(loadVoiceConfig)
                   @click="fetchRemoteAsrModels"
                 >
                   <PixelIcon name="refresh" size="xs" />
-                  获取模型列表
+                  {{ __t('ui.settings', '获取模型列表') }}
                 </PButton>
               </label>
               <BrandSelect
                 v-if="remoteAsrModels.length > 0"
                 v-model="asrModel"
                 :options="asrModelChoices"
-                placeholder="从列表中选择..."
+                :placeholder="__t('ui.settings', '从列表中选择...')"
               />
               <div v-else class="asr-model-input">
                 <BrandIcon :brand="resolveModelBrand(asrModel)" size="sm" />
-                <PInput v-model="asrModel" placeholder="例如: FunAudioLLM/SenseVoiceSmall" />
+                <PInput
+                  v-model="asrModel"
+                  :placeholder="__t('ui.settings', '例如: FunAudioLLM/SenseVoiceSmall')"
+                />
               </div>
             </div>
             <!-- 识别语言 -->
@@ -416,7 +536,7 @@ onMounted(loadVoiceConfig)
               <label
                 class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel"
               >
-                识别语言
+                {{ __t('ui.settings', '识别语言') }}
               </label>
               <PSelect v-model="asrLanguage" :options="asrLanguageOptions" />
             </div>
@@ -425,17 +545,19 @@ onMounted(loadVoiceConfig)
               <label
                 class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel"
               >
-                唤醒词
+                {{ __t('ui.settings', '唤醒词') }}
               </label>
-              <PInput v-model="wakeWord" placeholder="例如: 佩洛" />
-              <p class="text-[10px] text-slate-400 italic">说出唤醒词后开始语音输入</p>
+              <PInput v-model="wakeWord" :placeholder="__t('ui.settings', '例如: 佩洛')" />
+              <p class="text-[10px] text-slate-400 italic">
+                {{ __t('ui.settings', '说出唤醒词后开始语音输入') }}
+              </p>
             </div>
             <!-- 灵敏度 -->
             <div class="flex flex-col gap-1.5 col-span-2">
               <label
                 class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel"
               >
-                灵敏度 ({{ (asrSensitivity * 100).toFixed(0) }}%)
+                {{ __t('ui.settings', '灵敏度 (') }}{{ (asrSensitivity * 100).toFixed(0) }}%)
               </label>
               <PSlider v-model="asrSensitivity" :min="0.1" :max="1.0" :step="0.05" />
             </div>
@@ -446,7 +568,7 @@ onMounted(loadVoiceConfig)
           v-if="!asrEnabled"
           class="p-4 bg-[var(--dash-panel-soft)] border border-[var(--dash-panel-border)] text-center text-[13px] text-[var(--ui-text-tertiary)]"
         >
-          <p>语音识别已关闭。开启后即可用声音与助手对话。</p>
+          <p>{{ __t('ui.settings', '语音识别已关闭。开启后即可用声音与助手对话。') }}</p>
         </div>
       </PCard>
     </div>

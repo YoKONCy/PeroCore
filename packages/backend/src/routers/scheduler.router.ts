@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * Scheduler Router — 定时任务管理 API
  *
@@ -20,12 +21,40 @@ import type { AppContext } from '../container'
 export function createSchedulerRouter(ctx: AppContext) {
   const router = new Hono()
 
+  router.get('/proactive', (c) =>
+    c.json({ code: 'OK', data: ctx.companionSchedulerService.getState() }),
+  )
+  router.put(
+    '/proactive',
+    zValidator(
+      'json',
+      z
+        .object({
+          mode: z.enum(['off', 'companion', 'autonomous']).optional(),
+          companionIntervalMinutes: z.number().min(1).max(1440).optional(),
+          autonomousIntervalMinutes: z.number().min(1).max(1440).optional(),
+          goal: z.string().max(8000).optional(),
+          maxDailyRuns: z.number().int().min(1).max(1440).optional(),
+          timeZone: z.string().min(1).max(100).optional(),
+        })
+        .strict(),
+    ),
+    async (c) =>
+      c.json({
+        code: 'OK',
+        data: await ctx.companionSchedulerService.configure(c.req.valid('json')),
+      }),
+  )
+  router.post('/proactive/check', async (c) =>
+    c.json({ code: 'OK', data: await ctx.companionSchedulerService.checkNow() }),
+  )
+
   // GET /api/scheduler/status — 获取调度器全局状态
   router.get('/status', (c) => {
     const tasks = ctx.scheduler.getPeriodicScheduleStatus()
     return c.json({
       code: 'OK',
-      message: '获取成功',
+      message: __t('server.routers', '获取成功'),
       data: {
         schedulerRunning: ctx.scheduler.isPeriodicStarted,
         serverNow: Date.now(),
@@ -40,7 +69,7 @@ export function createSchedulerRouter(ctx: AppContext) {
     const tasks = ctx.scheduler.getPeriodicScheduleStatus()
     return c.json({
       code: 'OK',
-      message: '获取成功',
+      message: __t('server.routers', '获取成功'),
       data: {
         schedulerRunning: ctx.scheduler.isPeriodicStarted,
         serverNow: Date.now(),
@@ -59,7 +88,7 @@ export function createSchedulerRouter(ctx: AppContext) {
     const reminders = await ctx.schedulerService.listPending(agentId)
     return c.json({
       code: 'OK',
-      message: '获取成功',
+      message: __t('server.routers', '获取成功'),
       data: {
         items: reminders,
         total: reminders.length,
@@ -89,7 +118,7 @@ export function createSchedulerRouter(ctx: AppContext) {
     const activeTasks = tasks.items.filter((task) => task.category !== 'resident')
     return c.json({
       code: 'OK',
-      message: '获取成功',
+      message: __t('server.routers', '获取成功'),
       data: {
         agentId,
         scheduled,
@@ -107,19 +136,28 @@ export function createSchedulerRouter(ctx: AppContext) {
       const id = Number(c.req.param('id'))
       const action = c.req.param('action')
       const { agentId } = c.req.valid('json')
-      if (!Number.isSafeInteger(id) || !['cancel', 'retry'].includes(action))
+      if (!Number.isSafeInteger(id) || !['cancel', 'retry', 'pause', 'resume'].includes(action))
         throw new AppError('INVALID_PARAMETER', { message: '计划操作无效' })
       const ok =
         action === 'cancel'
           ? await ctx.schedulerService.cancel(id, agentId)
-          : await ctx.schedulerService.retry(id, agentId)
+          : action === 'retry'
+            ? await ctx.schedulerService.retry(id, agentId)
+            : await ctx.schedulerService.pause(id, agentId, action === 'pause')
       if (!ok)
         throw new AppError('INVALID_PARAMETER', {
           message: '计划不存在、角色不匹配或当前状态无法操作',
         })
       return c.json({
         code: 'OK',
-        message: action === 'cancel' ? '已取消' : '已安排重试',
+        message:
+          action === 'cancel'
+            ? __t('server.routers', '已取消')
+            : action === 'retry'
+              ? __t('server.routers', '已安排重试')
+              : action === 'pause'
+                ? __t('server.routers', '周期计划已暂停')
+                : __t('server.routers', '周期计划已恢复'),
         data: { id },
       })
     },
@@ -139,7 +177,10 @@ export function createSchedulerRouter(ctx: AppContext) {
           : await ctx.schedulerService.dismissSuggestion(c.req.param('id'), agentId)
       return c.json({
         code: 'OK',
-        message: action === 'accept' ? '建议已采纳' : '建议已忽略',
+        message:
+          action === 'accept'
+            ? __t('server.routers', '建议已采纳')
+            : __t('server.routers', '建议已忽略'),
         data: item,
       })
     },
@@ -153,6 +194,8 @@ export function createSchedulerRouter(ctx: AppContext) {
         agentId: z.string().min(1).max(64),
         time: z.string().min(1),
         instruction: z.string().min(1).max(4000),
+        threadId: z.string().min(1).optional(),
+        repeatIntervalMinutes: z.number().int().min(1).max(525600).optional(),
       }),
     ),
     async (c) => {
@@ -160,13 +203,28 @@ export function createSchedulerRouter(ctx: AppContext) {
       if (!ctx.agentManager.getAgent(body.agentId)) {
         throw new AppError('NOT_FOUND', { message: `角色不存在: ${body.agentId}` })
       }
+      const target = body.threadId
+        ? await ctx.threadService.getThread(body.threadId)
+        : await ctx.threadService.getOrCreateLatest(body.agentId, 'desktop', 'conversation')
+      if (
+        !target ||
+        target.agentId !== body.agentId ||
+        target.channel !== 'desktop' ||
+        target.purpose !== 'conversation'
+      )
+        throw new AppError('INVALID_PARAMETER', { message: '定时任务须绑定该角色有效的主应用会话' })
       const item = await ctx.schedulerService.create({
         type: 'agent_task',
         agentId: body.agentId,
         time: body.time,
         content: body.instruction,
+        threadId: target.id,
+        repeatIntervalMinutes: body.repeatIntervalMinutes,
       })
-      return c.json({ code: 'CREATED', message: '提醒已创建', data: item }, 201)
+      return c.json(
+        { code: 'CREATED', message: __t('server.routers', '提醒已创建'), data: item },
+        201,
+      )
     },
   )
 
@@ -183,7 +241,7 @@ export function createSchedulerRouter(ctx: AppContext) {
     return c.json(
       {
         code: 'ACCEPTED',
-        message: `任务 "${taskName}" 已触发`,
+        message: __t('server.routers', '任务 "{0}" 已触发', [taskName]),
         data: { taskName },
       },
       202,

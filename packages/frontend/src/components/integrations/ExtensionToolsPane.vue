@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import { ref } from 'vue'
 import type { ExtensionToolId } from '@infos/shared'
 import { PCard, PButton, PDialog, PInput, PInputNumber, PSwitch } from '../pixel'
@@ -16,14 +18,18 @@ const extensions: Array<{
   {
     id: 'deepwiki',
     name: 'DeepWiki',
-    description: '读懂代码仓库，查找文档与实现说明。',
+    get description() {
+      return __t('ui.integrations', '读懂代码仓库，查找文档与实现说明。')
+    },
     tool: '查询代码仓库',
     url: 'https://deepwiki.com',
   },
   {
     id: 'sciverse',
     name: 'Sciverse.space',
-    description: '查找学术文献与可追溯的原文证据。',
+    get description() {
+      return __t('ui.integrations', '查找学术文献与可追溯的原文证据。')
+    },
     tool: '检索学术资料',
     url: 'https://sciverse.space',
   },
@@ -59,8 +65,8 @@ async function save(): Promise<void> {
 <template>
   <section>
     <div class="integration-section-heading">
-      <h2>官方扩展</h2>
-      <span>infOS 自带</span>
+      <h2>{{ __t('ui.integrations', '官方扩展') }}</h2>
+      <span>{{ __t('ui.integrations', 'infOS 自带') }}</span>
     </div>
     <div class="integration-grid">
       <PCard
@@ -74,7 +80,9 @@ async function save(): Promise<void> {
           <IntegrationBrand :brand="extension.id" />
           <div>
             <h3>{{ extension.name }}</h3>
-            <span class="integration-publisher">infOS 官方适配</span>
+            <span class="integration-publisher">
+              {{ __t('ui.integrations', 'infOS 官方适配') }}
+            </span>
           </div>
         </div>
         <p class="integration-description">{{ extension.description }}</p>
@@ -85,10 +93,10 @@ async function save(): Promise<void> {
           >
             {{
               state?.extensions[extension.id].ready
-                ? '已启用'
+                ? __t('ui.integrations', '已启用')
                 : state?.extensions[extension.id].configured
-                  ? '已停用'
-                  : '待配置'
+                  ? __t('ui.integrations', '已停用')
+                  : __t('ui.integrations', '待配置')
             }}
           </span>
           <PButton
@@ -98,7 +106,7 @@ async function save(): Promise<void> {
             :disabled="busy || !state"
             @click="open(extension.id)"
           >
-            配置
+            {{ __t('ui.integrations', '配置') }}
           </PButton>
         </div>
       </PCard>
@@ -113,11 +121,11 @@ async function save(): Promise<void> {
           <IntegrationBrand :brand="selected" />
           <div>
             <strong>{{ extensions.find((item) => item.id === selected)?.tool }}</strong>
-            <p>配置完整并启用后，加入 Agent 工具列表。</p>
+            <p>{{ __t('ui.integrations', '配置完整并启用后，加入 Agent 工具列表。') }}</p>
           </div>
         </div>
         <label>
-          服务地址
+          {{ __t('ui.integrations', '服务地址') }}
           <PInput v-model="form.endpoint" :disabled="busy" />
         </label>
         <template v-if="selected === 'sciverse'">
@@ -128,17 +136,19 @@ async function save(): Promise<void> {
               type="password"
               autocomplete="new-password"
               :placeholder="
-                state?.extensions.sciverse.hasApiKey ? '已设置，留空保留' : '输入 API Key'
+                state?.extensions.sciverse.hasApiKey
+                  ? __t('ui.integrations', '已设置，留空保留')
+                  : __t('ui.integrations', '输入 API Key')
               "
               :disabled="busy"
             />
           </label>
           <label v-if="state?.extensions.sciverse.hasApiKey" class="integration-switch">
-            <span>清除已保存的 Key</span>
+            <span>{{ __t('ui.integrations', '清除已保存的 Key') }}</span>
             <PSwitch v-model="form.clearApiKey" :disabled="busy" />
           </label>
           <label>
-            默认结果数
+            {{ __t('ui.integrations', '默认结果数') }}
             <PInputNumber
               :model-value="form.maxResults"
               :min="1"
@@ -153,11 +163,11 @@ async function save(): Promise<void> {
           </label>
         </template>
         <label class="integration-switch">
-          <span>启用扩展</span>
+          <span>{{ __t('ui.integrations', '启用扩展') }}</span>
           <PSwitch v-model="form.enabled" :disabled="busy" />
         </label>
         <label class="integration-switch">
-          <span>聊天模式可用</span>
+          <span>{{ __t('ui.integrations', '聊天模式可用') }}</span>
           <PSwitch v-model="form.chatEnabled" :disabled="busy" />
         </label>
         <a
@@ -166,14 +176,16 @@ async function save(): Promise<void> {
           rel="noopener noreferrer"
           class="integration-doc-link"
         >
-          前往官网
+          {{ __t('ui.integrations', '前往官网') }}
         </a>
       </div>
       <template #footer>
         <PButton type="button" variant="ghost" :disabled="busy" @click="dialog = false">
-          取消
+          {{ __t('ui.integrations', '取消') }}
         </PButton>
-        <PButton type="button" :loading="busy" @click="save">保存</PButton>
+        <PButton type="button" :loading="busy" @click="save">
+          {{ __t('ui.integrations', '保存') }}
+        </PButton>
       </template>
     </PDialog>
   </section>

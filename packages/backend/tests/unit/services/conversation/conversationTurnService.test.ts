@@ -3,6 +3,43 @@ import { ConversationTurnService } from '@infos/backend/services/conversation/co
 import type { CompiledRunParams } from '@infos/backend/services/agent/agentService'
 
 describe('ConversationTurnService 初始提示词快照', () => {
+  it('预算编译与执行共用会话模型快照，密钥不进入回合返回值', async () => {
+    const model = {
+      provider: 'openai',
+      modelId: 'thread-model',
+      apiKey: '不可返回的密钥',
+      reasoningEffort: 'high' as const,
+      contextWindowTokens: 64000,
+      maxTokens: 2048,
+    }
+    const getThreadModelConfig = vi.fn().mockResolvedValue(model)
+    const run = vi.fn().mockResolvedValue('完成')
+    const service = new ConversationTurnService({
+      threadService: {
+        getThread: vi.fn().mockResolvedValue({
+          id: 'thread',
+          agentId: 'pero',
+          channel: 'desktop',
+          disabledTools: [],
+          interactionMode: 'chat',
+        }),
+      },
+      getThreadModelConfig,
+      agentService: { chatWithCompiledMessages: run },
+    } as never)
+    const result = await service.executeTurn({
+      threadId: 'thread',
+      content: '任务',
+      outputPersistence: 'ephemeral',
+      resumeMessages: [{ role: 'user', content: '任务' }],
+    })
+    expect(getThreadModelConfig).toHaveBeenCalledTimes(1)
+    expect(run.mock.calls[0]?.[0]).toMatchObject({ modelConfig: model })
+    expect(result.maxInputTokens).toBeGreaterThan(0)
+    expect(result.maxInputTokens).toBeLessThan(64000)
+    expect(JSON.stringify(result)).not.toContain('不可返回的密钥')
+  })
+
   it.each(['chat', 'work'] as const)(
     '%s 模式都保存单轮执行原件，失败轮次同样保留',
     async (interactionMode) => {
@@ -593,7 +630,7 @@ describe('ConversationTurnService 初始提示词快照', () => {
     expect(feedback).toHaveBeenCalledWith(result.pairId, '已使用记忆')
   })
 
-  it('持久对话编译前应按上下文轮次触发长记忆窗口兜底', async () => {
+  it('持久对话编译不再因窗口轮数同步触发后台补记', async () => {
     const ensureContextWindowCoverage = vi.fn().mockResolvedValue(undefined)
     const compile = vi.fn().mockResolvedValue({
       messages: [{ role: 'user', content: '第41轮' }],
@@ -624,15 +661,8 @@ describe('ConversationTurnService 初始提示词快照', () => {
 
     await service.prepareTurn({ threadId: 'thread-1', content: '第41轮' })
 
-    expect(ensureContextWindowCoverage).toHaveBeenCalledWith({
-      agentId: 'pero',
-      threadId: 'thread-1',
-      channel: 'desktop',
-      contextPairs: 40,
-    })
-    expect(ensureContextWindowCoverage.mock.invocationCallOrder[0]).toBeLessThan(
-      compile.mock.invocationCallOrder[0]!,
-    )
+    expect(ensureContextWindowCoverage).not.toHaveBeenCalled()
+    expect(compile).toHaveBeenCalledOnce()
   })
 
   it('完整读取结果进入短期缓存，来源随对话保存且不再自动写入心流正文', async () => {

@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { getDisplayLocale } from '../../../i18n/index'
+
+import { t as __t } from '../../../i18n/index'
+
 import '../../taskCenter/task-pixel.css'
 /**
  * TasksTab — 任务中心（重构版）
@@ -25,6 +29,7 @@ import {
 } from 'vue'
 import { PixelIcon, PButton, PBadge, PEmpty } from '../../pixel'
 import { schedulerApi } from '../../../api/modules/schedulerApi'
+import { threadsApi, type ThreadInfo } from '../../../api/modules/threadsApi'
 import type {
   SchedulerTask,
   ReminderItem as ReminderItemData,
@@ -43,7 +48,7 @@ import { useAgentStore, useThreadStore } from '../../../stores'
 import { useNotificationStore } from '../../../stores/useNotificationStore'
 import { getApiBaseUrl } from '../../../api/transport'
 import { backgroundTasksApi } from '../../../api/modules/backgroundTasksApi'
-import { agentApi, type CompanionStateResponse } from '../../../api/modules/agentApi'
+import ProactiveModePanel from '../ProactiveModePanel.vue'
 import { logger } from '../../../lib/logger'
 import { useTaskNavigation } from '../../../composables/main/useTaskNavigation'
 
@@ -69,6 +74,7 @@ function agentDisplayName(agentId: string): string {
 /** 当前激活的视图 */
 const activeView = ref<'active' | 'history' | 'reminders'>('active')
 const hasSocialAttention = ref(false)
+const hasSocialHistory = ref(false)
 
 /** 派发新任务弹窗 */
 const isDispatchOpen = ref(false)
@@ -99,7 +105,10 @@ watch(
       }
     } catch (error) {
       if (sequence === navigationSequence)
-        notify.toast(error instanceof Error ? error.message : '任务暂时无法打开', 'error')
+        notify.toast(
+          error instanceof Error ? error.message : __t('ui.settings', '任务暂时无法打开'),
+          'error',
+        )
     }
   },
   { immediate: true, flush: 'post' },
@@ -116,13 +125,20 @@ async function resumeInterrupted(id: string) {
     await backgroundTasksApi.resumeInterrupted(id)
     await taskCenter.refreshActive()
     await taskCenter.refreshHistory()
-    notify.toast('已恢复中断任务', { type: 'success', title: '任务中心' })
-  } catch (err) {
-    notify.toast(err instanceof Error ? err.message : '恢复失败', {
-      type: 'error',
-      title: '任务中心',
+    notify.toast(__t('ui.settings', '已恢复中断任务'), {
+      type: 'success',
+      get title() {
+        return __t('ui.settings', '任务中心')
+      },
     })
-    logger.error('TasksTab', '恢复中断任务失败', err)
+  } catch (err) {
+    notify.toast(err instanceof Error ? err.message : __t('ui.settings', '恢复失败'), {
+      type: 'error',
+      get title() {
+        return __t('ui.settings', '任务中心')
+      },
+    })
+    logger.error('TasksTab', __t('logs.frontend.settings', '恢复中断任务失败'), err)
   }
 }
 
@@ -131,6 +147,37 @@ async function resumeInterrupted(id: string) {
 const scheduledAgentTime = ref('')
 const scheduledAgentInstruction = ref('')
 const scheduledAgentId = ref('')
+const scheduledRepeat = ref('')
+const scheduledThreadId = ref('')
+const scheduledThreads = ref<ThreadInfo[]>([])
+let scheduledThreadRequest = 0
+watch(scheduledAgentId, async (agentId) => {
+  const request = ++scheduledThreadRequest
+  scheduledThreadId.value = ''
+  scheduledThreads.value = []
+  if (!agentId) return
+  try {
+    const response = await threadsApi.list({
+      agentId,
+      channel: 'desktop',
+      purpose: 'conversation',
+      pageSize: 100,
+    })
+    if (request !== scheduledThreadRequest) return
+    scheduledThreads.value = response.data?.items ?? []
+    if (
+      agentId === threadStore.agentId &&
+      scheduledThreads.value.some((item) => item.id === threadStore.threadId)
+    )
+      scheduledThreadId.value = threadStore.threadId
+  } catch (error) {
+    if (request === scheduledThreadRequest)
+      notify.toast(
+        error instanceof Error ? error.message : __t('ui.settings', '读取目标会话失败'),
+        'error',
+      )
+  }
+})
 const creatingScheduledAgent = ref(false)
 const scheduledComposer = ref<HTMLDetailsElement | null>(null)
 const hasCompanionAttention = ref(false)
@@ -149,6 +196,8 @@ async function createScheduledAgentTask(): Promise<void> {
       agentId: scheduledAgentId.value,
       time: new Date(scheduledAgentTime.value).toISOString(),
       instruction: scheduledAgentInstruction.value.trim(),
+      repeatIntervalMinutes: scheduledRepeat.value ? Number(scheduledRepeat.value) : undefined,
+      threadId: scheduledThreadId.value || undefined,
     })
     scheduledAgentInstruction.value = ''
     await fetchReminders()
@@ -156,12 +205,22 @@ async function createScheduledAgentTask(): Promise<void> {
       scheduledComposer.value.open = false
       scheduledComposer.value.querySelector<HTMLElement>('summary')?.focus({ preventScroll: true })
     }
-    notify.toast('定时 Agent 任务已创建', { type: 'success', title: '任务中心' })
-  } catch (error) {
-    notify.toast(error instanceof Error ? error.message : '创建失败，请稍后重试', {
-      type: 'error',
-      title: '任务中心',
+    notify.toast(__t('ui.settings', '定时 Agent 任务已创建'), {
+      type: 'success',
+      get title() {
+        return __t('ui.settings', '任务中心')
+      },
     })
+  } catch (error) {
+    notify.toast(
+      error instanceof Error ? error.message : __t('ui.settings', '创建失败，请稍后重试'),
+      {
+        type: 'error',
+        get title() {
+          return __t('ui.settings', '任务中心')
+        },
+      },
+    )
   } finally {
     creatingScheduledAgent.value = false
   }
@@ -169,18 +228,7 @@ async function createScheduledAgentTask(): Promise<void> {
 
 /** 用户提醒列表 */
 const reminders = shallowRef<ReminderItemData[]>([])
-const companionStates = shallowRef<CompanionStateResponse[]>([])
 const isLoadingReminders = ref(false)
-
-/** 加载陪伴调度只读状态。 */
-async function fetchCompanionStates(): Promise<void> {
-  try {
-    const response = await agentApi.listCompanionStates()
-    companionStates.value = response.data ?? []
-  } catch (error) {
-    logger.error('TasksTab', '加载陪伴调度状态失败', error)
-  }
-}
 
 /** 加载用户提醒列表 */
 async function fetchReminders(): Promise<void> {
@@ -191,7 +239,7 @@ async function fetchReminders(): Promise<void> {
       reminders.value = res.data.items
     }
   } catch (e) {
-    logger.error('TasksTab', '加载提醒列表失败', e)
+    logger.error('TasksTab', __t('logs.frontend.settings', '加载提醒列表失败'), e)
   } finally {
     isLoadingReminders.value = false
   }
@@ -223,7 +271,7 @@ async function markHistoryRead(task: BackgroundTaskInfo): Promise<void> {
     expandedHistoryTasks.value = new Set([...expandedHistoryTasks.value, task.id])
     detailTask.value = task
   } catch (error) {
-    logger.warn('TasksTab', '标记历史记录已读失败', error)
+    logger.warn('TasksTab', __t('logs.frontend.settings', '标记历史记录已读失败'), error)
   }
 }
 
@@ -232,14 +280,23 @@ async function markAllHistoryRead(): Promise<void> {
   markingHistoryRead.value = true
   try {
     const count = await taskCenter.markAllRead()
-    notify.toast(count > 0 ? `已读 ${count} 条历史记录` : '没有新的未读记录', {
-      type: 'success',
-      title: '任务中心',
-    })
+    notify.toast(
+      count > 0
+        ? __t('ui.settings', '已读 {0} 条历史记录', [count])
+        : __t('ui.settings', '没有新的未读记录'),
+      {
+        type: 'success',
+        get title() {
+          return __t('ui.settings', '任务中心')
+        },
+      },
+    )
   } catch (error) {
-    notify.toast(error instanceof Error ? error.message : '一键已读失败', {
+    notify.toast(error instanceof Error ? error.message : __t('ui.settings', '一键已读失败'), {
       type: 'error',
-      title: '任务中心',
+      get title() {
+        return __t('ui.settings', '任务中心')
+      },
     })
   } finally {
     markingHistoryRead.value = false
@@ -250,11 +307,18 @@ async function deleteHistoryTask(task: BackgroundTaskInfo): Promise<void> {
   try {
     await taskCenter.remove(task.id)
     expandedHistoryTasks.value.delete(task.id)
-    notify.toast('历史记录已删除', { type: 'success', title: '任务中心' })
+    notify.toast(__t('ui.settings', '历史记录已删除'), {
+      type: 'success',
+      get title() {
+        return __t('ui.settings', '任务中心')
+      },
+    })
   } catch (error) {
-    notify.toast(error instanceof Error ? error.message : '删除记录失败', {
+    notify.toast(error instanceof Error ? error.message : __t('ui.settings', '删除记录失败'), {
       type: 'error',
-      title: '任务中心',
+      get title() {
+        return __t('ui.settings', '任务中心')
+      },
     })
   }
 }
@@ -279,7 +343,7 @@ async function fetchCronTasks(): Promise<void> {
   } catch (e) {
     schedulerRunning.value = null
     cronError.value = e instanceof Error ? e.message : '加载系统任务失败'
-    logger.error('TasksTab', '加载系统任务列表失败', e)
+    logger.error('TasksTab', __t('logs.frontend.settings', '加载系统任务列表失败'), e)
   } finally {
     cronLoading.value = false
   }
@@ -324,10 +388,20 @@ async function triggerCronTask(task: SchedulerTask): Promise<void> {
   try {
     await schedulerApi.trigger(task.name)
     await fetchCronTasks()
-    notify.toast(`已触发 ${task.displayName}`, { type: 'success', title: '系统任务' })
+    notify.toast(__t('ui.settings', '已触发 {0}', [task.displayName]), {
+      type: 'success',
+      get title() {
+        return __t('ui.settings', '系统任务')
+      },
+    })
   } catch (e) {
-    logger.error('TasksTab', '触发系统任务失败', e)
-    notify.toast('触发失败', { type: 'error', title: '系统任务' })
+    logger.error('TasksTab', __t('logs.frontend.settings', '触发系统任务失败'), e)
+    notify.toast(__t('ui.settings', '触发失败'), {
+      type: 'error',
+      get title() {
+        return __t('ui.settings', '系统任务')
+      },
+    })
   } finally {
     const next = new Set(triggeringTasks.value)
     next.delete(task.name)
@@ -343,16 +417,19 @@ function serverNow(): number {
 
 function formatElapsed(ms: number | undefined): string {
   if (ms === undefined) return '-'
-  if (ms < 1000) return `${ms} 毫秒`
+  if (ms < 1000) return __t('ui.settings', '{0} 毫秒', [ms])
   const sec = Math.floor(ms / 1000)
-  if (sec < 60) return `${sec} 秒`
-  if (sec < 3600) return `${Math.floor(sec / 60)} 分 ${sec % 60} 秒`
-  return `${Math.floor(sec / 3600)} 小时 ${Math.floor((sec % 3600) / 60)} 分`
+  if (sec < 60) return __t('ui.settings', '{0} 秒', [sec])
+  if (sec < 3600) return __t('ui.settings', '{0} 分 {1} 秒', [Math.floor(sec / 60), sec % 60])
+  return __t('ui.settings', '{0} 小时 {1} 分', [
+    Math.floor(sec / 3600),
+    Math.floor((sec % 3600) / 60),
+  ])
 }
 
 function formatDateTime(timestamp: number | null): string {
   if (timestamp === null) return '-'
-  return new Date(timestamp).toLocaleString('zh-CN', {
+  return new Date(timestamp).toLocaleString(getDisplayLocale(), {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
@@ -361,26 +438,32 @@ function formatDateTime(timestamp: number | null): string {
 }
 
 function formatRelative(timestamp: number | null): string {
-  if (timestamp === null) return '尚未执行'
+  if (timestamp === null) return __t('ui.settings', '尚未执行')
   const elapsed = Math.max(0, serverNow() - timestamp)
-  if (elapsed < 60_000) return '不足 1 分钟前'
-  if (elapsed < 3_600_000) return `${Math.floor(elapsed / 60_000)} 分钟前`
-  if (elapsed < 86_400_000) return `${Math.floor(elapsed / 3_600_000)} 小时前`
-  return `${Math.floor(elapsed / 86_400_000)} 天前`
+  if (elapsed < 60_000) return __t('ui.settings', '不足 1 分钟前')
+  if (elapsed < 3_600_000) return __t('ui.settings', '{0} 分钟前', [Math.floor(elapsed / 60_000)])
+  if (elapsed < 86_400_000)
+    return __t('ui.settings', '{0} 小时前', [Math.floor(elapsed / 3_600_000)])
+  return __t('ui.settings', '{0} 天前', [Math.floor(elapsed / 86_400_000)])
 }
 
 function formatCountdown(task: SchedulerTask): string {
   const remaining = Math.max(0, task.nextDueAt - serverNow())
-  if (remaining === 0) return '等待调度'
-  if (remaining < 60_000) return '不足 1 分钟'
+  if (remaining === 0) return __t('ui.settings', '等待调度')
+  if (remaining < 60_000) return __t('ui.settings', '不足 1 分钟')
   const minutes = Math.ceil(remaining / 60_000)
-  if (minutes < 60) return `${minutes} 分钟后`
+  if (minutes < 60) return __t('ui.settings', '{0} 分钟后', [minutes])
   const hours = Math.floor(minutes / 60)
   const restMinutes = minutes % 60
-  if (hours < 24) return restMinutes ? `${hours} 小时 ${restMinutes} 分钟后` : `${hours} 小时后`
+  if (hours < 24)
+    return restMinutes
+      ? __t('ui.settings', '{0} 小时 {1} 分钟后', [hours, restMinutes])
+      : __t('ui.settings', '{0} 小时后', [hours])
   const days = Math.floor(hours / 24)
   const restHours = hours % 24
-  return restHours ? `${days} 天 ${restHours} 小时后` : `${days} 天后`
+  return restHours
+    ? __t('ui.settings', '{0} 天 {1} 小时后', [days, restHours])
+    : __t('ui.settings', '{0} 天后', [days])
 }
 
 function progressPercent(task: SchedulerTask): number {
@@ -405,13 +488,27 @@ function cronStatus(task: SchedulerTask): CronVisualStatus {
 function statusText(task: SchedulerTask): string {
   const status = cronStatus(task)
   return {
-    running: '运行中',
-    error: '执行失败',
-    stopped: '调度器已停止',
-    unavailable: '状态不可用',
-    due: '等待调度',
-    soon: '即将执行',
-    waiting: '等待中',
+    get running() {
+      return __t('ui.settings', '运行中')
+    },
+    get error() {
+      return __t('ui.settings', '执行失败')
+    },
+    get stopped() {
+      return __t('ui.settings', '调度器已停止')
+    },
+    get unavailable() {
+      return __t('ui.settings', '状态不可用')
+    },
+    get due() {
+      return __t('ui.settings', '等待调度')
+    },
+    get soon() {
+      return __t('ui.settings', '即将执行')
+    },
+    get waiting() {
+      return __t('ui.settings', '等待中')
+    },
   }[status]
 }
 
@@ -426,9 +523,11 @@ function statusVariant(
 }
 
 function outcomeText(task: SchedulerTask): string {
-  if (task.lastOutcome === 'success') return `成功 · ${formatRelative(task.lastFinishedAt)}`
-  if (task.lastOutcome === 'error') return `失败 · ${formatRelative(task.lastFinishedAt)}`
-  return '尚未执行'
+  if (task.lastOutcome === 'success')
+    return __t('ui.settings', '成功 · {0}', [formatRelative(task.lastFinishedAt)])
+  if (task.lastOutcome === 'error')
+    return __t('ui.settings', '失败 · {0}', [formatRelative(task.lastFinishedAt)])
+  return __t('ui.settings', '尚未执行')
 }
 
 /** 历史时间线条目结束时间（completedAt 优先，回退 updatedAt） */
@@ -436,7 +535,7 @@ function historyEndTime(task: BackgroundTaskInfo): string {
   const iso = task.completedAt ?? task.updatedAt
   if (!iso) return ''
   const d = new Date(iso.replace(' ', 'T'))
-  return d.toLocaleString('zh-CN', {
+  return d.toLocaleString(getDisplayLocale(), {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
@@ -462,7 +561,6 @@ watch(
     if (!scheduledAgentId.value)
       scheduledAgentId.value = agentStore.activeAgentId || agentStore.agents[0]?.id || ''
     fetchReminders()
-    fetchCompanionStates()
     fetchCronTasks()
   },
 )
@@ -474,7 +572,6 @@ onMounted(() => {
   if (!scheduledAgentId.value)
     scheduledAgentId.value = agentStore.activeAgentId || agentStore.agents[0]?.id || ''
   fetchReminders()
-  fetchCompanionStates()
   // M05: 历史任务首次进入时预加载（进行中已由 MainView 全局拉取）
   taskCenter.refreshHistory()
   syncCronPolling(true)
@@ -492,6 +589,7 @@ onDeactivated(() => {
 
 onUnmounted(() => {
   navigationSequence++
+  scheduledThreadRequest++
   componentActive = false
   stopCronPolling()
 })
@@ -505,20 +603,20 @@ onUnmounted(() => {
         <!-- 标题与其他 Tab 一致：像素字体 + 加粗大字号 -->
         <h2 class="tasks-tab__title flex items-center gap-3 text-2xl font-black font-pixel">
           <PixelIcon name="bell" size="md" class="tasks-tab__title-icon" />
-          任务中心
+          {{ __t('ui.settings', '任务中心') }}
         </h2>
         <div class="tasks-tab__stats">
           <span v-if="taskCenter.activeCount > 0" class="tasks-tab__stat tasks-tab__stat--active">
-            {{ taskCenter.activeCount }} 进行中
+            {{ taskCenter.activeCount }} {{ __t('ui.settings', '进行中') }}
           </span>
           <span v-if="reminders.length > 0" class="tasks-tab__stat tasks-tab__stat--reminder">
-            {{ reminders.length }} 条待触发
+            {{ reminders.length }} {{ __t('ui.settings', '条待触发') }}
           </span>
         </div>
       </div>
       <PButton variant="primary" size="sm" @click="openDispatch">
         <PixelIcon name="plus" size="xs" />
-        派发新任务
+        {{ __t('ui.settings', '派发新任务') }}
       </PButton>
     </header>
 
@@ -534,7 +632,13 @@ onUnmounted(() => {
         :class="{ 'tasks-tab__nav-item--active': activeView === v }"
         @click="activeView = v"
       >
-        {{ v === 'active' ? '进行中' : v === 'history' ? '历史记录' : '定时与提醒' }}
+        {{
+          v === 'active'
+            ? __t('ui.settings', '进行中')
+            : v === 'history'
+              ? __t('ui.settings', '历史记录')
+              : __t('ui.settings', '定时与提醒')
+        }}
       </button>
     </nav>
 
@@ -556,14 +660,14 @@ onUnmounted(() => {
           !hasCompanionAttention &&
           !hasSocialAttention
         "
-        description="暂无进行中任务，点击右上角「派发新任务」让 Agent 帮你干活吧~"
+        :description="__t('ui.settings', '暂无任务，可点击「派发新任务」')"
       />
 
       <!-- 进行中后台任务 -->
       <div v-if="taskCenter.activeTasks.length > 0" class="tasks-tab__group">
         <h3 class="tasks-tab__group-title">
           <PixelIcon name="activity" size="xs" />
-          后台任务 · {{ taskCenter.activeTasks.length }}
+          {{ __t('ui.settings', '后台任务 ·') }} {{ taskCenter.activeTasks.length }}
         </h3>
         <div class="tasks-tab__list">
           <TaskCard
@@ -584,7 +688,7 @@ onUnmounted(() => {
       <details v-if="taskCenter.residentTasks.length" class="tasks-tab__group">
         <summary class="tasks-tab__group-title">
           <PixelIcon name="activity" size="xs" />
-          系统常驻 · 只读状态
+          {{ __t('ui.settings', '系统常驻 · 只读状态') }}
         </summary>
         <div class="tasks-tab__list">
           <TaskCard
@@ -602,7 +706,7 @@ onUnmounted(() => {
       <div v-if="reminders.length > 0" class="tasks-tab__group">
         <h3 class="tasks-tab__group-title">
           <PixelIcon name="clock" size="xs" />
-          待触发提醒 · {{ reminders.length }}
+          {{ __t('ui.settings', '待触发提醒 ·') }} {{ reminders.length }}
         </h3>
         <div class="tasks-tab__list">
           <ReminderItem
@@ -617,18 +721,23 @@ onUnmounted(() => {
 
     <!-- ═══ 历史记录视图（时间线） ═══ -->
     <section v-if="activeView === 'history'" class="tasks-tab__section">
-      <SocialTurnPanel :agent-id="agentStore.activeAgentId" history />
+      <SocialTurnPanel
+        :agent-id="agentStore.activeAgentId"
+        history
+        @history-change="hasSocialHistory = $event"
+      />
       <div v-if="taskCenter.historyTasks.length" class="history-toolbar">
         <div class="history-toolbar__info">
           <span class="history-toolbar__icon"><PixelIcon name="mail" size="xs" /></span>
           <div>
-            <strong>历史消息</strong>
-            <span>打开未读记录后将自动标记为已读</span>
+            <strong>{{ __t('ui.settings', '历史消息') }}</strong>
+            <span>{{ __t('ui.settings', '打开未读记录后将自动标记为已读') }}</span>
           </div>
           <b v-if="taskCenter.historyTasks.some((task) => !task.readAt)">
-            {{ taskCenter.historyTasks.filter((task) => !task.readAt).length }} 条未读
+            {{ taskCenter.historyTasks.filter((task) => !task.readAt).length }}
+            {{ __t('ui.settings', '条未读') }}
           </b>
-          <b v-else class="history-toolbar__all-read">已全部读完</b>
+          <b v-else class="history-toolbar__all-read">{{ __t('ui.settings', '已全部读完') }}</b>
         </div>
         <button
           type="button"
@@ -641,14 +750,14 @@ onUnmounted(() => {
             size="xs"
             :animation="markingHistoryRead ? 'spin' : undefined"
           />
-          {{ markingHistoryRead ? '处理中…' : '一键已读' }}
+          {{ markingHistoryRead ? __t('ui.settings', '处理中…') : __t('ui.settings', '一键已读') }}
         </button>
       </div>
       <PEmpty
-        v-if="taskCenter.historyTasks.length === 0"
-        description="任务完成、失败或取消后会归档在这里~"
+        v-if="taskCenter.historyTasks.length === 0 && !hasSocialHistory"
+        :description="__t('ui.settings', '任务完成、失败或取消后会归档在这里~')"
       />
-      <ol v-else class="tasks-tab__timeline">
+      <ol v-if="taskCenter.historyTasks.length" class="tasks-tab__timeline">
         <li v-for="task in taskCenter.historyTasks" :key="task.id" class="tasks-tab__timeline-item">
           <!-- 时间线节点 -->
           <span class="tasks-tab__timeline-rail" aria-hidden="true">
@@ -681,13 +790,13 @@ onUnmounted(() => {
       <details ref="scheduledComposer" class="scheduled-agent-composer">
         <summary>
           <PixelIcon name="clock" size="sm" />
-          <strong>安排稍后的任务</strong>
-          <span>选择角色、时间和要做的事</span>
+          <strong>{{ __t('ui.settings', '安排稍后的任务') }}</strong>
+          <span>{{ __t('ui.settings', '选择角色、时间和要做的事') }}</span>
           <PixelIcon name="plus" size="sm" />
         </summary>
         <form class="scheduled-agent-form" @submit.prevent="createScheduledAgentTask">
           <label>
-            <span>交给谁</span>
+            <span>{{ __t('ui.settings', '交给谁') }}</span>
             <select v-model="scheduledAgentId" required>
               <option v-for="agent in agentStore.agents" :key="agent.id" :value="agent.id">
                 {{ agent.name ?? agent.id }}
@@ -695,21 +804,46 @@ onUnmounted(() => {
             </select>
           </label>
           <label>
-            <span>执行时间</span>
+            <span>{{ __t('ui.settings', '执行时间') }}</span>
             <input v-model="scheduledAgentTime" type="datetime-local" required />
           </label>
+          <label>
+            <span>{{ __t('ui.settings', '结果会话与工具模式来源') }}</span>
+            <select v-model="scheduledThreadId">
+              <option value="">{{ __t('ui.settings', '使用角色最近的会话') }}</option>
+              <option v-for="thread in scheduledThreads" :key="thread.id" :value="thread.id">
+                {{ thread.title || __t('ui.settings', '未命名会话') }} ·
+                {{
+                  thread.interactionMode === 'minimal'
+                    ? __t('ui.settings', '极简')
+                    : thread.interactionMode === 'chat'
+                      ? __t('ui.settings', '聊天')
+                      : __t('ui.settings', '工作')
+                }}
+              </option>
+            </select>
+          </label>
+          <label>
+            <span>{{ __t('ui.settings', '重复安排') }}</span>
+            <select v-model="scheduledRepeat">
+              <option value="">{{ __t('ui.settings', '仅一次') }}</option>
+              <option value="60">{{ __t('ui.settings', '每小时') }}</option>
+              <option value="1440">{{ __t('ui.settings', '每 24 小时') }}</option>
+              <option value="10080">{{ __t('ui.settings', '每 7 天') }}</option>
+            </select>
+          </label>
           <label class="scheduled-agent-form__instruction">
-            <span>任务内容</span>
+            <span>{{ __t('ui.settings', '任务内容') }}</span>
             <textarea
               v-model="scheduledAgentInstruction"
               rows="3"
               required
               maxlength="4000"
-              placeholder="描述到时希望角色帮你完成的事情…"
+              :placeholder="__t('ui.settings', '描述到时希望角色帮你完成的事情…')"
             />
           </label>
           <footer>
-            <span>任务会在后台执行，完成后通知你。</span>
+            <span>{{ __t('ui.settings', '按所选会话的模式和工具执行，结果发送到该会话。') }}</span>
             <PButton
               type="submit"
               variant="primary"
@@ -720,45 +854,23 @@ onUnmounted(() => {
               "
             >
               <PixelIcon name="plus" size="xs" />
-              创建任务
+              {{ __t('ui.settings', '创建任务') }}
             </PButton>
           </footer>
         </form>
       </details>
 
-      <!-- 陪伴调度只读状态 -->
-      <div class="tasks-tab__group">
-        <h3 class="tasks-tab__group-title">
-          <PixelIcon name="heart" size="xs" />
-          陪伴调度 · {{ companionStates.filter((state) => state.enabled).length }} 个运行中
-        </h3>
-        <PEmpty v-if="companionStates.length === 0" description="暂无可用角色" />
-        <div v-else class="companion-state-list">
-          <article
-            v-for="state in companionStates"
-            :key="state.agentId"
-            class="companion-state-card"
-          >
-            <div>
-              <strong>{{ agentDisplayName(state.agentId) }}</strong>
-              <p>主动陪伴与空闲关怀调度</p>
-            </div>
-            <PBadge :variant="state.enabled ? 'success' : 'default'" size="sm">
-              {{ state.enabled ? '运行中' : '已停止' }}
-            </PBadge>
-          </article>
-        </div>
-      </div>
+      <ProactiveModePanel />
 
       <!-- 用户提醒 -->
       <div class="tasks-tab__group">
         <h3 class="tasks-tab__group-title">
           <PixelIcon name="bell" size="xs" />
-          用户提醒 · {{ reminders.length }}
+          {{ __t('ui.settings', '用户提醒 ·') }} {{ reminders.length }}
         </h3>
         <PEmpty
           v-if="!isLoadingReminders && reminders.length === 0"
-          description="通过聊天让 Agent 帮你设置提醒吧~"
+          :description="__t('ui.settings', '通过聊天让 Agent 帮你设置提醒吧~')"
         />
         <div v-else class="tasks-tab__list">
           <ReminderItem
@@ -775,10 +887,10 @@ onUnmounted(() => {
         <button type="button" class="tasks-tab__cron-header" @click="toggleCronTasks">
           <span class="tasks-tab__cron-title">
             <PixelIcon name="desktop" size="xs" />
-            系统后台任务 · {{ cronTasks.length }}
+            {{ __t('ui.settings', '系统后台任务 ·') }} {{ cronTasks.length }}
           </span>
           <span v-if="runningCronTasks > 0" class="tasks-tab__stat tasks-tab__stat--active">
-            {{ runningCronTasks }} 运行中
+            {{ runningCronTasks }} {{ __t('ui.settings', '运行中') }}
           </span>
           <PixelIcon :name="showCronTasks ? 'chevron-up' : 'chevron-down'" size="xs" />
         </button>
@@ -787,11 +899,11 @@ onUnmounted(() => {
           <div v-if="cronError" class="cron-feedback cron-feedback--error">
             <span>{{ cronError }}</span>
             <PButton variant="secondary" size="sm" :loading="cronLoading" @click="fetchCronTasks">
-              重试
+              {{ __t('ui.settings', '重试') }}
             </PButton>
           </div>
           <div v-else-if="cronLoading && cronTasks.length === 0" class="cron-feedback">
-            正在加载任务状态…
+            {{ __t('ui.settings', '正在加载任务状态…') }}
           </div>
 
           <article
@@ -813,11 +925,12 @@ onUnmounted(() => {
               </div>
 
               <div class="cron-card__schedule">
-                <span>周期 {{ task.intervalDesc }}</span>
+                <span>{{ __t('ui.settings', '周期') }} {{ task.intervalDesc }}</span>
                 <span v-if="!task.running">
-                  预计 {{ formatCountdown(task) }} · {{ formatDateTime(task.nextDueAt) }}
+                  {{ __t('ui.settings', '预计') }} {{ formatCountdown(task) }} ·
+                  {{ formatDateTime(task.nextDueAt) }}
                 </span>
-                <span v-else>本次任务正在执行</span>
+                <span v-else>{{ __t('ui.settings', '本次任务正在执行') }}</span>
               </div>
               <div
                 class="cron-card__progress"
@@ -832,9 +945,12 @@ onUnmounted(() => {
 
               <div class="cron-card__summary">
                 <span :class="{ 'cron-card__outcome--error': task.lastOutcome === 'error' }">
-                  最近结果：{{ outcomeText(task) }}
+                  {{ __t('ui.settings', '最近结果：') }}{{ outcomeText(task) }}
                 </span>
-                <span>最近耗时：{{ formatElapsed(task.stats.lastDurationMs) }}</span>
+                <span>
+                  {{ __t('ui.settings', '最近耗时：')
+                  }}{{ formatElapsed(task.stats.lastDurationMs) }}
+                </span>
               </div>
             </div>
 
@@ -846,14 +962,18 @@ onUnmounted(() => {
                 :disabled="task.running || triggeringTasks.has(task.name)"
                 @click.stop="triggerCronTask(task)"
               >
-                立即执行
+                {{ __t('ui.settings', '立即执行') }}
               </PButton>
               <button
                 type="button"
                 class="cron-card__detail-toggle"
                 @click="toggleCronDetail(task.name)"
               >
-                {{ expandedTasks.has(task.name) ? '收起详情' : '展开详情' }}
+                {{
+                  expandedTasks.has(task.name)
+                    ? __t('ui.settings', '收起详情')
+                    : __t('ui.settings', '展开详情')
+                }}
                 <PixelIcon
                   :name="expandedTasks.has(task.name) ? 'chevron-up' : 'chevron-down'"
                   size="xs"
@@ -863,38 +983,39 @@ onUnmounted(() => {
 
             <dl v-if="expandedTasks.has(task.name)" class="cron-card__details">
               <div>
-                <dt>最近开始</dt>
+                <dt>{{ __t('ui.settings', '最近开始') }}</dt>
                 <dd>{{ formatDateTime(task.lastStartedAt) }}</dd>
               </div>
               <div>
-                <dt>最近完成</dt>
+                <dt>{{ __t('ui.settings', '最近完成') }}</dt>
                 <dd>{{ formatDateTime(task.lastFinishedAt) }}</dd>
               </div>
               <div>
-                <dt>最近成功</dt>
+                <dt>{{ __t('ui.settings', '最近成功') }}</dt>
                 <dd>{{ formatDateTime(task.lastSuccessAt) }}</dd>
               </div>
               <div>
-                <dt>最近失败</dt>
+                <dt>{{ __t('ui.settings', '最近失败') }}</dt>
                 <dd>{{ formatDateTime(task.lastFailureAt) }}</dd>
               </div>
               <div>
-                <dt>执行统计</dt>
+                <dt>{{ __t('ui.settings', '执行统计') }}</dt>
                 <dd>
-                  共 {{ task.stats.totalRuns }} 次 · 成功 {{ task.stats.successCount }} · 失败
-                  {{ task.stats.errorCount }}
+                  {{ __t('ui.settings', '共') }} {{ task.stats.totalRuns }}
+                  {{ __t('ui.settings', '次 · 成功') }} {{ task.stats.successCount }}
+                  {{ __t('ui.settings', '· 失败') }} {{ task.stats.errorCount }}
                 </dd>
               </div>
               <div>
-                <dt>平均耗时</dt>
+                <dt>{{ __t('ui.settings', '平均耗时') }}</dt>
                 <dd>{{ formatElapsed(task.stats.averageDurationMs) }}</dd>
               </div>
               <div class="cron-card__detail-wide">
-                <dt>最近错误</dt>
+                <dt>{{ __t('ui.settings', '最近错误') }}</dt>
                 <dd>{{ task.stats.lastError || '-' }}</dd>
               </div>
               <div class="cron-card__detail-wide">
-                <dt>内部任务标识</dt>
+                <dt>{{ __t('ui.settings', '内部任务标识') }}</dt>
                 <dd>
                   <code>{{ task.name }}</code>
                 </dd>
@@ -924,35 +1045,6 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.companion-state-list {
-  display: grid;
-  gap: 8px;
-}
-
-.companion-state-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 12px;
-  border: 1px solid var(--ui-border-subtle);
-  border-radius: 0;
-  background: var(--task-fill);
-  border-color: var(--ui-border-default);
-  box-shadow: var(--task-raised);
-}
-
-.companion-state-card strong {
-  color: var(--ui-text-primary);
-  font-size: 12px;
-}
-
-.companion-state-card p {
-  margin: 3px 0 0;
-  color: var(--ui-text-tertiary);
-  font-size: 11px;
-}
-
 .scheduled-agent-composer {
   border: 1px solid var(--ui-border-subtle);
   border-radius: 0;

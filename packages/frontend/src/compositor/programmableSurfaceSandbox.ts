@@ -121,6 +121,9 @@ function sandboxDocument(props: ProgrammableIslandSurfaceProps, code: string): s
 async function sha256(value: Uint8Array): Promise<string> {
   const isolated = new Uint8Array(value.byteLength)
   isolated.set(value)
-  const digest = await crypto.subtle.digest('SHA-256', isolated.buffer)
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+  // HTTP 下仍执行同等 SHA-256 校验，不因缺少 Web Crypto 跳过资产完整性检查。
+  const digest = globalThis.crypto?.subtle
+    ? new Uint8Array(await crypto.subtle.digest('SHA-256', isolated.buffer))
+    : (await import('@noble/hashes/sha2.js')).sha256(isolated)
+  return [...digest].map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }

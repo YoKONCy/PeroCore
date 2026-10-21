@@ -11,6 +11,7 @@ import { eq } from 'drizzle-orm'
 import { aiModelConfigs } from '../database/schema'
 import type { ReasoningEffort } from '../services/llm/types'
 import type { DrizzleDb } from '../database'
+import { ProviderConnectionRepository } from './providerConnection.repo'
 
 // ─────────────────────────────────────────────
 // 类型
@@ -23,6 +24,10 @@ export interface CreateModelInput {
   modelId: string
   apiKey: string
   apiBase?: string
+  providerConnectionId?: string | null
+  connectionOverride?: boolean
+  connectionProtocol?: 'openai' | 'anthropic' | 'gemini' | null
+  connectionAuthMode?: 'api_key' | 'none'
   temperature?: number | null
   topP?: number | null
   maxTokens?: number | null
@@ -45,6 +50,10 @@ export interface UpdateModelInput {
   modelId?: string
   apiKey?: string
   apiBase?: string
+  providerConnectionId?: string | null
+  connectionOverride?: boolean
+  connectionProtocol?: 'openai' | 'anthropic' | 'gemini' | null
+  connectionAuthMode?: 'api_key' | 'none'
   temperature?: number | null
   topP?: number | null
   maxTokens?: number | null
@@ -57,6 +66,7 @@ export interface UpdateModelInput {
   stream?: boolean
   providerType?: string
   enableVision?: boolean
+  enableAudioInput?: boolean
 }
 
 // Drizzle 推导行类型
@@ -67,7 +77,11 @@ type ModelConfigRow = typeof aiModelConfigs.$inferSelect
 // ─────────────────────────────────────────────
 
 export class ModelRepository {
-  constructor(private db: DrizzleDb) {}
+  readonly connections: ProviderConnectionRepository
+
+  constructor(private db: DrizzleDb) {
+    this.connections = new ProviderConnectionRepository(db)
+  }
 
   /** 列出所有模型配置 */
   async findAll(): Promise<ModelConfigRow[]> {
@@ -90,6 +104,10 @@ export class ModelRepository {
         modelId: data.modelId,
         apiKey: data.apiKey,
         apiBase: data.apiBase,
+        providerConnectionId: data.providerConnectionId,
+        connectionOverride: data.connectionOverride ?? false,
+        connectionProtocol: data.connectionProtocol,
+        connectionAuthMode: data.connectionAuthMode ?? 'api_key',
         temperature: data.temperature ?? null,
         topP: data.topP ?? null,
         maxTokens: data.maxTokens ?? null,
@@ -133,6 +151,12 @@ export class ModelRepository {
     if (data.reasoningDialect !== undefined) updates.reasoningDialect = data.reasoningDialect
     if (data.stream !== undefined) updates.stream = data.stream
     if (data.providerType !== undefined) updates.providerType = data.providerType
+    if (data.providerConnectionId !== undefined)
+      updates.providerConnectionId = data.providerConnectionId
+    if (data.connectionOverride !== undefined) updates.connectionOverride = data.connectionOverride
+    if (data.connectionProtocol !== undefined) updates.connectionProtocol = data.connectionProtocol
+    if (data.connectionAuthMode !== undefined) updates.connectionAuthMode = data.connectionAuthMode
+    if (data.enableAudioInput !== undefined) updates.enableAudioInput = data.enableAudioInput
     if (data.enableVision !== undefined) updates.enableVision = data.enableVision
 
     await this.db.update(aiModelConfigs).set(updates).where(eq(aiModelConfigs.id, id))

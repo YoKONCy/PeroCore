@@ -1,3 +1,5 @@
+import { t as __t } from '../utils/i18n'
+import { getClientCredential } from '../utils/clientCredential'
 import { BrowserWindow, app, session } from 'electron'
 import http from 'node:http'
 import { desktopTabs } from '../windows/desktopTabs'
@@ -36,7 +38,7 @@ export function prepareDashboardSession(endpoint: URL): Promise<void> {
       throw new Error('管理页部分缓存未完成清理')
   })().catch(() => {
     preparedOrigins.delete(endpoint.origin)
-    logger.warn('NapCat', '管理页缓存清理未完成，将继续加载')
+    logger.warn('NapCat', __t('electron.logs.napcatDashboard', '管理页缓存清理未完成，将继续加载'))
   })
   preparedOrigins.set(endpoint.origin, operation)
   return operation
@@ -75,7 +77,7 @@ export function initializeNapCatDashboard(): void {
   desktopTabs.registerApplication({
     id: NAPCAT_APPLICATION_ID,
     title: 'NapCat',
-    description: 'QQ 登录与机器人管理',
+    description: __t('electron.ui.napcatDashboard', 'QQ 登录与机器人管理'),
     icon: 'chat',
     url: waitingPage(),
     preload: false,
@@ -203,7 +205,7 @@ export async function openNapCatDashboard(replaceId?: string) {
 export async function startNapCatWithDashboard(replaceId?: string) {
   if (!getNapCatStatus().running) {
     try {
-      const token = process.env.INFOS_API_TOKEN
+      const token = getClientCredential()
       const response = await fetch(
         `http://127.0.0.1:${Number(process.env.PERO_PORT ?? 9120)}/api/social/status`,
         {

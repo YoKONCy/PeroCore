@@ -103,6 +103,28 @@ beforeEach(() => {
 })
 
 describe('最近会话激活与初始化竞态', () => {
+  it('取消断流恢复后，迟到快照不能覆盖当前消息或重新占用界面', async () => {
+    const store = useThreadStore()
+    await store.loadThreadMessages('pero-thread', 'pero')
+    const delayed = deferred<ReturnType<typeof projectionResponse>>()
+    api.projection.mockReturnValueOnce(delayed.promise)
+    const controller = new AbortController()
+    const restoring = store.loadThreadMessages('pero-thread', 'pero', controller.signal)
+    expect(store.isLoadingHistory).toBe(true)
+    controller.abort()
+    expect(store.isLoadingHistory).toBe(false)
+    store.addMessage({
+      id: '停止后保留的消息',
+      role: 'user',
+      content: '保留此内容',
+      timestamp: '2026-10-20T00:00:00Z',
+    })
+    delayed.resolve(projectionResponse(recordFor('pero-thread')))
+    await expect(restoring).resolves.toEqual({ status: 'superseded' })
+    expect(store.messages.some((message) => message.content === '保留此内容')).toBe(true)
+    expect(store.isLoadingHistory).toBe(false)
+  })
+
   it('审批后原执行提交时用持久消息替换占位，不残留第二条回复', () => {
     const store = useThreadStore()
     const compositor = useCompositorStore()

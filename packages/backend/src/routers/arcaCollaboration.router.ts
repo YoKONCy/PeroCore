@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * arcaCollaboration.router — HTTP 路由适配层
  *
@@ -62,7 +63,10 @@ export function createArcaCollaborationRouter(ctx: AppContext) {
     }
     try {
       const task = await ctx.arcaCollaboration.create(body)
-      return c.json({ code: 'CREATED', message: '协作任务已创建', data: task }, 201)
+      return c.json(
+        { code: 'CREATED', message: __t('server.routers', '协作任务已创建'), data: task },
+        201,
+      )
     } catch (error) {
       throw new AppError('SERVICE_UNAVAILABLE', {
         message: error instanceof Error ? error.message : String(error),

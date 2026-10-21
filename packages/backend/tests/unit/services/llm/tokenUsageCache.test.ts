@@ -17,6 +17,7 @@ beforeEach(() => {
   vi.useFakeTimers()
   vi.setSystemTime(now)
   sqlite = new Database(':memory:')
+  sqlite.exec('CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT)')
   sqlite.exec(
     readFileSync(
       new URL('../../../../src/database/migrations/0010_llm_usage.sql', import.meta.url),
@@ -61,6 +62,49 @@ function record(input: number, cached?: number, options: Partial<LlmUsageAttempt
 }
 
 describe('缓存用量的同口径聚合', () => {
+  it('Thread、供应商模型与角色筛选可组合，并同时约束用量和最早记录时间', () => {
+    record(1000, 900, { threadId: 't1' })
+    record(500, 100, { threadId: 't2' })
+    record(200, 50, { threadId: 't1', modelId: 'other-model' })
+    record(300, 0, { threadId: 't1', provider: 'relay' })
+    record(400, 100, { threadId: 't1', agentId: 'nana', startedAt: now - 86400000 })
+    const filtered = service.statistics('7d', 'Asia/Shanghai', 'pero', {
+      threadId: 't1',
+      provider: 'deepseek',
+      modelId: 'deepseek-flash',
+    })
+    expect(filtered.totals).toMatchObject({
+      requests: 1,
+      inputTokens: 1000,
+      cacheHitTokens: 900,
+      cacheMissTokens: 100,
+    })
+    expect(filtered.firstRecordedAt).toBe(new Date(now).toISOString())
+    expect(
+      service.statistics('7d', 'Asia/Shanghai', undefined, { threadId: 't1' }).totals.requests,
+    ).toBe(4)
+    expect(
+      service.statistics('today', 'Asia/Shanghai', undefined, { threadId: '不存在' }).totals
+        .requests,
+    ).toBe(0)
+  })
+
+  it('筛选选项保留已删除 Thread 和社交通道，按实际使用模型去重并支持角色隔离', () => {
+    sqlite.prepare('INSERT INTO threads (id, title) VALUES (?, ?)').run('t1', '制作网页')
+    record(100, 10, { threadId: 't1' })
+    record(100, 10, { threadId: 't1' })
+    record(100, 10, { threadId: 'social:qq:private:123456' })
+    record(100, 10, { threadId: 'nana-only', modelId: 'other-model', agentId: 'nana' })
+    expect(service.filterOptions('pero')).toEqual({
+      threads: expect.arrayContaining([
+        { id: 't1', title: '制作网页' },
+        { id: 'social:qq:private:123456', title: null },
+      ]),
+      models: [{ provider: 'deepseek', modelId: 'deepseek-flash' }],
+    })
+    expect(service.filterOptions('pero').threads).toHaveLength(2)
+  })
+
   it('按通道聚合，历史无归属记录单列，合计仍保持一致', () => {
     record(1000, 900, { channel: 'desktop', threadId: 't1', applicationId: 'infos', step: 1 })
     record(500, 100, { channel: 'social', threadId: 'qq:t1', applicationId: 'social', step: 2 })

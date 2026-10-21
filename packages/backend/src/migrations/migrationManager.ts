@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 import path from 'node:path'
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import type Database from 'better-sqlite3'
@@ -45,17 +46,19 @@ export class MigrationManager {
         }
 
         const context = this.createContext(migration.id)
-        logger.info(`检查数据迁移: ${migration.id} — ${migration.description}`)
+        logger.info(
+          __t('logs.migrations', '检查数据迁移: {0} — {1}', [migration.id, migration.description]),
+        )
         if (!(await migration.check(context))) {
           this.recordCompleted(state, migration)
           completedIds.add(migration.id)
           result.skipped.push(migration.id)
           this.removeJournal(context.journalPath)
-          logger.info(`数据迁移无需执行，已记录完成: ${migration.id}`)
+          logger.info(__t('logs.migrations', '数据迁移无需执行，已记录完成: {0}', [migration.id]))
           continue
         }
 
-        logger.info(`开始数据迁移: ${migration.id}`)
+        logger.info(__t('logs.migrations', '开始数据迁移: {0}', [migration.id]))
         try {
           await migration.up(context)
           await migration.verify(context)
@@ -63,9 +66,12 @@ export class MigrationManager {
           completedIds.add(migration.id)
           result.completed.push(migration.id)
           this.removeJournal(context.journalPath)
-          logger.info(`数据迁移完成: ${migration.id}`)
+          logger.info(__t('logs.migrations', '数据迁移完成: {0}', [migration.id]))
         } catch (error) {
-          logger.error(`数据迁移失败，将在下次启动重试: ${migration.id}`, error)
+          logger.error(
+            __t('logs.migrations', '数据迁移失败，将在下次启动重试: {0}', [migration.id]),
+            error,
+          )
           throw error
         }
       }
@@ -128,7 +134,7 @@ export class MigrationManager {
         throw new Error(`另一个数据迁移进程正在运行: ${this.lockPath}`)
       }
       rmSync(this.lockPath, { force: true })
-      logger.warn(`已清理异常退出留下的数据迁移锁: ${this.lockPath}`)
+      logger.warn(__t('logs.migrations', '已清理异常退出留下的数据迁移锁: {0}', [this.lockPath]))
     }
     try {
       writeFileSync(

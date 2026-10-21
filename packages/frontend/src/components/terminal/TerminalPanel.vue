@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
+import { copyClientText } from '../../lib/clientPlatform'
+
 /**
  * TerminalPanel — 系统日志终端
  *
@@ -142,10 +146,10 @@ async function handleContextMenu(event: MouseEvent): Promise<void> {
   if (text) {
     event.preventDefault()
     try {
-      await navigator.clipboard.writeText(text)
-      notif.toast('已复制选中文本', { type: 'success' })
+      await copyClientText(text)
+      notif.toast(__t('ui.workspace', '已复制选中文本'), { type: 'success' })
     } catch {
-      notif.toast('复制失败', { type: 'error' })
+      notif.toast(__t('ui.workspace', '复制失败'), { type: 'error' })
     }
   }
 }
@@ -252,13 +256,13 @@ onUnmounted(() => {
         <div class="terminal-icon-pulse">
           <PixelIcon name="terminal" size="sm" />
         </div>
-        <span class="terminal-title">实时终端</span>
+        <span class="terminal-title">{{ __t('ui.workspace', '实时终端') }}</span>
         <span class="terminal-badge">NATIVE</span>
       </div>
       <div class="terminal-header-right">
         <label class="terminal-auto-scroll">
           <PSwitch v-model="autoScroll" size="sm" />
-          <span>自动滚动</span>
+          <span>{{ __t('ui.workspace', '自动滚动') }}</span>
         </label>
         <PButton variant="ghost" size="sm" @click="clearLogs">
           <PixelIcon name="trash" size="xs" />
@@ -287,7 +291,7 @@ onUnmounted(() => {
       <!-- 空状态 -->
       <div v-if="logs.length === 0" class="terminal-empty">
         <PixelIcon name="desktop" size="xl" />
-        <span>等待系统日志...</span>
+        <span>{{ __t('ui.workspace', '等待系统日志...') }}</span>
       </div>
     </div>
   </div>

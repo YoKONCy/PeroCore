@@ -1,3 +1,4 @@
+import { t as __t } from '../utils/i18n'
 /**
  * @file 窗口管理器
  * @description 管理 infOS 的 5 种窗口类型，提供创建/销毁/切换等操作
@@ -135,7 +136,7 @@ export class WindowManager {
     desktopTabs.registerApplication({
       id: 'infos.arca',
       title: 'Arca',
-      description: '星页工房 · 文档与创作',
+      description: __t('electron.ui.windows', '星页工房 · 文档与创作'),
       icon: 'book',
       preload: true,
       acceptsUrl: (url) =>
@@ -159,7 +160,7 @@ export class WindowManager {
     desktopTabs.registerApplication({
       id: 'infos.pictoria',
       title: 'Pictoria',
-      description: '自由画布 · 图像与灵感',
+      description: __t('electron.ui.windows', '自由画布 · 图像与灵感'),
       icon: 'image',
       preload: true,
       waitForSurfaceReady: true,
@@ -199,12 +200,15 @@ export class WindowManager {
     const devUrl = process.env.ELECTRON_RENDERER_URL ?? process.env.VITE_DEV_SERVER_URL
     if (devUrl) {
       const url = `${devUrl}#${route}`
-      logger.info('WindowManager', `加载 Dev URL: ${url}`)
+      logger.info('WindowManager', __t('electron.logs.windows', '加载 Dev URL: {0}', [url]))
       win.loadURL(url)
     } else {
       const { app } = require('electron')
       const indexPath = path.join(app.getAppPath(), 'renderer', 'index.html')
-      logger.info('WindowManager', `加载文件: ${indexPath}, hash: ${route}`)
+      logger.info(
+        'WindowManager',
+        __t('electron.logs.windows', '加载文件: {0}, hash: {1}', [indexPath, route]),
+      )
       win.loadFile(indexPath, { hash: route })
     }
   }
@@ -316,7 +320,10 @@ export class WindowManager {
       if (shownAfterLoad || win.isDestroyed() || this.visibilityIntent.get(win) === false) return
       shownAfterLoad = true
       applyWindowIdentity(win)
-      logger.info('WindowManager', `${configKey} 已就绪 (${source})`)
+      logger.info(
+        'WindowManager',
+        __t('electron.logs.windows', '{0} 已就绪 ({1})', [configKey, source]),
+      )
       if (configKey === 'pet') win.showInactive()
       else win.show()
     }
@@ -329,9 +336,15 @@ export class WindowManager {
     setTimeout(() => {
       if (!win.isDestroyed() && !win.isVisible() && this.visibilityIntent.get(win) !== false) {
         if (win.webContents.isLoadingMainFrame()) {
-          logger.warn('WindowManager', `${configKey} 页面加载超时，先显示窗口`)
+          logger.warn(
+            'WindowManager',
+            __t('electron.logs.windows', '{0} 页面加载超时，先显示窗口', [configKey]),
+          )
         } else {
-          logger.info('WindowManager', `${configKey} 首帧事件缺失，显示已加载窗口`)
+          logger.info(
+            'WindowManager',
+            __t('electron.logs.windows', '{0} 首帧事件缺失，显示已加载窗口', [configKey]),
+          )
         }
         showWhenReady('timeout-fallback')
       }
@@ -343,11 +356,24 @@ export class WindowManager {
       if (!isMainFrame) {
         logger.warn(
           'WindowManager',
-          `${configKey} 内嵌页面加载失败: ${desc} (${code}), URL: ${url}`,
+          __t('electron.logs.windows', '{0} 内嵌页面加载失败: {1} ({2}), URL: {3}', [
+            configKey,
+            desc,
+            code,
+            url,
+          ]),
         )
         return
       }
-      logger.error('WindowManager', `${configKey} 加载失败: ${desc} (${code}), URL: ${url}`)
+      logger.error(
+        'WindowManager',
+        __t('electron.logs.windows', '{0} 加载失败: {1} ({2}), URL: {3}', [
+          configKey,
+          desc,
+          code,
+          url,
+        ]),
+      )
       if (!win.isDestroyed() && !win.isVisible() && this.visibilityIntent.get(win) !== false) {
         win.show()
       }
@@ -394,7 +420,7 @@ export class WindowManager {
     if (this.launcherWin && !this.launcherWin.isDestroyed()) {
       this.visibilityIntent.set(this.launcherWin, false)
       this.launcherWin.hide()
-      logger.info('WindowManager', '已隐藏 Launcher 窗口')
+      logger.info('WindowManager', __t('electron.logs.windows', '已隐藏 Launcher 窗口'))
       clearTimeout(this.launcherReleaseTimer)
       const launcher = this.launcherWin
       // 启动完成后释放闲置页面，需要返回启动器时按已有配置重新创建。
@@ -452,7 +478,13 @@ export class WindowManager {
     // 渲染进程崩溃时恢复 Launcher
     this.petWin.webContents.on('render-process-gone', (_e, details) => {
       if (this.destroyingAll || !this.petWin || this.petWin.isDestroyed()) return
-      logger.error('WindowManager', `Pet 渲染进程崩溃: ${details.reason} (${details.exitCode})`)
+      logger.error(
+        'WindowManager',
+        __t('electron.logs.windows', 'Pet 渲染进程崩溃: {0} ({1})', [
+          details.reason,
+          details.exitCode,
+        ]),
+      )
       if (!this.destroyingAll) this.showLauncherWindow()
     })
 
@@ -464,7 +496,10 @@ export class WindowManager {
         (w) => !w.isDestroyed() && w.isVisible(),
       )
       if (!hasVisible && !this.destroyingAll) {
-        logger.info('WindowManager', 'Pet 关闭且无其他可见窗口，恢复 Launcher')
+        logger.info(
+          'WindowManager',
+          __t('electron.logs.windows', 'Pet 关闭且无其他可见窗口，恢复 Launcher'),
+        )
         this.showLauncherWindow()
       }
     })

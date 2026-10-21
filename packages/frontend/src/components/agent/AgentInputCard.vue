@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import { computed, nextTick, ref, watch } from 'vue'
 import {
   getAgentInputQuestions,
@@ -154,23 +156,29 @@ function submit(): void {
     <header class="agent-input-card__header">
       <AgentRequestIdentity
         :agent-id="request.principalId || 'pero'"
-        subtitle="回答后会继续刚才的工作"
+        :subtitle="__t('ui.agent', '回答后会继续刚才的工作')"
       >
-        <template #title>想问问你</template>
+        <template #title>{{ __t('ui.agent', '想问问你') }}</template>
       </AgentRequestIdentity>
       <span class="agent-input-card__waiting">
         <i />
-        等待回答
+        {{ __t('ui.agent', '等待回答') }}
       </span>
     </header>
-    <nav v-if="questions.length > 1" class="question-steps" aria-label="题目导航">
+    <nav
+      v-if="questions.length > 1"
+      class="question-steps"
+      :aria-label="__t('ui.agent', '题目导航')"
+    >
       <button
         v-for="(question, i) in questions"
         :key="question.id"
         type="button"
         :class="{ active: !review && index === i, done: completed.includes(question.id) }"
         :aria-current="!review && index === i ? 'step' : undefined"
-        :aria-label="`第${i + 1}题${completed.includes(question.id) ? '，已填写' : ''}`"
+        :aria-label="
+          __t('ui.agent', '第{0}题{1}', [i + 1, completed.includes(question.id) ? '，已填写' : ''])
+        "
         :disabled="loading"
         @click="visit(i)"
       >
@@ -185,14 +193,14 @@ function submit(): void {
     <fieldset :disabled="loading" class="question-body">
       <template v-if="!review">
         <div class="question-caption">
-          <span>第 {{ index + 1 }} 题</span>
+          <span>{{ __t('ui.agent', '第') }} {{ index + 1 }} {{ __t('ui.agent', '题') }}</span>
           <span>
             {{
               current.multiple && current.options.length
-                ? '可多选'
+                ? __t('ui.agent', '可多选')
                 : current.options.length
-                  ? '选一项，或自己回答'
-                  : '写下你的回答'
+                  ? __t('ui.agent', '选一项，或自己回答')
+                  : __t('ui.agent', '写下你的回答')
             }}
           </span>
         </div>
@@ -225,10 +233,10 @@ function submit(): void {
               v-if="current.allowFreeText !== false"
               class="question-option__supplement"
               type="button"
-              :aria-label="`选择${option.label}并补充`"
+              :aria-label="__t('ui.agent', '选择{0}并补充', [option.label])"
               @click="select(option.id, true)"
             >
-              补充
+              {{ __t('ui.agent', '补充') }}
             </button>
           </div>
         </div>
@@ -239,30 +247,36 @@ function submit(): void {
           @click="customize"
         >
           <PixelIcon name="edit" size="xs" />
-          自定义回答
+          {{ __t('ui.agent', '自定义回答') }}
         </button>
         <label v-if="showText && current.allowFreeText !== false" class="question-text">
-          <span>{{ currentAnswer.selectedOptionIds.length ? '补充说明' : '你的回答' }}</span>
+          <span>
+            {{
+              currentAnswer.selectedOptionIds.length
+                ? __t('ui.agent', '补充说明')
+                : __t('ui.agent', '你的回答')
+            }}
+          </span>
           <textarea
             ref="textarea"
             v-model="currentAnswer.message"
             rows="3"
             maxlength="4000"
-            placeholder="写下你的想法…"
+            :placeholder="__t('ui.agent', '写下你的想法…')"
             @input="edit"
           />
         </label>
         <div class="question-controls">
           <button v-if="index > 0" type="button" class="question-back" @click="visit(index - 1)">
-            上一题
+            {{ __t('ui.agent', '上一题') }}
           </button>
           <PButton size="sm" :disabled="loading || !valid(currentAnswer)" @click="complete">
-            {{ questions.length === 1 ? '确认回答' : '完成本题' }}
+            {{ questions.length === 1 ? __t('ui.agent', '确认回答') : __t('ui.agent', '完成本题') }}
           </PButton>
         </div>
       </template>
       <template v-else>
-        <h3 ref="questionHeading" tabindex="-1">回答都在这里了</h3>
+        <h3 ref="questionHeading" tabindex="-1">{{ __t('ui.agent', '回答都在这里了') }}</h3>
         <ol class="question-review">
           <li v-for="(question, i) in questions" :key="question.id">
             <div>
@@ -272,10 +286,10 @@ function submit(): void {
             <button
               type="button"
               class="question-back"
-              :aria-label="`修改第${i + 1}题`"
+              :aria-label="__t('ui.agent', '修改第{0}题', [i + 1])"
               @click="visit(i)"
             >
-              修改
+              {{ __t('ui.agent', '修改') }}
             </button>
           </li>
         </ol>
@@ -290,11 +304,11 @@ function submit(): void {
         :disabled="loading"
         @click="emit('answer', { skipped: true })"
       >
-        暂时跳过
+        {{ __t('ui.agent', '暂时跳过') }}
       </button>
-      <span v-if="!review" class="question-footnote">填好后统一提交</span>
+      <span v-if="!review" class="question-footnote">{{ __t('ui.agent', '填好后统一提交') }}</span>
       <PButton v-else size="sm" :disabled="loading || !allDone" @click="submit">
-        {{ loading ? '正在提交…' : '提交回答' }}
+        {{ loading ? __t('ui.agent', '正在提交…') : __t('ui.agent', '提交回答') }}
       </PButton>
     </footer>
   </article>

@@ -76,6 +76,42 @@ const draft = {
 }
 
 describe('EventMemoryService真实双库存储', () => {
+  it('编辑一轮只重开该轮，整批其他已审阅来源在重启后仍保持覆盖', async () => {
+    const { db, repo } = createFixture()
+    await repo.saveCoverage({
+      id: 'shared-batch',
+      agentId: 'pero',
+      threadId: 'thread-1',
+      pairIds: ['pair-a', 'pair-b', 'pair-c'],
+      messageIds: [],
+      outcome: 'reviewed_no_event',
+      eventNoteIds: [],
+      mode: 'background',
+      coveredAt: '2026-10-21T04:00:00.000Z',
+    })
+    await repo.invalidateCoverageByPairIds('thread-1', ['pair-b'])
+    const restarted = new EventNoteRepository(db)
+    expect(await restarted.coveredPairIds('pero', 'thread-1')).toEqual(
+      new Set(['pair-a', 'pair-c']),
+    )
+    expect(
+      await restarted.claimCoverageRange({
+        agentId: 'pero',
+        threadId: 'thread-1',
+        pairIds: ['pair-a'],
+        ownerId: 'repeat',
+      }),
+    ).toBe(false)
+    expect(
+      await restarted.claimCoverageRange({
+        agentId: 'pero',
+        threadId: 'thread-1',
+        pairIds: ['pair-b'],
+        ownerId: 'edited',
+      }),
+    ).toBe(true)
+  })
+
   it('关闭向量后语义与混合查询均走纯文本，不调用 Embedding 或已有向量索引', async () => {
     const { service, stores, embeddings } = createFixture()
     const note = await service.create(draft)
@@ -336,13 +372,13 @@ describe('EventMemoryService真实双库存储', () => {
     closeDrizzleConnection(db)
   })
 
-  it('主动写入后的计时重置在数据库和新仓库实例中保持有效', async () => {
+  it('主动写入不重置八小时补记时钟，累计值在新仓库实例中保持有效', async () => {
     const { db, stores, repo, service } = createFixture()
-    await repo.advanceTimer('agent-silence:pero', 6 * 60 * 60)
+    await repo.advanceTimer('background-runtime:pero', 6 * 60 * 60)
     await service.create(draft, 'reset-active-memory')
-    expect(await repo.advanceTimer('agent-silence:pero', 60)).toBe(60)
+    expect(await repo.advanceTimer('background-runtime:pero', 60)).toBe(6 * 60 * 60 + 60)
     const restartedRepo = new EventNoteRepository(db)
-    expect(await restartedRepo.advanceTimer('agent-silence:pero', 60)).toBe(120)
+    expect(await restartedRepo.advanceTimer('background-runtime:pero', 60)).toBe(6 * 60 * 60 + 120)
     stores.closeAll()
     closeDrizzleConnection(db)
   })

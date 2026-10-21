@@ -3,11 +3,16 @@ import type { LlmService, ModelConfig } from '../llm/llmService'
 import type { EventReflectionModel, ReflectionDecision } from './eventReflectionService'
 import { formatEventTime } from './eventMemoryTime'
 import { TASK_PROMPTS } from '../prompt/taskPrompts'
+import type { MemoryPersonaResolver } from './memoryPersona'
 
 export class LlmEventReflectionModel implements EventReflectionModel {
   constructor(
     private llm: LlmService,
     private getModelConfig: () => Promise<ModelConfig | null>,
+    private getPersona: MemoryPersonaResolver = async (agentId) => ({
+      agent_id: agentId,
+      agent_name: agentId,
+    }),
   ) {}
 
   async reflect(input: {
@@ -17,6 +22,7 @@ export class LlmEventReflectionModel implements EventReflectionModel {
   }): Promise<ReflectionDecision> {
     const config = await this.getModelConfig()
     if (!config) throw new Error('Reflection模型未配置')
+    const persona = await this.getPersona(input.event.agentId, input.event.origin.channel)
     input.signal?.throwIfAborted()
     const output = await this.llm.chatText(
       config,
@@ -40,6 +46,9 @@ export class LlmEventReflectionModel implements EventReflectionModel {
         temperature: 0.1,
         signal: input.signal,
         promptTask: 'memory.reflect',
+        promptChannel: input.event.origin.channel,
+        promptVariables: persona,
+        promptSources: ['persona_definition', 'channel_patch'],
         maxTokens: 1500,
         usageContext: { agentId: input.event.agentId, purpose: 'memory' },
       },

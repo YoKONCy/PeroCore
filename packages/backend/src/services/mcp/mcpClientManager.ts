@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * MCP Client Manager — MCP 服务器连接管理
  *
@@ -71,7 +72,7 @@ export class McpClientManager {
   private connections = new Map<string, McpConnection>()
 
   constructor(private mcpRepo: McpConfigRepository) {
-    logger.info('MCP Client Manager 初始化完成')
+    logger.info(__t('logs.mcp', 'MCP Client Manager 初始化完成'))
   }
 
   /**
@@ -87,11 +88,11 @@ export class McpClientManager {
     }
 
     if (configs.length === 0) {
-      logger.info('无已启用的 MCP 服务器配置')
+      logger.info(__t('logs.mcp', '无已启用的 MCP 服务器配置'))
       return
     }
 
-    logger.info(`正在连接 ${configs.length} 个 MCP 服务器...`)
+    logger.info(__t('logs.mcp', '正在连接 {0} 个 MCP 服务器...', [configs.length]))
 
     const results = await Promise.allSettled(configs.map((config) => this.connectOne(config)))
 
@@ -100,7 +101,7 @@ export class McpClientManager {
       if (result.status === 'fulfilled') successCount++
     }
 
-    logger.info(`MCP 连接完成: ${successCount}/${configs.length} 成功`)
+    logger.info(__t('logs.mcp', 'MCP 连接完成: {0}/{1} 成功', [successCount, configs.length]))
   }
 
   /**
@@ -122,14 +123,14 @@ export class McpClientManager {
       await this.disconnectOne(name)
     }
 
-    logger.info(`正在连接 MCP 服务器: ${name} (type=${config.type})`)
+    logger.info(__t('logs.mcp', '正在连接 MCP 服务器: {0} (type={1})', [name, config.type]))
 
     try {
       // 创建 Transport
       const transport = this.createTransport(config)
 
       // 创建 Client
-      const client = new Client({ name: `infos-${name}`, version: '0.9.4' }, { capabilities: {} })
+      const client = new Client({ name: `infos-${name}`, version: '0.9.5' }, { capabilities: {} })
 
       // 连接
       await client.connect(transport)
@@ -153,12 +154,14 @@ export class McpClientManager {
       }
 
       this.connections.set(name, connection)
-      logger.success(`MCP 服务器 "${name}" 已连接，发现 ${tools.length} 个工具`)
+      logger.success(
+        __t('logs.mcp', 'MCP 服务器 "{0}" 已连接，发现 {1} 个工具', [name, tools.length]),
+      )
 
       return connection
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err)
-      logger.error(`MCP 服务器 "${name}" 连接失败: ${errorMsg}`)
+      logger.error(__t('logs.mcp', 'MCP 服务器 "{0}" 连接失败: {1}', [name, errorMsg]))
 
       const failedConnection: McpConnection = {
         configId: id,
@@ -186,11 +189,11 @@ export class McpClientManager {
         await conn.transport.close()
       }
     } catch (err) {
-      logger.warn(`MCP 服务器 "${name}" 断开时出错: ${err}`)
+      logger.warn(__t('logs.mcp', 'MCP 服务器 "{0}" 断开时出错: {1}', [name, err]))
     }
 
     this.connections.delete(name)
-    logger.info(`MCP 服务器 "${name}" 已断开`)
+    logger.info(__t('logs.mcp', 'MCP 服务器 "{0}" 已断开', [name]))
   }
 
   /**
@@ -199,7 +202,7 @@ export class McpClientManager {
   async disconnectAll(): Promise<void> {
     const names = [...this.connections.keys()]
     await Promise.allSettled(names.map((name) => this.disconnectOne(name)))
-    logger.info('所有 MCP 连接已断开')
+    logger.info(__t('logs.mcp', '所有 MCP 连接已断开'))
   }
 
   /**
@@ -208,7 +211,7 @@ export class McpClientManager {
   async reconnectOne(name: string): Promise<McpConnection | null> {
     const config = await this.mcpRepo.findByName(name)
     if (!config) {
-      logger.warn(`未找到 MCP 配置: ${name}`)
+      logger.warn(__t('logs.mcp', '未找到 MCP 配置: {0}', [name]))
       return null
     }
     return this.connectOne(config)
@@ -232,7 +235,7 @@ export class McpClientManager {
       throw new Error(`MCP 服务器 "${serverName}" 未连接`)
     }
 
-    logger.debug(`调用 MCP 工具: ${serverName}/${toolName}`)
+    logger.debug(__t('logs.mcp', '调用 MCP 工具: {0}/{1}', [serverName, toolName]))
 
     if (signal?.aborted) throw new Error('MCP工具调用已取消')
     const result = await conn.client.callTool(

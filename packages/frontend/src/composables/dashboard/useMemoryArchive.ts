@@ -1,3 +1,4 @@
+import { t as __t } from '../../i18n/index'
 /**
  * useMemoryArchive — 核心记忆档案 composable
  *
@@ -120,19 +121,27 @@ export function useMemoryArchive(
       const value = searchQuery.value
       list.push({
         key: 'query',
-        label: `搜索：${value.trim()}`,
+        get label() {
+          return __t('ui.settings', '搜索：{0}', [value.trim()])
+        },
         remove: () => (searchQuery.value = ''),
       })
     }
     if (channel.value !== 'all') {
       const value = channel.value
-      list.push({ key: 'channel', label: `来源：${value}`, remove: () => (channel.value = 'all') })
+      list.push({
+        key: 'channel',
+        get label() {
+          return __t('ui.settings', '来源：{0}', [value])
+        },
+        remove: () => (channel.value = 'all'),
+      })
     }
     if (mode.value !== 'all') {
       const value = mode.value
       list.push({
         key: 'mode',
-        label: value === 'active' ? '主动记事' : '后台炼化',
+        label: value === 'active' ? __t('ui.settings', '主动记事') : __t('ui.settings', '后台炼化'),
         remove: () => (mode.value = 'all'),
       })
     }
@@ -141,7 +150,9 @@ export function useMemoryArchive(
       const max = importanceMax.value
       list.push({
         key: 'importance',
-        label: `重要度 ${min}–${max}`,
+        get label() {
+          return __t('ui.settings', '重要度 {0}–{1}', [min, max])
+        },
         remove: () => {
           importanceMin.value = 0
           importanceMax.value = 10
@@ -164,7 +175,9 @@ export function useMemoryArchive(
       const to = eventAtTo.value
       list.push({
         key: 'eventRange',
-        label: `事件时间 ${from || '…'} ~ ${to || '…'}`,
+        get label() {
+          return __t('ui.settings', '事件时间 {0} ~ {1}', [from || '…', to || '…'])
+        },
         remove: () => {
           eventAtFrom.value = ''
           eventAtTo.value = ''
@@ -176,7 +189,9 @@ export function useMemoryArchive(
       const to = createdAtTo.value
       list.push({
         key: 'createdRange',
-        label: `记录时间 ${from || '…'} ~ ${to || '…'}`,
+        get label() {
+          return __t('ui.settings', '记录时间 {0} ~ {1}', [from || '…', to || '…'])
+        },
         remove: () => {
           createdAtFrom.value = ''
           createdAtTo.value = ''

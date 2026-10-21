@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { getDisplayLocale } from '../../../i18n/index'
+
+import { t as __t } from '../../../i18n/index'
+
 import { computed, onMounted, ref, watch } from 'vue'
 import type {
   FactArchiveObject,
@@ -73,7 +77,7 @@ async function loadFacts(): Promise<void> {
     if (!selected.value) selectedId.value = archive.value.items[0]?.objectId ?? null
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '事实库读取失败'
-    logger.error('KnowledgeTab', '读取事实库失败', cause)
+    logger.error('KnowledgeTab', __t('logs.frontend.settings', '读取事实库失败'), cause)
   } finally {
     loading.value = false
   }
@@ -90,7 +94,7 @@ function formatDate(value: string): string {
   const date = new Date(value)
   return Number.isNaN(date.getTime())
     ? value
-    : date.toLocaleString('zh-CN', {
+    : date.toLocaleString(getDisplayLocale(), {
         year: 'numeric',
         month: '2-digit',
         day: '2-digit',
@@ -100,7 +104,7 @@ function formatDate(value: string): string {
 }
 
 function confidenceLabel(value?: number): string {
-  if (value === undefined) return '未标注'
+  if (value === undefined) return __t('ui.settings', '未标注')
   return `${Math.round(value <= 1 ? value * 100 : value)}%`
 }
 
@@ -118,9 +122,12 @@ async function confirmRetract(): Promise<void> {
     else await knowledgeApi.retractFact(target.id)
     retractTarget.value = null
     await loadFacts()
-    notif.toast(action === 'delete' ? '事实已永久删除' : '事实已撤回', 'success')
+    notif.toast(
+      action === 'delete' ? __t('ui.settings', '事实已永久删除') : __t('ui.settings', '事实已撤回'),
+      'success',
+    )
   } catch (cause) {
-    notif.toast('删除事实失败：' + (cause as Error).message, 'error')
+    notif.toast(__t('ui.settings', '删除事实失败：') + (cause as Error).message, 'error')
     retractTarget.value = null
     await loadFacts()
   } finally {
@@ -148,57 +155,57 @@ onMounted(loadFacts)
       <div>
         <h2 class="font-pixel">
           <PixelIcon name="database" size="md" />
-          知识库
+          {{ __t('ui.settings', '知识库') }}
         </h2>
-        <p>共享事实与外部资料 · SHARED KNOWLEDGE ARCHIVE</p>
+        <p>{{ __t('ui.settings', '共享事实与外部资料 · SHARED KNOWLEDGE ARCHIVE') }}</p>
       </div>
       <div v-if="section === 'facts'" class="knowledge-stats">
         <span>
           <b class="font-pixel">{{ archive.stats.objectCount }}</b>
-          事实对象
+          {{ __t('ui.settings', '事实对象') }}
         </span>
         <span>
           <b class="font-pixel">{{ archive.stats.activeFactCount }}</b>
-          有效事实
+          {{ __t('ui.settings', '有效事实') }}
         </span>
         <span>
           <b class="font-pixel">{{ archive.stats.historicalFactCount }}</b>
-          历史事实
+          {{ __t('ui.settings', '历史事实') }}
         </span>
         <span>
           <b class="font-pixel">{{ archive.stats.retractedFactCount }}</b>
-          已撤回
+          {{ __t('ui.settings', '已撤回') }}
         </span>
       </div>
       <div v-else class="knowledge-stats">
         <span>
           <b class="font-pixel">{{ documentStats.documentCount }}</b>
-          资料
+          {{ __t('ui.settings', '资料') }}
         </span>
         <span>
           <b class="font-pixel">{{ documentStats.readyCount }}</b>
-          可检索
+          {{ __t('ui.settings', '可检索') }}
         </span>
         <span>
           <b class="font-pixel">{{ documentStats.pendingCount }}</b>
-          整理中
+          {{ __t('ui.settings', '整理中') }}
         </span>
         <span>
           <b class="font-pixel">{{ documentStats.partCount }}</b>
-          内容部分
+          {{ __t('ui.settings', '内容部分') }}
         </span>
       </div>
     </header>
 
-    <nav class="section-tabs" aria-label="知识库分类">
+    <nav class="section-tabs" :aria-label="__t('ui.settings', '知识库分类')">
       <button :class="{ active: section === 'facts' }" @click="section = 'facts'">
         <PixelIcon name="database" size="sm" />
-        事实库
+        {{ __t('ui.settings', '事实库') }}
         <small>{{ archive.stats.activeFactCount }}</small>
       </button>
       <button :class="{ active: section === 'documents' }" @click="section = 'documents'">
         <PixelIcon name="file" size="sm" />
-        文档知识库
+        {{ __t('ui.settings', '文档知识库') }}
         <small>{{ documentStats.documentCount }}</small>
       </button>
     </nav>
@@ -207,23 +214,31 @@ onMounted(loadFacts)
       <aside class="object-panel">
         <label class="search-box">
           <PixelIcon name="search" size="sm" />
-          <input v-model="query" placeholder="搜索对象、别名或事实内容……" />
+          <input v-model="query" :placeholder="__t('ui.settings', '搜索对象、别名或事实内容……')" />
         </label>
 
         <div v-if="loading" class="panel-state">
           <PixelIcon name="refresh" size="md" animation="spin" />
-          正在翻阅事实档案…
+          {{ __t('ui.settings', '正在翻阅事实档案…') }}
         </div>
         <div v-else-if="error" class="panel-state error-state">
           <PixelIcon name="alert" size="md" />
           {{ error }}
-          <PButton size="sm" @click="loadFacts">重新加载</PButton>
+          <PButton size="sm" @click="loadFacts">{{ __t('ui.settings', '重新加载') }}</PButton>
         </div>
         <div v-else-if="!archive.items.length" class="panel-state">
           <PixelIcon name="database" size="lg" />
-          <b>{{ query ? '没有找到相关事实' : '事实库还是空的' }}</b>
+          <b>
+            {{
+              query ? __t('ui.settings', '没有找到相关事实') : __t('ui.settings', '事实库还是空的')
+            }}
+          </b>
           <span>
-            {{ query ? '换个名称、别名或关键词试试' : 'Agent 会在对话与任务中逐渐整理共同事实' }}
+            {{
+              query
+                ? __t('ui.settings', '换个名称、别名或关键词试试')
+                : __t('ui.settings', 'Agent 会在对话与任务中逐渐整理共同事实')
+            }}
           </span>
         </div>
         <div v-else class="object-list">
@@ -235,9 +250,9 @@ onMounted(loadFacts)
           >
             <span>
               <b>{{ item.standardName }}</b>
-              <small>{{ item.activeFacts.length }} 条</small>
+              <small>{{ item.activeFacts.length }} {{ __t('ui.settings', '条') }}</small>
             </span>
-            <em>{{ item.aliases.slice(0, 2).join(' · ') || '暂无别名' }}</em>
+            <em>{{ item.aliases.slice(0, 2).join(' · ') || __t('ui.settings', '暂无别名') }}</em>
           </button>
         </div>
       </aside>
@@ -245,20 +260,23 @@ onMounted(loadFacts)
       <main class="fact-inspector">
         <div v-if="!selected" class="inspector-empty">
           <PixelIcon name="database" size="xl" />
-          <b>选择一个事实对象</b>
-          <span>查看它当前成立的事实、别名和历史变化</span>
+          <b>{{ __t('ui.settings', '选择一个事实对象') }}</b>
+          <span>{{ __t('ui.settings', '查看它当前成立的事实、别名和历史变化') }}</span>
         </div>
         <template v-else>
           <header class="object-head">
             <span class="object-mark" aria-hidden="true">◇</span>
             <div>
               <h3>{{ selected.standardName }}</h3>
-              <p>事实对象 · {{ selected.activeFacts.length }} 条有效事实</p>
+              <p>
+                {{ __t('ui.settings', '事实对象 ·') }} {{ selected.activeFacts.length }}
+                {{ __t('ui.settings', '条有效事实') }}
+              </p>
             </div>
           </header>
 
           <section v-if="selected.aliases.length" class="alias-section">
-            <h4>别名</h4>
+            <h4>{{ __t('ui.settings', '别名') }}</h4>
             <div>
               <span v-for="alias in selected.aliases" :key="alias">{{ alias }}</span>
             </div>
@@ -267,18 +285,19 @@ onMounted(loadFacts)
           <section class="fact-section">
             <h4>
               <PixelIcon name="sparkle" size="xs" />
-              当前事实
+              {{ __t('ui.settings', '当前事实') }}
             </h4>
             <div v-if="!selected.activeFacts.length" class="inline-empty">
-              该对象目前没有有效事实
+              {{ __t('ui.settings', '该对象目前没有有效事实') }}
             </div>
             <article v-for="fact in selected.activeFacts" :key="fact.id" class="fact-card">
               <p>{{ fact.statement }}</p>
               <footer class="fact-footer">
                 <span class="fact-source">
-                  {{ fact.source || '来源未标注' }} · {{ formatDate(fact.observedAt) }}
+                  {{ fact.source || __t('ui.settings', '来源未标注') }} ·
+                  {{ formatDate(fact.observedAt) }}
                 </span>
-                <div class="fact-actions" role="group" aria-label="事实操作">
+                <div class="fact-actions" role="group" :aria-label="__t('ui.settings', '事实操作')">
                   <PButton
                     type="button"
                     size="sm"
@@ -286,45 +305,49 @@ onMounted(loadFacts)
                     :aria-expanded="expandedFacts.has(fact.id)"
                     @click="toggleFact(fact.id)"
                   >
-                    {{ expandedFacts.has(fact.id) ? '收起' : '详情' }}
+                    {{
+                      expandedFacts.has(fact.id)
+                        ? __t('ui.settings', '收起')
+                        : __t('ui.settings', '详情')
+                    }}
                   </PButton>
                   <PButton
                     type="button"
                     size="sm"
                     variant="secondary"
-                    title="撤回事实"
+                    :title="__t('ui.settings', '撤回事实')"
                     @click="selectFactAction(fact, 'retract')"
                   >
-                    撤回
+                    {{ __t('ui.settings', '撤回') }}
                   </PButton>
                   <PButton
                     type="button"
                     size="sm"
                     variant="secondary"
                     class="fact-action--danger"
-                    title="永久删除事实"
+                    :title="__t('ui.settings', '永久删除事实')"
                     @click="selectFactAction(fact, 'delete')"
                   >
                     <PixelIcon name="trash" size="xs" />
-                    永久删除
+                    {{ __t('ui.settings', '永久删除') }}
                   </PButton>
                 </div>
               </footer>
               <dl v-if="expandedFacts.has(fact.id)">
                 <div>
-                  <dt>来源</dt>
-                  <dd>{{ fact.source || '未标注' }}</dd>
+                  <dt>{{ __t('ui.settings', '来源') }}</dt>
+                  <dd>{{ fact.source || __t('ui.settings', '未标注') }}</dd>
                 </div>
                 <div>
-                  <dt>观察时间</dt>
+                  <dt>{{ __t('ui.settings', '观察时间') }}</dt>
                   <dd>{{ formatDate(fact.observedAt) }}</dd>
                 </div>
                 <div>
-                  <dt>记录时间</dt>
+                  <dt>{{ __t('ui.settings', '记录时间') }}</dt>
                   <dd>{{ formatDate(fact.createdAt) }}</dd>
                 </div>
                 <div>
-                  <dt>置信度</dt>
+                  <dt>{{ __t('ui.settings', '置信度') }}</dt>
                   <dd>{{ confidenceLabel(fact.confidence) }}</dd>
                 </div>
               </dl>
@@ -334,18 +357,18 @@ onMounted(loadFacts)
           <section v-if="selected.historicalFacts.length" class="history-section">
             <button class="history-toggle" @click="historyOpen = !historyOpen">
               <PixelIcon name="chevron-down" size="xs" :class="{ open: historyOpen }" />
-              历史事实 {{ selected.historicalFacts.length }}
+              {{ __t('ui.settings', '历史事实') }} {{ selected.historicalFacts.length }}
             </button>
             <div v-if="historyOpen" class="history-list">
               <article v-for="fact in selected.historicalFacts" :key="fact.id" class="history-card">
-                <span>已被取代</span>
+                <span>{{ __t('ui.settings', '已被取代') }}</span>
                 <p>{{ fact.statement }}</p>
                 <time>{{ formatDate(fact.observedAt) }}</time>
                 <PButton size="sm" variant="danger" @click="selectFactAction(fact, 'delete')">
-                  永久删除
+                  {{ __t('ui.settings', '永久删除') }}
                 </PButton>
                 <template v-if="replacementFor(fact)">
-                  <i>↓ 被以下事实取代</i>
+                  <i>{{ __t('ui.settings', '↓ 被以下事实取代') }}</i>
                   <strong>{{ replacementFor(fact)?.statement }}</strong>
                 </template>
               </article>
@@ -355,15 +378,15 @@ onMounted(loadFacts)
           <section v-if="selected.retractedFacts.length" class="history-section">
             <button class="history-toggle" @click="historyOpen = !historyOpen">
               <PixelIcon name="chevron-down" size="xs" :class="{ open: historyOpen }" />
-              已撤回 {{ selected.retractedFacts.length }}
+              {{ __t('ui.settings', '已撤回') }} {{ selected.retractedFacts.length }}
             </button>
             <div v-if="historyOpen" class="history-list">
               <article v-for="fact in selected.retractedFacts" :key="fact.id" class="history-card">
-                <span>已撤回</span>
+                <span>{{ __t('ui.settings', '已撤回') }}</span>
                 <p>{{ fact.statement }}</p>
                 <time>{{ formatDate(fact.observedAt) }}</time>
                 <PButton size="sm" variant="danger" @click="selectFactAction(fact, 'delete')">
-                  永久删除
+                  {{ __t('ui.settings', '永久删除') }}
                 </PButton>
               </article>
             </div>
@@ -376,13 +399,19 @@ onMounted(loadFacts)
 
     <PDialog
       :model-value="Boolean(retractTarget)"
-      :title="factAction === 'delete' ? '永久删除事实？' : '撤回事实？'"
+      :title="
+        factAction === 'delete'
+          ? __t('ui.settings', '永久删除事实？')
+          : __t('ui.settings', '撤回事实？')
+      "
       :message="
         factAction === 'delete'
-          ? '正文、索引及操作记录中的副本将被清理，无法恢复。'
-          : '退出有效事实，保留历史记录。'
+          ? __t('ui.settings', '将永久删除，无法恢复。')
+          : __t('ui.settings', '退出有效事实，保留历史记录。')
       "
-      :confirm-text="factAction === 'delete' ? '永久删除' : '撤回'"
+      :confirm-text="
+        factAction === 'delete' ? __t('ui.settings', '永久删除') : __t('ui.settings', '撤回')
+      "
       confirm-variant="danger"
       :loading="retracting"
       :auto-close="false"

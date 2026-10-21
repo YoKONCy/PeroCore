@@ -1,3 +1,4 @@
+import { t as __t } from '../i18n/index'
 /**
  * Internal Surface SSE 客户端。
  *
@@ -6,6 +7,7 @@
 
 import type { SurfaceFrame } from '@infos/shared'
 import { getBaseUrl } from './transportUtils'
+import { clientFetch } from './transport'
 import { logger } from '../lib/logger'
 
 /** 执行完成事件。 */
@@ -68,17 +70,64 @@ export function streamRequest(endpoint: string, body: unknown, events: SseEvents
     /** 是否收到服务端明确的 error 终态（避免再误报流截断）。 */
     let terminalErrorReceived = false
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
+    let lastReceivedAt = Date.now()
+
+    // 服务端每 15 秒发送保活帧。超过三个周期无数据时只结束观察连接，由上层同步后台任务。
+    // 不重新 POST 同一任务，也不把手机锁屏或网络切换当成停止后台执行。
+    const checkLiveness = () => {
+      if (controller.signal.aborted || doneReceived || terminalErrorReceived) return
+      if (Date.now() - lastReceivedAt < 45_000) return
+      controller.abort()
+      events.onError?.({
+        code: 'STREAM_ERROR',
+        get message() {
+          return __t('ui.stream', '对话连接暂时中断，正在同步后台执行结果')
+        },
+      })
+    }
+    const handleOffline = () => {
+      if (controller.signal.aborted || doneReceived || terminalErrorReceived) return
+      controller.abort()
+      events.onError?.({
+        code: 'NETWORK_ERROR',
+        get message() {
+          return __t('ui.stream', '网络已断开，恢复后将自动同步后台结果')
+        },
+      })
+    }
+    const watchdog = setInterval(checkLiveness, 5_000)
+    const cleanupObservation = () => {
+      clearInterval(watchdog)
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('online', checkLiveness)
+        window.removeEventListener('offline', handleOffline)
+        window.removeEventListener('pageshow', checkLiveness)
+        document.removeEventListener('visibilitychange', checkLiveness)
+      }
+    }
+    const handleAbort = () => {
+      cleanupObservation()
+      void reader?.cancel().catch(() => {})
+    }
+    controller.signal.addEventListener('abort', handleAbort, { once: true })
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', checkLiveness)
+      window.addEventListener('offline', handleOffline)
+      window.addEventListener('pageshow', checkLiveness)
+      document.addEventListener('visibilitychange', checkLiveness)
+    }
 
     try {
-      // 直接用 fetch (Transport 没有 SSE 接口，这里是允许的二进制/流式例外)
+      // 流式请求也复用通信层的服务端选择、凭据与未授权处理。
       const baseUrl = getBaseUrl()
 
-      const res = await fetch(`${baseUrl}/api${endpoint}`, {
+      const res = await clientFetch(`${baseUrl}/api${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
         signal: controller.signal,
       })
+      if (controller.signal.aborted) return
 
       if (!res.ok || !res.body) {
         const failure = (await res.json().catch(() => null)) as {
@@ -99,7 +148,9 @@ export function streamRequest(endpoint: string, body: unknown, events: SseEvents
       // eslint-disable-next-line no-constant-condition
       while (true) {
         const { done, value } = await reader.read()
+        if (controller.signal.aborted) return
         if (done) break
+        lastReceivedAt = Date.now()
 
         buffer += decoder.decode(value, { stream: true })
 
@@ -118,11 +169,13 @@ export function streamRequest(endpoint: string, body: unknown, events: SseEvents
               terminalErrorReceived = true
             },
           )
+          if (doneReceived || terminalErrorReceived) break
         }
+        if (doneReceived || terminalErrorReceived) break
       }
 
       // 处理最后残余
-      if (buffer.trim()) {
+      if (buffer.trim() && !doneReceived && !terminalErrorReceived) {
         parseSseEvent(
           buffer,
           events,
@@ -139,7 +192,9 @@ export function streamRequest(endpoint: string, body: unknown, events: SseEvents
       if (!doneReceived && !terminalErrorReceived) {
         events.onError?.({
           code: 'STREAM_TRUNCATED',
-          message: '流式响应被截断：未收到 done 事件',
+          get message() {
+            return __t('ui.stream', '流式响应被截断：未收到 done 事件')
+          },
         })
       }
     } catch (err) {
@@ -149,6 +204,8 @@ export function streamRequest(endpoint: string, body: unknown, events: SseEvents
         message: (err as Error).message,
       })
     } finally {
+      cleanupObservation()
+      controller.signal.removeEventListener('abort', handleAbort)
       if (reader) {
         await reader.cancel().catch(() => {})
         reader.releaseLock()
@@ -183,7 +240,7 @@ function parseSseEvent(
   try {
     parsed = JSON.parse(data)
   } catch {
-    logger.warn('SSE', '收到无法解析的流事件', eventType)
+    logger.warn('SSE', __t('logs.frontend.stream', '收到无法解析的流事件'), eventType)
     return
   }
   // 回调错误必须向外传播，不能伪装成 JSON 解析失败而吞掉消息。

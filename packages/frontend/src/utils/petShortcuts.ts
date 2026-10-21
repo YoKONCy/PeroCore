@@ -1,3 +1,4 @@
+import { t as __t } from '../i18n/index'
 import { pttVirtualKeys } from '@infos/shared'
 
 const acceleratorKeys: Record<string, string> = {
@@ -101,10 +102,16 @@ export function petShortcutLabels(binding: string): string[] {
     Control: 'Ctrl',
     Meta: mac ? '⌘' : 'Win',
     Super: mac ? '⌘' : 'Win',
-    Space: '空格',
+    get Space() {
+      return __t('ui.petShortcuts', '空格')
+    },
     Return: 'Enter',
-    Mouse4: '鼠标侧键 4',
-    Mouse5: '鼠标侧键 5',
+    get Mouse4() {
+      return __t('ui.petShortcuts', '鼠标侧键 4')
+    },
+    get Mouse5() {
+      return __t('ui.petShortcuts', '鼠标侧键 5')
+    },
     ArrowUp: '↑',
     Up: '↑',
     ArrowDown: '↓',
@@ -125,17 +132,37 @@ export function petShortcutLabels(binding: string): string[] {
     Comma: ',',
     Period: '.',
     Slash: '/',
-    NumpadEnter: '小键盘 Enter',
-    NumpadAdd: '小键盘 +',
-    numadd: '小键盘 +',
-    NumpadSubtract: '小键盘 -',
-    numsub: '小键盘 -',
-    NumpadMultiply: '小键盘 ×',
-    nummult: '小键盘 ×',
+    get NumpadEnter() {
+      return __t('ui.petShortcuts', '小键盘 Enter')
+    },
+    get NumpadAdd() {
+      return __t('ui.petShortcuts', '小键盘 +')
+    },
+    get numadd() {
+      return __t('ui.petShortcuts', '小键盘 +')
+    },
+    get NumpadSubtract() {
+      return __t('ui.petShortcuts', '小键盘 -')
+    },
+    get numsub() {
+      return __t('ui.petShortcuts', '小键盘 -')
+    },
+    get NumpadMultiply() {
+      return __t('ui.petShortcuts', '小键盘 ×')
+    },
+    get nummult() {
+      return __t('ui.petShortcuts', '小键盘 ×')
+    },
     NumpadDivide: '小键盘 ÷',
-    numdiv: '小键盘 ÷',
-    NumpadDecimal: '小键盘 .',
-    numdec: '小键盘 .',
+    get numdiv() {
+      return __t('ui.petShortcuts', '小键盘 ÷')
+    },
+    get NumpadDecimal() {
+      return __t('ui.petShortcuts', '小键盘 .')
+    },
+    get numdec() {
+      return __t('ui.petShortcuts', '小键盘 .')
+    },
   }
   return binding
     .split('+')
@@ -144,7 +171,8 @@ export function petShortcutLabels(binding: string): string[] {
       if (labels[key]) return labels[key]!
       if (/^Key[A-Z]$/.test(key)) return key.slice(3)
       if (/^Digit[0-9]$/.test(key)) return key.slice(5)
-      if (/^(num|Numpad)[0-9]$/.test(key)) return `小键盘 ${key.slice(-1)}`
+      if (/^(num|Numpad)[0-9]$/.test(key))
+        return __t('ui.petShortcuts', '小键盘 {0}', [key.slice(-1)])
       return key
     })
 }

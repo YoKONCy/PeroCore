@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto'
-import { AppError } from '@infos/backend/applicationHostAbi'
 import type { AccountSticker, AccountStickerProvider } from '../../runtime/stickerService'
 
 type CallApi = (
@@ -20,11 +19,16 @@ export class NapcatStickers implements AccountStickerProvider {
     params: Record<string, unknown>,
     timeout = 15_000,
   ) {
+    const mutation = ['add_custom_face', 'set_custom_face_desc', 'delete_custom_face'].includes(
+      action,
+    )
     const raw = (await this.callApi(action, params, timeout, accountId).catch((error: unknown) => {
-      if (error instanceof AppError) throw error
-      throw new AppError('EXTERNAL_ERROR', {
-        message: error instanceof Error ? error.message : 'NapCat 表情接口暂不可用',
-      })
+      const code = (error as { code?: string })?.code
+      const rejected = !mutation || code === 'DELIVERY_NOT_SENT' || code === 'DELIVERY_REJECTED'
+      throw Object.assign(
+        new Error(error instanceof Error ? error.message : 'NapCat 表情接口暂不可用'),
+        { rejected, uncertain: !rejected, code: code ?? 'STICKER_TRANSPORT_FAILED', stage: action },
+      )
     })) as {
       status?: string
       retcode?: number
@@ -33,12 +37,14 @@ export class NapcatStickers implements AccountStickerProvider {
       data?: unknown
     }
     if (raw?.status !== 'ok' || raw.retcode !== 0)
-      throw new AppError('EXTERNAL_ERROR', {
-        message: raw?.message || raw?.wording || 'NapCat 表情接口暂不可用',
+      throw Object.assign(new Error(raw?.message || raw?.wording || 'NapCat 表情接口暂不可用'), {
+        rejected: true,
+        code: 'STICKER_PLATFORM_REJECTED',
+        stage: action,
       })
     const native = raw.data
     if (typeof native === 'number' && native !== 0)
-      throw new AppError('EXTERNAL_ERROR', { message: 'QQ 拒绝了表情操作' })
+      throw Object.assign(new Error('QQ 拒绝了表情操作'), { rejected: true, stage: action })
     if (
       native &&
       typeof native === 'object' &&
@@ -46,16 +52,20 @@ export class NapcatStickers implements AccountStickerProvider {
       typeof native.result === 'number' &&
       native.result !== 0
     )
-      throw new AppError('EXTERNAL_ERROR', {
-        message: 'errMsg' in native ? String(native.errMsg) : 'QQ 拒绝了表情操作',
-      })
+      throw Object.assign(
+        new Error('errMsg' in native ? String(native.errMsg) : 'QQ 拒绝了表情操作'),
+        { rejected: true, code: 'STICKER_PLATFORM_REJECTED', stage: action },
+      )
     return raw.data
   }
 
   async list(accountId: string) {
     const raw = await this.invoke(accountId, 'fetch_custom_face_detail', { count: MAX_STICKERS })
     if (!Array.isArray(raw))
-      throw new AppError('EXTERNAL_ERROR', { message: 'NapCat 返回的收藏表情列表格式异常' })
+      throw Object.assign(new Error('NapCat 返回的收藏表情列表格式异常'), {
+        rejected: true,
+        stage: 'list',
+      })
     const stickers: AccountSticker[] = []
     const seen = new Set<string>()
     for (const entry of raw.slice(0, MAX_STICKERS)) {
@@ -81,7 +91,10 @@ export class NapcatStickers implements AccountStickerProvider {
 
   async collect(accountId: string, url: string) {
     if (!/^https?:\/\//i.test(url))
-      throw new AppError('INVALID_PARAMETER', { message: '收藏图片必须来自有效的消息图片链接' })
+      throw Object.assign(new Error('收藏图片必须来自有效的消息图片链接'), {
+        rejected: true,
+        stage: 'preflight',
+      })
     const downloaded = (await this.invoke(
       accountId,
       'download_file',
@@ -89,9 +102,17 @@ export class NapcatStickers implements AccountStickerProvider {
       60_000,
     )) as { file?: string }
     // download_file 未指定 name 时，NapCat 使用内容 MD5 作为文件名。
-    const md5 = downloaded?.file?.split(/[\\/]/).at(-1)?.toLowerCase()
+    const md5 = downloaded?.file
+      ?.split(/[\\/]/)
+      .at(-1)
+      ?.match(/^([a-f\d]{32})(?:\.[a-z\d]+)?$/i)?.[1]
+      ?.toLowerCase()
     if (!md5 || !/^[a-f0-9]{32}$/.test(md5))
-      throw new AppError('EXTERNAL_ERROR', { message: 'NapCat 下载结果未提供可确认的图片 MD5' })
+      throw Object.assign(new Error('NapCat 下载结果未提供可确认的图片 MD5，尚未提交收藏'), {
+        rejected: true,
+        code: 'STICKER_DOWNLOAD_INVALID',
+        stage: 'download',
+      })
     const existing = await this.list(accountId)
     if (!existing.stickers.some((item) => item.md5.toLowerCase() === md5))
       await this.invoke(accountId, 'add_custom_face', { file: downloaded.file, md5 }, 60_000)

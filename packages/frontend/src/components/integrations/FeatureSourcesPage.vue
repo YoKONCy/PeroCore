@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import { computed, ref, watch } from 'vue'
 import {
   INTEGRATION_PROVIDERS,
@@ -24,7 +26,9 @@ const emit = defineEmits<{ back: [] }>()
 const { state, busy, updateFeature, saveSource, removeSource } = useIntegrations()
 const feature = computed(() => state.value?.features[props.kind])
 const providers = computed(() => INTEGRATION_PROVIDERS.filter((item) => item.kind === props.kind))
-const title = computed(() => (props.kind === 'pdf' ? 'PDF 解析' : '联网搜索'))
+const title = computed(() =>
+  props.kind === 'pdf' ? __t('ui.integrations', 'PDF 解析') : __t('ui.integrations', '联网搜索'),
+)
 const editing = ref(false)
 const deleting = ref<string | null>(null)
 const savedKey = ref(false)
@@ -128,7 +132,7 @@ async function remove(): Promise<void> {
       <div>
         <button type="button" class="integration-back" @click="emit('back')">
           <PixelIcon name="chevron-left" size="xs" />
-          拓展功能
+          {{ __t('ui.integrations', '拓展功能') }}
         </button>
         <h2>{{ title }}</h2>
       </div>
@@ -141,19 +145,23 @@ async function remove(): Promise<void> {
           :disabled="busy"
           @click="disable"
         >
-          停用
+          {{ __t('ui.integrations', '停用') }}
         </PButton>
-        <PButton type="button" :disabled="busy || !feature" @click="open()">添加来源</PButton>
+        <PButton type="button" :disabled="busy || !feature" @click="open()">
+          {{ __t('ui.integrations', '添加来源') }}
+        </PButton>
       </div>
     </div>
     <p class="integration-description">
       {{
         kind === 'pdf'
-          ? '选择一个解析来源，开启 PDF 附件上传。文件上传后自动解析。'
-          : '保存多个搜索来源，选择其中一个供联网搜索工具使用。'
+          ? __t('ui.integrations', '配置 PDF 解析服务。')
+          : __t('ui.integrations', '配置并选择搜索服务。')
       }}
     </p>
-    <p v-if="!feature?.sources.length" class="integration-empty">尚未添加来源。</p>
+    <p v-if="!feature?.sources.length" class="integration-empty">
+      {{ __t('ui.integrations', '尚未添加来源。') }}
+    </p>
     <div class="integration-source-list">
       <PCard
         v-for="source in feature?.sources"
@@ -173,14 +181,18 @@ async function remove(): Promise<void> {
               v-if="feature?.enabled && feature.selectedSourceId === source.id"
               class="integration-selected"
             >
-              当前使用
+              {{ __t('ui.integrations', '当前使用') }}
             </span>
           </h3>
           <p>
             {{ INTEGRATION_PROVIDERS.find((item) => item.id === source.provider)?.name }} ·
-            {{ source.configured ? '已配置' : '待配置' }}
+            {{
+              source.configured
+                ? __t('ui.integrations', '已配置')
+                : __t('ui.integrations', '待配置')
+            }}
           </p>
-          <small>{{ source.endpoint || '尚未设置服务地址' }}</small>
+          <small>{{ source.endpoint || __t('ui.integrations', '尚未设置服务地址') }}</small>
         </div>
         <div class="integration-source-actions">
           <PButton
@@ -190,7 +202,7 @@ async function remove(): Promise<void> {
             :disabled="busy"
             @click="open(source)"
           >
-            配置
+            {{ __t('ui.integrations', '配置') }}
           </PButton>
           <PButton
             v-if="!feature?.enabled || feature.selectedSourceId !== source.id"
@@ -199,12 +211,12 @@ async function remove(): Promise<void> {
             :disabled="busy || !source.configured"
             @click="choose(source.id)"
           >
-            使用
+            {{ __t('ui.integrations', '使用') }}
           </PButton>
           <button
             type="button"
             class="integration-remove"
-            title="移除来源"
+            :title="__t('ui.integrations', '移除来源')"
             :disabled="busy"
             @click="deleting = source.id"
           >
@@ -213,10 +225,14 @@ async function remove(): Promise<void> {
         </div>
       </PCard>
     </div>
-    <PDialog v-model="editing" :title="form.id ? '配置来源' : '添加来源'" width="560px">
+    <PDialog
+      v-model="editing"
+      :title="form.id ? __t('ui.integrations', '配置来源') : __t('ui.integrations', '添加来源')"
+      width="560px"
+    >
       <div class="integration-form">
         <label>
-          来源类型
+          {{ __t('ui.integrations', '来源类型') }}
           <PSelect
             v-model="providerBinding"
             :options="providers.map((item) => ({ label: item.name, value: item.id }))"
@@ -224,11 +240,15 @@ async function remove(): Promise<void> {
           />
         </label>
         <label>
-          名称
+          {{ __t('ui.integrations', '名称') }}
           <PInput v-model="form.name" maxlength="80" :disabled="busy" />
         </label>
         <label>
-          {{ form.provider === 'pdf-http' ? '解析接口地址' : '服务地址' }}
+          {{
+            form.provider === 'pdf-http'
+              ? __t('ui.integrations', '解析接口地址')
+              : __t('ui.integrations', '服务地址')
+          }}
           <PInput v-model="form.endpoint" placeholder="https://…" :disabled="busy" />
         </label>
         <label v-if="currentProvider?.needsKey || form.provider === 'pdf-http'">
@@ -238,18 +258,22 @@ async function remove(): Promise<void> {
             type="password"
             autocomplete="new-password"
             :placeholder="
-              savedKey ? '已设置，留空保留' : currentProvider?.needsKey ? '输入 API Key' : '可选'
+              savedKey
+                ? __t('ui.integrations', '已设置，留空保留')
+                : currentProvider?.needsKey
+                  ? __t('ui.integrations', '输入 API Key')
+                  : __t('ui.integrations', '可选')
             "
             :disabled="busy"
           />
         </label>
         <label v-if="savedKey" class="integration-switch">
-          <span>清除已保存的 Key</span>
+          <span>{{ __t('ui.integrations', '清除已保存的 Key') }}</span>
           <PSwitch v-model="form.clearApiKey" :disabled="busy" />
         </label>
         <template v-if="kind === 'search'">
           <label>
-            默认结果数
+            {{ __t('ui.integrations', '默认结果数') }}
             <PInputNumber
               :model-value="form.options.maxResults"
               :min="1"
@@ -263,23 +287,23 @@ async function remove(): Promise<void> {
             />
           </label>
           <label v-if="form.provider === 'tavily'">
-            检索深度
+            {{ __t('ui.integrations', '检索深度') }}
             <PSelect
               v-model="depthBinding"
               :options="[
-                { label: '常规', value: 'basic' },
-                { label: '深入', value: 'advanced' },
+                { label: __t('ui.integrations', '常规'), value: 'basic' },
+                { label: __t('ui.integrations', '深入'), value: 'advanced' },
               ]"
               :disabled="busy"
             />
           </label>
           <p v-if="form.provider === 'searxng'" class="integration-form-help">
-            SearXNG 实例需要允许 JSON 搜索结果。
+            {{ __t('ui.integrations', 'SearXNG 实例需要允许 JSON 搜索结果。') }}
           </p>
         </template>
         <template v-else>
           <label>
-            文档语言
+            {{ __t('ui.integrations', '文档语言') }}
             <PInput
               v-model="form.options.language"
               placeholder="ch / en"
@@ -288,11 +312,11 @@ async function remove(): Promise<void> {
             />
           </label>
           <label class="integration-switch">
-            <span>启用 OCR</span>
+            <span>{{ __t('ui.integrations', '启用 OCR') }}</span>
             <PSwitch v-model="form.options.ocr" :disabled="busy" />
           </label>
           <label v-if="form.provider === 'mineru'">
-            解析模型
+            {{ __t('ui.integrations', '解析模型') }}
             <PSelect
               v-model="modelBinding"
               :options="[
@@ -303,25 +327,30 @@ async function remove(): Promise<void> {
             />
           </label>
           <p v-if="form.provider === 'mineru-light'" class="integration-form-help">
-            轻量模式无需 Key，支持最多 10MB；页数与调用额度由 MinerU 限制。
+            {{ __t('ui.integrations', '无需密钥，最大 10MB；页数与额度以 MinerU 为准。') }}
           </p>
           <p v-if="form.provider === 'pdf-http'" class="integration-form-help">
-            接口接收 multipart 的 file、language、ocr，返回 JSON 的 markdown 或 text 字段。
+            {{
+              __t(
+                'ui.integrations',
+                '上传：multipart（file、language、ocr）；返回：JSON（markdown 或 text）。',
+              )
+            }}
           </p>
         </template>
       </div>
       <template #footer>
         <PButton type="button" variant="ghost" :disabled="busy" @click="editing = false">
-          取消
+          {{ __t('ui.integrations', '取消') }}
         </PButton>
         <PButton type="button" :loading="busy" :disabled="!form.name.trim()" @click="save">
-          保存
+          {{ __t('ui.integrations', '保存') }}
         </PButton>
       </template>
     </PDialog>
     <PDialog
       :model-value="Boolean(deleting)"
-      title="移除来源"
+      :title="__t('ui.integrations', '移除来源')"
       width="400px"
       @update:model-value="
         (value) => {
@@ -329,12 +358,14 @@ async function remove(): Promise<void> {
         }
       "
     >
-      <p>移除这个来源？如果正在使用它，对应功能会停用。</p>
+      <p>{{ __t('ui.integrations', '移除这个来源？如果正在使用它，对应功能会停用。') }}</p>
       <template #footer>
         <PButton type="button" variant="ghost" :disabled="busy" @click="deleting = null">
-          取消
+          {{ __t('ui.integrations', '取消') }}
         </PButton>
-        <PButton type="button" variant="danger" :loading="busy" @click="remove">移除</PButton>
+        <PButton type="button" variant="danger" :loading="busy" @click="remove">
+          {{ __t('ui.integrations', '移除') }}
+        </PButton>
       </template>
     </PDialog>
   </section>

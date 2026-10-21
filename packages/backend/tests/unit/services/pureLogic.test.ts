@@ -126,13 +126,17 @@ describe('ModelRoleResolver', () => {
     const config = await resolver.resolve('scorer')
 
     expect(config).toEqual({
+      configId: undefined,
       provider: 'openai',
       modelId: 'gpt-secretary',
       apiKey: 'key',
-      apiBase: undefined,
+      apiBase: null,
       temperature: undefined,
       topP: undefined,
       maxTokens: 1000,
+      maxReActTurns: undefined,
+      fallbackModels: [],
+      stream: true,
       reasoningEffort: undefined,
       contextWindowTokens: undefined,
       usagePurpose: 'memory',

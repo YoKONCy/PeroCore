@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../../i18n/index'
+
 defineOptions({ name: 'WorkspaceTab' })
 /**
  * WorkspaceTab — Agent 强绑定的协作工作台。
@@ -49,6 +51,7 @@ import { threadsApi } from '../../../api/modules/threadsApi'
 import { getApiBaseUrl, isElectronRuntime } from '../../../api/transport'
 import { invoke } from '../../../utils/ipcAdapter'
 import { resourceNavigation } from '../../../composables/resources/useResources'
+import { useMobileLayout } from '../../../composables/ui/useMobileLayout'
 import {
   buildConversationMarkdown,
   downloadMarkdown,
@@ -109,9 +112,14 @@ const selectedSnippet = ref<{
   startLine: number
   endLine: number
 } | null>(null)
-const isExplorerCollapsed = ref(false)
-const isCopilotCollapsed = ref(false)
-const isTerminalCollapsed = ref(false)
+const { isMobile } = useMobileLayout()
+const isExplorerCollapsed = ref(isMobile.value)
+const isCopilotCollapsed = ref(isMobile.value)
+function dismissMobileWorkspacePanels() {
+  isExplorerCollapsed.value = true
+  isCopilotCollapsed.value = true
+}
+const isTerminalCollapsed = ref(isMobile.value)
 const isTerminalMaximized = ref(false)
 const isApprovalQueueExpanded = ref(true)
 const isSessionDrawerOpen = ref(false)
@@ -121,6 +129,40 @@ const copilotWidth = ref(480)
 const explorerWidth = ref(248)
 const showHistoryExport = ref(false)
 const isExportingHistory = ref(false)
+// 手机一次展示一个工作面板；终端和文件仍由同一服务端持有。
+watch(isMobile, (value) => {
+  if (value) {
+    isExplorerCollapsed.value = true
+    isCopilotCollapsed.value = true
+    isTerminalCollapsed.value = true
+  }
+})
+watch(isExplorerCollapsed, (closed) => {
+  if (isMobile.value && !closed) {
+    isCopilotCollapsed.value = true
+    isTerminalCollapsed.value = true
+  }
+})
+watch(isCopilotCollapsed, (closed) => {
+  if (isMobile.value && !closed) {
+    isExplorerCollapsed.value = true
+    isTerminalCollapsed.value = true
+  }
+})
+watch(isTerminalCollapsed, (closed) => {
+  if (isMobile.value && !closed) {
+    isExplorerCollapsed.value = true
+    isCopilotCollapsed.value = true
+  }
+})
+function closeMobilePanels(event: KeyboardEvent) {
+  if (isMobile.value && event.key === 'Escape') {
+    isExplorerCollapsed.value = true
+    isCopilotCollapsed.value = true
+  }
+}
+onMounted(() => window.addEventListener('keydown', closeMobilePanels))
+onBeforeUnmount(() => window.removeEventListener('keydown', closeMobilePanels))
 
 async function exportCurrentHistory(options: HistoryExportOptions): Promise<void> {
   if (!threadStore.threadId || !currentAgent.value) return
@@ -128,7 +170,7 @@ async function exportCurrentHistory(options: HistoryExportOptions): Promise<void
   try {
     const response = await threadsApi.getProjection(threadStore.threadId)
     if (!response.data) throw new Error('服务端未返回工作区会话历史')
-    const title = `${currentAgent.value.name}-工作区会话`
+    const title = __t('ui.navigation', '{0}-工作区会话', [currentAgent.value.name])
     downloadMarkdown(
       title,
       buildConversationMarkdown(
@@ -144,11 +186,14 @@ async function exportCurrentHistory(options: HistoryExportOptions): Promise<void
       ),
     )
     showHistoryExport.value = false
-    notification.toast('工作区会话历史已导出到客户端', { type: 'success' })
+    notification.toast(__t('ui.navigation', '会话记录已导出'), { type: 'success' })
   } catch (error) {
-    notification.toast(error instanceof Error ? error.message : '历史记录导出失败', {
-      type: 'error',
-    })
+    notification.toast(
+      error instanceof Error ? error.message : __t('ui.navigation', '历史记录导出失败'),
+      {
+        type: 'error',
+      },
+    )
   } finally {
     isExportingHistory.value = false
   }
@@ -223,9 +268,12 @@ async function ensureAgent(): Promise<void> {
     if (currentAgent.value && !threadId.value)
       await threadStore.ensureLatestThread(currentAgent.value.id, 'desktop')
   } catch (error) {
-    notification.toast(error instanceof Error ? error.message : '恢复工作区会话失败', {
-      type: 'error',
-    })
+    notification.toast(
+      error instanceof Error ? error.message : __t('ui.navigation', '恢复工作区会话失败'),
+      {
+        type: 'error',
+      },
+    )
   }
 }
 
@@ -238,13 +286,18 @@ async function revealWorkspace(): Promise<void> {
     if (!response.data) throw new Error('未能解析工作区路径')
     if (isElectronRuntime()) await invoke('open-local-path', response.data.path)
     notification.toast(
-      isElectronRuntime() ? '已在 Windows 资源管理器中打开工作区' : '已请求执行节点打开工作区',
+      isElectronRuntime()
+        ? __t('ui.navigation', '已在 Windows 资源管理器中打开工作区')
+        : __t('ui.navigation', '已请求打开工作区'),
       { type: 'success' },
     )
   } catch (error) {
-    notification.toast(error instanceof Error ? error.message : '无法打开工作区目录', {
-      type: 'error',
-    })
+    notification.toast(
+      error instanceof Error ? error.message : __t('ui.navigation', '无法打开工作区目录'),
+      {
+        type: 'error',
+      },
+    )
   }
 }
 
@@ -268,7 +321,7 @@ async function openFile(
   if (existing?.dirty && forceReload) {
     // Agent 修改了用户仍在编辑的未保存文件时，不静默覆盖本地缓冲。
     notification.toast(
-      `“${existing.name}”已被 Agent 修改，但本地有未保存内容，请手动决定是否重载`,
+      __t('ui.navigation', '“{0}”已被外部修改，请保存当前编辑或重新载入', [existing.name]),
       { type: 'warning' },
     )
     focus()
@@ -345,13 +398,17 @@ function activateFile(path: string): void {
   const file = openFiles.value.find((item) => item.path === path)
   if (file && !file.dirty && needsRefresh.has(file))
     void openFile({ path, name: file.name, type: 'file' }, true, false).catch(() =>
-      notification.toast('文件刷新失败，请手动重载', { type: 'error' }),
+      notification.toast(__t('ui.navigation', '文件刷新失败，请手动重载'), { type: 'error' }),
     )
 }
 
 function selectFile(node: WorkspaceFileNode): void {
+  if (isMobile.value) isExplorerCollapsed.value = true
   void openFile(node).catch((error) =>
-    notification.toast(error instanceof Error ? error.message : '文件打开失败', { type: 'error' }),
+    notification.toast(
+      error instanceof Error ? error.message : __t('ui.navigation', '文件打开失败'),
+      { type: 'error' },
+    ),
   )
 }
 
@@ -362,9 +419,12 @@ async function reloadPreview(): Promise<void> {
     await openFile({ path: file.path, name: file.name, type: 'file' }, true)
     if (openFiles.value.includes(file)) file.previewRevision++
   } catch (error) {
-    notification.toast(error instanceof Error ? error.message : '文件重新载入失败', {
-      type: 'error',
-    })
+    notification.toast(
+      error instanceof Error ? error.message : __t('ui.navigation', '文件重新载入失败'),
+      {
+        type: 'error',
+      },
+    )
   }
 }
 
@@ -409,7 +469,10 @@ watch(
       )
     } catch (error) {
       openedResourceRevision = -1
-      notification.toast(error instanceof Error ? error.message : '无法打开文件', { type: 'error' })
+      notification.toast(
+        error instanceof Error ? error.message : __t('ui.navigation', '无法打开文件'),
+        { type: 'error' },
+      )
     }
   },
   { immediate: true },
@@ -422,20 +485,22 @@ function attachSelection(): void {
   const text = file.content.slice(editor.selectionStart, editor.selectionEnd)
   if (!text.trim()) return
   if (text.length > 4000) {
-    notification.toast('选区最多附带 4000 字，请缩小范围', { type: 'warning' })
+    notification.toast(__t('ui.navigation', '选区最多附带 4000 字，请缩小范围'), {
+      type: 'warning',
+    })
     return
   }
   const startLine = file.content.slice(0, editor.selectionStart).split('\n').length
   const endLine = file.content.slice(0, editor.selectionEnd).split('\n').length
   selectedSnippet.value = { path: file.path, text, startLine, endLine }
-  notification.toast('选区已加入本轮材料', { type: 'success' })
+  notification.toast(__t('ui.navigation', '选区已加入本轮材料'), { type: 'success' })
 }
 
 async function save(): Promise<void> {
   const file = activeFile.value
   if (!file || file.kind !== 'text' || !currentAgent.value || !threadId.value) return
   if (file.truncated) {
-    notification.toast('大文件当前为只读预览，禁止覆盖保存', { type: 'error' })
+    notification.toast(__t('ui.navigation', '大文件仅支持预览'), { type: 'error' })
     return
   }
   try {
@@ -446,9 +511,9 @@ async function save(): Promise<void> {
     file.hash = res.data?.hash ?? file.hash
     file.dirty = false
     selectedSnippet.value = null
-    notification.toast('文件已安全保存', { type: 'success' })
+    notification.toast(__t('ui.navigation', '文件已保存'), { type: 'success' })
   } catch {
-    notification.toast('保存失败：文件可能已被外部修改', { type: 'error' })
+    notification.toast(__t('ui.navigation', '保存失败：文件可能已被外部修改'), { type: 'error' })
   }
 }
 
@@ -490,7 +555,9 @@ function handleFileRenamed(payload: { oldPath: string; newPath: string; name: st
     file.previewRevision++
     if (!file.dirty) {
       void openFile({ path: file.path, name: file.name, type: 'file' }, true, false).catch(() =>
-        notification.toast('重命名已完成，预览刷新失败，请重新载入', { type: 'warning' }),
+        notification.toast(__t('ui.navigation', '重命名已完成，预览刷新失败，请重新载入'), {
+          type: 'warning',
+        }),
       )
     }
   }
@@ -576,9 +643,14 @@ function handleBeforeWorkspaceRewind(event: Event): void {
   const dirty = files.filter((file) => file.dirty && affected.has(key(file.path)))
   if (!dirty.length) return
   event.preventDefault()
-  notification.toast(`请先保存或关闭未保存的文件：${dirty.map((file) => file.name).join('、')}`, {
-    type: 'warning',
-  })
+  notification.toast(
+    __t('ui.navigation', '请先保存或关闭未保存的文件：{0}', [
+      dirty.map((file) => file.name).join('、'),
+    ]),
+    {
+      type: 'warning',
+    },
+  )
 }
 
 /** 回滚完成后同步资源树与编辑器标签。 */
@@ -594,9 +666,12 @@ async function handleWorkspaceRewound(event: Event): Promise<void> {
     if (change.action === 'delete_created') {
       const file = openFiles.value.find((item) => item.path === change.path)
       if (file?.dirty) {
-        notification.toast(`“${file.name}”已被回滚删除，但本地有未保存缓冲，标签暂时保留`, {
-          type: 'warning',
-        })
+        notification.toast(
+          __t('ui.navigation', '“{0}”已被回滚删除，但本地有未保存缓冲，标签暂时保留', [file.name]),
+          {
+            type: 'warning',
+          },
+        )
         continue
       }
       handleFileDeleted(change.path)
@@ -612,7 +687,9 @@ async function handleWorkspaceRewound(event: Event): Promise<void> {
 
 function onWorkspaceRewound(event: Event): void {
   void handleWorkspaceRewound(event).catch(() => {
-    notification.toast('文件已回滚，工作区刷新失败，请手动重载', { type: 'warning' })
+    notification.toast(__t('ui.navigation', '文件已回滚，工作区刷新失败，请手动重载'), {
+      type: 'warning',
+    })
   })
 }
 
@@ -705,7 +782,11 @@ onBeforeRouteLeave(async () => {
     ...[...buffersByAgent.values()].flatMap((buffer) => buffer.files),
   ]
   if (files.some((file) => file.dirty))
-    return confirmDiscard('离开工作区', '工作区仍有未保存文件，确定离开吗？', '离开工作区')
+    return confirmDiscard(
+      __t('ui.navigation', '离开工作区'),
+      __t('ui.navigation', '工作区仍有未保存文件，确定离开吗？'),
+      __t('ui.navigation', '离开工作区'),
+    )
   return true
 })
 
@@ -730,7 +811,9 @@ onActivated(() => {
     const file = activeFile.value
     if (file && !file.dirty)
       await openFile({ path: file.path, name: file.name, type: 'file' }, true, false)
-  })().catch(() => notification.toast('工作区文件刷新失败，请手动重载', { type: 'error' }))
+  })().catch(() =>
+    notification.toast(__t('ui.navigation', '工作区文件刷新失败，请手动重载'), { type: 'error' }),
+  )
 })
 
 onBeforeUnmount(() => {
@@ -743,7 +826,10 @@ onBeforeUnmount(() => {
 
 <template>
   <div v-if="currentAgent" class="workspace-tab">
-    <div class="workspace-panel">
+    <div
+      class="workspace-panel"
+      :class="{ 'workspace-panel--mobile-terminal': isMobile && !isTerminalCollapsed }"
+    >
       <!-- 工作台上下文栏：集中呈现 Agent、当前文件和可见区域开关。 -->
       <header class="workspace-commandbar">
         <div class="workspace-agent">
@@ -762,7 +848,7 @@ onBeforeUnmount(() => {
             </div>
             <span class="workspace-agent__status">
               <i />
-              专属工作空间已连接
+              {{ __t('ui.navigation', '专属工作空间已连接') }}
             </span>
           </div>
         </div>
@@ -770,16 +856,22 @@ onBeforeUnmount(() => {
         <div class="workspace-context" :title="activeFile?.path">
           <WorkspaceFileGlyph v-if="activeFile" :kind="activeFile.kind" />
           <PixelIcon v-else name="folder" size="xs" />
-          <span>{{ activeFile?.path || '选择文件开始协作' }}</span>
-          <i v-if="activeFile?.dirty" class="workspace-dirty-dot" title="尚未保存" />
-          <span v-if="activeFile?.truncated" class="workspace-readonly-badge">只读预览</span>
+          <span>{{ activeFile?.path || __t('ui.navigation', '选择文件开始协作') }}</span>
+          <i
+            v-if="activeFile?.dirty"
+            class="workspace-dirty-dot"
+            :title="__t('ui.navigation', '尚未保存')"
+          />
+          <span v-if="activeFile?.truncated" class="workspace-readonly-badge">
+            {{ __t('ui.navigation', '只读预览') }}
+          </span>
         </div>
 
         <div class="workspace-actions">
           <button
             v-if="pendingApprovals.length"
             class="workspace-action workspace-action--approval"
-            title="展开待审批队列"
+            :title="__t('ui.navigation', '展开待审批队列')"
             @click="expandApprovalQueue"
           >
             <PixelIcon name="alert" size="xs" />
@@ -788,7 +880,7 @@ onBeforeUnmount(() => {
           <button
             class="workspace-action"
             :class="{ active: !isExplorerCollapsed }"
-            title="切换资源栏"
+            :title="__t('ui.navigation', '切换资源栏')"
             @click="isExplorerCollapsed = !isExplorerCollapsed"
           >
             <PixelIcon name="folder" size="sm" />
@@ -796,7 +888,7 @@ onBeforeUnmount(() => {
           <button
             class="workspace-action"
             :class="{ active: !isTerminalCollapsed }"
-            title="切换终端面板"
+            :title="__t('ui.navigation', '切换终端面板')"
             @click="isTerminalCollapsed = !isTerminalCollapsed"
           >
             <PixelIcon name="terminal" size="sm" />
@@ -804,7 +896,7 @@ onBeforeUnmount(() => {
           <button
             class="workspace-action"
             :class="{ active: !isCopilotCollapsed }"
-            title="切换 Agent 协作栏"
+            :title="__t('ui.navigation', '切换 Agent 协作栏')"
             @click="isCopilotCollapsed = !isCopilotCollapsed"
           >
             <PixelIcon name="chat" size="sm" />
@@ -813,6 +905,12 @@ onBeforeUnmount(() => {
       </header>
 
       <div class="workspace-body">
+        <button
+          v-if="isMobile && (!isExplorerCollapsed || !isCopilotCollapsed)"
+          class="workspace-mobile-backdrop"
+          :aria-label="__t('ui.navigation', '关闭工作区面板')"
+          @click="dismissMobileWorkspacePanels"
+        />
         <!-- 左侧资源栏。折叠后保留可恢复的图标轨道。 -->
         <aside
           class="workspace-explorer"
@@ -822,7 +920,7 @@ onBeforeUnmount(() => {
           <button
             v-if="isExplorerCollapsed"
             class="workspace-rail-button"
-            title="展开资源栏"
+            :title="__t('ui.navigation', '展开资源栏')"
             @click="isExplorerCollapsed = false"
           >
             <PixelIcon name="folder" size="sm" />
@@ -846,8 +944,11 @@ onBeforeUnmount(() => {
         </aside>
 
         <!-- 中部始终是第一视觉焦点：文件标签、编辑器和底部工作面板。 -->
-        <main class="workspace-center">
-          <div class="editor-tabs" role="tablist" aria-label="已打开文件">
+        <main
+          class="workspace-center"
+          :inert="isMobile && (!isExplorerCollapsed || !isCopilotCollapsed)"
+        >
+          <div class="editor-tabs" role="tablist" :aria-label="__t('ui.navigation', '已打开文件')">
             <button
               v-for="file in openFiles"
               :key="file.path"
@@ -858,10 +959,12 @@ onBeforeUnmount(() => {
             >
               <WorkspaceFileGlyph :kind="file.kind" />
               <span>{{ file.name }}</span>
-              <i v-if="file.dirty" title="尚未保存" />
-              <b title="关闭文件" @click.stop="close(file)">×</b>
+              <i v-if="file.dirty" :title="__t('ui.navigation', '尚未保存')" />
+              <b :title="__t('ui.navigation', '关闭文件')" @click.stop="close(file)">×</b>
             </button>
-            <span v-if="!openFiles.length" class="editor-tabs__empty">没有打开的文件</span>
+            <span v-if="!openFiles.length" class="editor-tabs__empty">
+              {{ __t('ui.navigation', '没有打开的文件') }}
+            </span>
           </div>
 
           <SurfaceTransition
@@ -869,7 +972,7 @@ onBeforeUnmount(() => {
             variant="panel"
             :identity="`${currentAgent.id}:${activePath}`"
             :pending="!!pendingFile && !isTerminalMaximized"
-            label="正在打开文件"
+            :label="__t('ui.navigation', '正在打开文件')"
             class="editor-area"
             :class="{ 'editor-area--terminal-maximized': isTerminalMaximized }"
           >
@@ -880,13 +983,13 @@ onBeforeUnmount(() => {
                   <span>{{ activeFile.path }}</span>
                 </div>
                 <span v-if="activeFile.truncated" class="editor-warning">
-                  文件过大，仅载入前 128K 字符
+                  {{ __t('ui.navigation', '文件过大，仅载入前 128K 字符') }}
                 </span>
                 <div
                   v-if="isMarkdownFile"
                   class="editor-view-switch"
                   role="group"
-                  aria-label="Markdown视图"
+                  :aria-label="__t('ui.navigation', 'Markdown视图')"
                 >
                   <button
                     type="button"
@@ -894,7 +997,7 @@ onBeforeUnmount(() => {
                     @click="setMarkdownPreview(false)"
                   >
                     <PixelIcon name="code" size="xs" />
-                    编辑
+                    {{ __t('ui.navigation', '编辑') }}
                   </button>
                   <button
                     type="button"
@@ -902,7 +1005,7 @@ onBeforeUnmount(() => {
                     @click="setMarkdownPreview(true)"
                   >
                     <PixelIcon name="eye" size="xs" />
-                    浏览
+                    {{ __t('ui.navigation', '浏览') }}
                   </button>
                 </div>
                 <PButton
@@ -911,7 +1014,7 @@ onBeforeUnmount(() => {
                   variant="ghost"
                   @click="attachSelection"
                 >
-                  引用选区
+                  {{ __t('ui.navigation', '引用选区') }}
                 </PButton>
                 <PButton
                   v-if="activeFile.kind === 'text' && !isMarkdownPreview"
@@ -919,7 +1022,11 @@ onBeforeUnmount(() => {
                   :disabled="!activeFile.dirty || activeFile.truncated"
                   @click="save"
                 >
-                  {{ activeFile.truncated ? '只读预览' : '保存' }}
+                  {{
+                    activeFile.truncated
+                      ? __t('ui.navigation', '只读预览')
+                      : __t('ui.navigation', '保存')
+                  }}
                 </PButton>
               </div>
               <WorkspaceFilePreview
@@ -935,7 +1042,7 @@ onBeforeUnmount(() => {
               <div
                 v-else-if="isMarkdownPreview"
                 class="markdown-preview"
-                aria-label="Markdown浏览器"
+                :aria-label="__t('ui.navigation', 'Markdown浏览器')"
               >
                 <article class="markdown-preview__paper">
                   <ChatRichText :content="activeFile.content" />
@@ -948,7 +1055,7 @@ onBeforeUnmount(() => {
                   :value="activeFile.content"
                   :readonly="activeFile.truncated"
                   spellcheck="false"
-                  aria-label="文件编辑器"
+                  :aria-label="__t('ui.navigation', '文件编辑器')"
                   @input="updateContent"
                   @keydown.ctrl.s.prevent="save"
                 />
@@ -956,7 +1063,11 @@ onBeforeUnmount(() => {
               <footer class="editor-statusbar">
                 <span>
                   {{
-                    activeFile.kind !== 'text' ? '只读浏览' : activeFile.dirty ? '已修改' : '已保存'
+                    activeFile.kind !== 'text'
+                      ? __t('ui.navigation', '只读浏览')
+                      : activeFile.dirty
+                        ? __t('ui.navigation', '已修改')
+                        : __t('ui.navigation', '已保存')
                   }}
                 </span>
                 <span class="editor-statusbar__spacer" />
@@ -968,11 +1079,14 @@ onBeforeUnmount(() => {
 
             <div v-else-if="!isTerminalMaximized" class="editor-empty">
               <div class="editor-empty__mark"><PixelIcon name="code" size="2xl" /></div>
-              <strong>打开文件，开始与 {{ currentAgent.name }} 协作</strong>
-              <span>从左侧资源栏选择文件，当前上下文会自动同步到 Agent 协作栏。</span>
+              <strong>
+                {{ __t('ui.navigation', '打开文件，开始与') }} {{ currentAgent.name }}
+                {{ __t('ui.navigation', '协作') }}
+              </strong>
+              <span>{{ __t('ui.navigation', '从左侧选择文件，与助手一起编辑。') }}</span>
               <button @click="revealWorkspace">
                 <PixelIcon name="folder" size="xs" />
-                在文件管理器中打开
+                {{ __t('ui.navigation', '在文件管理器中打开') }}
               </button>
             </div>
           </SurfaceTransition>
@@ -997,18 +1111,25 @@ onBeforeUnmount(() => {
             <div class="terminal-panelbar" @dblclick="isTerminalCollapsed = !isTerminalCollapsed">
               <div class="terminal-panelbar__title">
                 <PixelIcon name="terminal" size="xs" />
-                <strong>终端</strong>
-                <span v-if="activeTerminalId">已连接</span>
+                <strong>{{ __t('ui.navigation', '终端') }}</strong>
+                <span v-if="activeTerminalId">{{ __t('ui.navigation', '已连接') }}</span>
               </div>
               <div class="terminal-panelbar__actions">
-                <button title="最大化终端" @click="toggleTerminalMaximized">
+                <button
+                  :title="__t('ui.navigation', '最大化终端')"
+                  @click="toggleTerminalMaximized"
+                >
                   <PixelIcon
                     :name="isTerminalMaximized ? 'chevron-down' : 'chevron-up'"
                     size="xs"
                   />
                 </button>
                 <button
-                  :title="isTerminalCollapsed ? '展开终端' : '收起终端'"
+                  :title="
+                    isTerminalCollapsed
+                      ? __t('ui.navigation', '展开终端')
+                      : __t('ui.navigation', '收起终端')
+                  "
                   @click="toggleTerminalCollapsed"
                 >
                   <PixelIcon
@@ -1039,7 +1160,7 @@ onBeforeUnmount(() => {
               :agent-id="currentAgent.id"
               :agent-name="currentAgent.name"
               class="copilot-rail-avatar"
-              :aria-label="`切换会话（当前：${currentAgent.name}）`"
+              :aria-label="__t('ui.navigation', '切换会话（当前：{0}）', [currentAgent.name])"
               @click="isSessionDrawerOpen = true"
             >
               <img v-if="agentAvatarUrl" :src="agentAvatarUrl" :alt="currentAgent.name" />
@@ -1048,7 +1169,7 @@ onBeforeUnmount(() => {
             </AgentStateHover>
             <button
               class="workspace-rail-button"
-              title="展开协作栏"
+              :title="__t('ui.navigation', '展开协作栏')"
               @click="isCopilotCollapsed = false"
             >
               <PixelIcon name="chat" size="sm" />
@@ -1062,7 +1183,7 @@ onBeforeUnmount(() => {
             <header class="copilot-header">
               <button
                 class="copilot-header__main"
-                aria-label="切换工作区会话"
+                :aria-label="__t('ui.navigation', '切换工作区会话')"
                 @click="isSessionDrawerOpen = true"
               >
                 <AgentStateHover
@@ -1074,8 +1195,11 @@ onBeforeUnmount(() => {
                   <span v-else>{{ agentInitial }}</span>
                 </AgentStateHover>
                 <div class="copilot-header__identity">
-                  <strong>与 {{ currentAgent.name }} 协作</strong>
-                  <span>AGENT COPILOT · 点击切换会话</span>
+                  <strong>
+                    {{ __t('ui.navigation', '与') }} {{ currentAgent.name }}
+                    {{ __t('ui.navigation', '协作') }}
+                  </strong>
+                  <span>{{ __t('ui.navigation', 'AGENT COPILOT · 点击切换会话') }}</span>
                 </div>
                 <PixelIcon name="chevron-down" size="xs" class="copilot-header__switch" />
               </button>
@@ -1083,15 +1207,15 @@ onBeforeUnmount(() => {
                 variant="ghost"
                 size="sm"
                 :disabled="!threadStore.threadId"
-                title="导出当前工作区会话历史"
+                :title="__t('ui.navigation', '导出当前工作区会话历史')"
                 @click="showHistoryExport = true"
               >
                 <PixelIcon name="download" size="xs" />
-                导出
+                {{ __t('ui.navigation', '导出') }}
               </PButton>
               <button
                 class="copilot-header__collapse"
-                title="收起协作栏"
+                :title="__t('ui.navigation', '收起协作栏')"
                 @click="isCopilotCollapsed = true"
               >
                 <PixelIcon name="chevron-right" size="xs" />
@@ -1099,14 +1223,14 @@ onBeforeUnmount(() => {
             </header>
 
             <div v-if="activePath || activeTerminalId" class="copilot-context">
-              <span class="copilot-context__label">当前上下文</span>
+              <span class="copilot-context__label">{{ __t('ui.navigation', '当前上下文') }}</span>
               <span v-if="activePath" class="context-chip">
                 <PixelIcon name="code" size="xs" />
                 {{ activeFile?.name || activePath }}
               </span>
               <span v-if="activeTerminalId" class="context-chip">
                 <PixelIcon name="terminal" size="xs" />
-                当前终端
+                {{ __t('ui.navigation', '当前终端') }}
               </span>
             </div>
 
@@ -1121,7 +1245,7 @@ onBeforeUnmount(() => {
               >
                 <span>
                   <PixelIcon name="alert" size="xs" />
-                  <strong>安全确认</strong>
+                  <strong>{{ __t('ui.navigation', '安全确认') }}</strong>
                   <i>{{ queuedApprovals.length }}</i>
                 </span>
                 <PixelIcon
@@ -1132,11 +1256,11 @@ onBeforeUnmount(() => {
               <div v-if="isApprovalQueueExpanded" class="approval-queue__body">
                 <button
                   class="approval-queue__collapse"
-                  title="收起待审批队列"
+                  :title="__t('ui.navigation', '收起待审批队列')"
                   @click="isApprovalQueueExpanded = false"
                 >
                   <PixelIcon name="chevron-up" size="xs" />
-                  收起待审批队列
+                  {{ __t('ui.navigation', '收起待审批队列') }}
                 </button>
                 <ApprovalCard
                   v-for="request in queuedApprovals"
@@ -1192,7 +1316,7 @@ onBeforeUnmount(() => {
       :title="discardDialog?.title"
       :message="discardDialog?.message"
       :confirm-text="discardDialog?.confirmText"
-      cancel-text="继续编辑"
+      :cancel-text="__t('ui.navigation', '继续编辑')"
       confirm-variant="danger"
       @confirm="settleDiscard(true)"
       @cancel="settleDiscard()"
@@ -1209,7 +1333,7 @@ onBeforeUnmount(() => {
 
   <div v-else class="workspace-loading">
     <PixelIcon name="refresh" size="lg" animation="spin" />
-    正在加载 Agent 工作区…
+    {{ __t('ui.navigation', '正在加载 Agent 工作区…') }}
   </div>
 </template>
 

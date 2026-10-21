@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * Token 鉴权中间件
  *
@@ -83,7 +84,7 @@ export function createAuthMiddleware(options: AuthMiddlewareOptions): Middleware
     // 鉴权失败
     const body: AuthErrorResponse = {
       code: 'UNAUTHORIZED',
-      message: '未授权：缺少或无效的 token',
+      message: __t('server.middleware', '未授权：缺少或无效的 token'),
     }
     return c.json(body, 401)
   }

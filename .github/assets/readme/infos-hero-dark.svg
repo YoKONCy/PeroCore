@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="376" viewBox="0 0 1280 376" role="img" aria-labelledby="title desc">
+  <title id="title">infOS · 让 AI 成为真正有温度的伙伴</title>
+  <desc id="desc">使用定稿 I-C 图形与 I-B 路径字标。冷蓝、柔紫与粉色组成的文档页首，右侧以轨道连接人格、记忆与行动。</desc>
+  <defs><linearGradient id="companion-silk" x1="0" y1="0" x2="1" y2=".5"><stop stop-color="#8587b8"/><stop offset=".6" stop-color="#a29ec5"/><stop offset="1" stop-color="#c398b3"/></linearGradient><linearGradient id="ref-cool" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#6c9bed"/><stop offset="1" stop-color="#ad8cdb"/></linearGradient><symbol id="infos-selected" viewBox="0 0 680 230"><use href="#ref-icon-c" x="61" y="25" width="178" height="178"/><use href="#ref-type-b" x="282" y="63" width="323" height="102"/></symbol><symbol id="ref-icon-c" viewBox="0 0 160 160">
+      <path d="M80 67 18 36 12 82 57 107Z" fill="#6c9bed"/>
+      <path d="M80 67 142 36 148 82 103 107Z" fill="#6e58a8"/>
+      <path d="M57 107 46 133 80 119 114 133 103 107 80 91Z" fill="url(#ref-cool)"/>
+      <path d="M80 52 99 76 80 96 61 76Z" fill="#ad8cdb"/>
+      <path d="M18 36 80 67 57 107 48 78Z" fill="url(#ref-cool)"/>
+    </symbol><symbol id="ref-type-b" viewBox="0 0 260 82">
+      <g fill="none" stroke="#f0edf6" stroke-width="8" stroke-linecap="butt" stroke-linejoin="round">
+        <path d="M8 34V70M33 70V34H54C63 34 68 40 68 49V70M94 70V24C94 16 100 12 109 12H122M82 35H116"/>
+        <path d="M157 12H169C183 12 190 23 190 41S183 70 169 70H157C143 70 136 59 136 41S143 12 157 12ZM248 17C239 11 214 8 209 24 203 43 248 35 248 54 248 74 219 74 205 64"/>
+      </g><rect x="4" y="11" width="8" height="8" rx="1" fill="#6c9bed"/>
+    </symbol>
+    <linearGradient id="edge"><stop stop-color="#82b0fa"/><stop offset=".55" stop-color="#b6a0ec"/><stop offset="1" stop-color="#e7a2cb"/></linearGradient>
+    <radialGradient id="halo"><stop stop-color="#b6a0ec" stop-opacity=".14"/><stop offset="1" stop-color="#b6a0ec" stop-opacity="0"/></radialGradient>
+    <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r=".8" fill="#a5a7bf" opacity=".12"/></pattern>
+  </defs>
+  <rect x="1" y="1" width="1278" height="374" rx="18" fill="#11141f" stroke="#303349"/>
+  <path d="M20 1H1260" stroke="url(#edge)" stroke-width="2"/>
+  <path d="M730 1H1260Q1279 1 1279 20V356Q1279 375 1260 375H730Z" fill="url(#dots)"/>
+  <ellipse cx="1010" cy="185" rx="280" ry="220" fill="url(#halo)"/>
+  <g font-family="Segoe UI,Arial,sans-serif">
+    <rect x="72" y="39" width="5" height="5" fill="#82b0fa"/>
+    <text x="89" y="46" fill="#a5a7bf" font-size="11" font-weight="600" letter-spacing="2.7">A HOME FOR DIGITAL COMPANIONS</text>
+    <use href="#ref-icon-c" x="61" y="70" width="148" height="148"/>
+    <use href="#ref-type-b" x="236" y="94" width="276" height="87"/>
+    <text x="74" y="259" fill="#f0edf6" font-size="29" font-weight="600" letter-spacing="-.7">Your warm, infinite companion.</text>
+    <text x="75" y="293" fill="#a5a7bf" font-size="13" letter-spacing=".3">Personality that stays. Memories that grow. Ideas that happen.</text>
+    <text x="75" y="342" fill="#a5a7bf" font-size="10" letter-spacing="2">INFRASTRUCTURE  /  INFOMORPH  /  INFINITY</text>
+    <g transform="translate(989 183)" fill="none" stroke="#303349">
+      <circle r="116"/><circle r="148" stroke-dasharray="3 9"/>
+      <path d="M-186 25H-125M105-62h103M-61 110v48"/>
+    </g>
+    <use href="#ref-icon-c" x="893" y="85" width="192" height="192"/>
+    <g transform="translate(797 66)">
+      <rect width="152" height="43" rx="6" fill="#1b1e30" stroke="#303349"/>
+      <rect x="16" y="17" width="8" height="8" fill="#82b0fa"/>
+      <text x="35" y="26" font-size="11" fill="#a5a7bf" letter-spacing="1.4">PERSONALITY</text>
+    </g>
+    <g transform="translate(1055 235)">
+      <rect width="144" height="43" rx="6" fill="#1b1e30" stroke="#303349"/>
+      <rect x="16" y="17" width="8" height="8" fill="#e7a2cb"/>
+      <text x="35" y="26" font-size="11" fill="#a5a7bf" letter-spacing="1.4">MEMORY</text>
+    </g>
+    <g transform="translate(814 285)">
+      <rect width="126" height="43" rx="6" fill="#1b1e30" stroke="#303349"/>
+      <rect x="16" y="17" width="8" height="8" fill="#b6a0ec"/>
+      <text x="35" y="26" font-size="11" fill="#a5a7bf" letter-spacing="1.4">ACTION</text>
+    </g>
+  </g>
+</svg>

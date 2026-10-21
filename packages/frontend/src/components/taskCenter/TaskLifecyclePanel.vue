@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import './task-pixel.css'
 import { ref, watch, onUnmounted } from 'vue'
 import type { TaskControlInput } from '@infos/shared'
@@ -130,23 +132,35 @@ async function resolveDelivery(id: string, decision: 'sent' | 'retry') {
   }
 }
 const deliveryLabels: Record<string, string> = {
-  pending: '待投递',
-  sending: '发送中',
-  sent: '已送达',
-  uncertain: '送达待核验',
-  failed: '投递失败',
-  superseded: '已失效',
+  get pending() {
+    return __t('ui.taskCenter', '待投递')
+  },
+  get sending() {
+    return __t('ui.taskCenter', '发送中')
+  },
+  get sent() {
+    return __t('ui.taskCenter', '已送达')
+  },
+  get uncertain() {
+    return __t('ui.taskCenter', '送达待核验')
+  },
+  get failed() {
+    return __t('ui.taskCenter', '投递失败')
+  },
+  get superseded() {
+    return __t('ui.taskCenter', '已失效')
+  },
 }
 </script>
 
 <template>
   <section v-if="task.lifecycle" class="task-lifecycle task-pixel-surface">
     <p v-if="task.lifecycle.successCriteria">
-      <span>完成条件</span>
+      <span>{{ __t('ui.taskCenter', '完成条件') }}</span>
       {{ task.lifecycle.successCriteria }}
     </p>
     <p v-if="task.lifecycle.continuation">
-      <span>当前交接</span>
+      <span>{{ __t('ui.taskCenter', '当前交接') }}</span>
       {{ task.lifecycle.continuation }}
     </p>
     <TodoPlanCard v-if="task.plan" :plan="task.plan" :dismissible="false" />
@@ -157,27 +171,27 @@ const deliveryLabels: Record<string, string> = {
       </li>
     </ol>
     <p v-if="task.lifecycle.wait">
-      <span>等待</span>
+      <span>{{ __t('ui.taskCenter', '等待') }}</span>
       {{
         task.lifecycle.wait.kind === 'time'
           ? new Date(task.lifecycle.wait.key).toLocaleString()
           : task.lifecycle.wait.kind === 'task'
-            ? `关联任务 ${task.lifecycle.wait.key}`
-            : '你的决定'
+            ? __t('ui.taskCenter', '关联任务 {0}', [task.lifecycle.wait.key])
+            : __t('ui.taskCenter', '你的决定')
       }}
     </p>
     <p v-if="task.status === 'completed'">
-      <span>结果依据</span>
+      <span>{{ __t('ui.taskCenter', '结果依据') }}</span>
       {{
         task.lifecycle.verification === 'evidence_available'
-          ? '有工具记录可查'
+          ? __t('ui.taskCenter', '有工具记录可查')
           : task.lifecycle.verification === 'reported'
-            ? '执行器已交付'
-            : '未核验'
+            ? __t('ui.taskCenter', '执行器已交付')
+            : __t('ui.taskCenter', '未核验')
       }}
     </p>
     <details v-if="task.lifecycle.evidence.length || task.lifecycle.artifacts.length">
-      <summary>查看依据与产出</summary>
+      <summary>{{ __t('ui.taskCenter', '查看依据与产出') }}</summary>
       <ul>
         <li v-for="item in task.lifecycle.evidence" :key="item.toolCallId">
           {{ item.description }} · {{ item.toolCallId }}
@@ -186,15 +200,19 @@ const deliveryLabels: Record<string, string> = {
       </ul>
     </details>
     <p class="lifecycle-muted">
-      已执行 {{ task.lifecycle.segments }} 段 · 模型 {{ task.lifecycle.usage.llmCalls }}/{{
+      {{ __t('ui.taskCenter', '已执行') }} {{ task.lifecycle.segments }}
+      {{ __t('ui.taskCenter', '段 · 模型') }} {{ task.lifecycle.usage.llmCalls }}/{{
         task.lifecycle.maxLlmCalls
       }}
-      · 工具 {{ task.lifecycle.usage.toolCalls }}/{{ task.lifecycle.maxToolCalls }}
+      {{ __t('ui.taskCenter', '· 工具') }} {{ task.lifecycle.usage.toolCalls }}/{{
+        task.lifecycle.maxToolCalls
+      }}
     </p>
     <template v-if="!['completed', 'cancelled'].includes(task.status)">
       <label v-if="task.lifecycle.pendingEffect">
         <input v-model="confirmed" type="checkbox" :disabled="busy" />
-        我已核验「{{ task.lifecycle.pendingEffect.toolName }}」的执行结果
+        {{ __t('ui.taskCenter', '我已核验「') }}{{ task.lifecycle.pendingEffect.toolName
+        }}{{ __t('ui.taskCenter', '」的执行结果') }}
       </label>
       <PButton
         v-if="['blocked', 'paused', 'failed', 'waiting'].includes(task.status)"
@@ -202,62 +220,62 @@ const deliveryLabels: Record<string, string> = {
         :disabled="busy || (!!task.lifecycle.pendingEffect && !confirmed)"
         @click="control('resume')"
       >
-        继续任务
+        {{ __t('ui.taskCenter', '继续任务') }}
       </PButton>
       <details>
-        <summary>调整任务</summary>
+        <summary>{{ __t('ui.taskCenter', '调整任务') }}</summary>
         <label>
-          任务要求
+          {{ __t('ui.taskCenter', '任务要求') }}
           <textarea v-model="instruction" rows="3" maxlength="4000" :disabled="busy" />
         </label>
         <label>
-          完成条件
+          {{ __t('ui.taskCenter', '完成条件') }}
           <textarea v-model="criteria" rows="2" maxlength="2000" :disabled="busy" />
         </label>
         <label>
-          截止时间
+          {{ __t('ui.taskCenter', '截止时间') }}
           <input v-model="deadline" type="datetime-local" :disabled="busy" />
         </label>
         <label>
           <input v-model="readOnly" type="checkbox" :disabled="busy" />
-          仅查询与读取，重启后自动继续
+          {{ __t('ui.taskCenter', '仅查询与读取，重启后自动继续') }}
         </label>
         <div class="lifecycle-budgets">
           <label>
-            执行段上限
+            {{ __t('ui.taskCenter', '执行段上限') }}
             <input v-model.number="budgetSegments" type="number" min="1" max="1000" />
           </label>
           <label>
-            模型调用上限
+            {{ __t('ui.taskCenter', '模型调用上限') }}
             <input v-model.number="budgetLlm" type="number" min="1" max="10000" />
           </label>
           <label>
-            工具调用上限
+            {{ __t('ui.taskCenter', '工具调用上限') }}
             <input v-model.number="budgetTools" type="number" min="1" max="50000" />
           </label>
         </div>
         <PButton size="sm" :disabled="busy || !instruction.trim()" @click="control('update')">
-          保存调整
+          {{ __t('ui.taskCenter', '保存调整') }}
         </PButton>
       </details>
     </template>
     <details v-if="deliveries.length">
-      <summary>结果投递</summary>
+      <summary>{{ __t('ui.taskCenter', '结果投递') }}</summary>
       <div v-for="item in deliveries" :key="item.id" class="delivery-item">
         <span>
           {{
             item.channel === 'social'
-              ? '来源会话'
+              ? __t('ui.taskCenter', '来源会话')
               : item.channel === 'chat'
-                ? '主应用对话'
-                : '应用通知'
+                ? __t('ui.taskCenter', '主应用对话')
+                : __t('ui.taskCenter', '应用通知')
           }}
           ·
           {{
             item.status === 'sent'
               ? item.channel === 'app'
-                ? '已记录'
-                : '已发送'
+                ? __t('ui.taskCenter', '已记录')
+                : __t('ui.taskCenter', '已发送')
               : (deliveryLabels[item.status] ?? item.status)
           }}
         </span>
@@ -269,7 +287,7 @@ const deliveryLabels: Record<string, string> = {
             :disabled="busy"
             @click="resolveDelivery(item.id, 'sent')"
           >
-            已送达
+            {{ __t('ui.taskCenter', '已送达') }}
           </PButton>
           <PButton
             size="sm"
@@ -277,7 +295,7 @@ const deliveryLabels: Record<string, string> = {
             :disabled="busy"
             @click="resolveDelivery(item.id, 'retry')"
           >
-            确认未送达，重发
+            {{ __t('ui.taskCenter', '确认未送达，重发') }}
           </PButton>
         </div>
       </div>

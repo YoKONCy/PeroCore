@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /**
  * PModal — 全局模态通知对话框
  *
@@ -15,13 +17,17 @@ const store = useNotificationStore()
       <div v-if="store.modal" class="modal-overlay" @click.self="store.closeModal()">
         <div :class="['modal-dialog', `modal-${store.modal.type}`]">
           <div class="modal-header">
-            <span class="modal-title">{{ store.modal.title ?? '提示' }}</span>
+            <span class="modal-title">
+              {{ store.modal.title ?? __t('ui.notification', '提示') }}
+            </span>
           </div>
           <div class="modal-body">
             {{ store.modal.message }}
           </div>
           <div class="modal-footer">
-            <button class="pixel-btn-primary" @click="store.closeModal()">确定</button>
+            <button class="pixel-btn-primary" @click="store.closeModal()">
+              {{ __t('ui.notification', '确定') }}
+            </button>
           </div>
         </div>
       </div>

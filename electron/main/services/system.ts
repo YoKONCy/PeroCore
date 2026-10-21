@@ -1,3 +1,4 @@
+import { t as __t } from '../utils/i18n'
 /**
  * 系统信息监控服务 (v2)
  *
@@ -57,7 +58,7 @@ export function startSystemMonitor(): void {
   }, 5000)
   // 首次采样
   cachedCpuUsage = calculateCpuUsage()
-  logger.info('System', '系统监控已启动')
+  logger.info('System', __t('electron.logs.system', '系统监控已启动'))
 }
 
 /** 停止系统监控 */

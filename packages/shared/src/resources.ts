@@ -30,7 +30,7 @@ export const SCREENSHOT_TOOLS = [
   'browser_page_image',
   'automation_execute',
 ] as const
-export const IMAGE_PREVIEW_TOOLS = ['read_image', ...SCREENSHOT_TOOLS] as const
+export const IMAGE_PREVIEW_TOOLS = ['read_image', 'document', ...SCREENSHOT_TOOLS] as const
 
 /** 读图与截图均只解析附件引用，不把外部地址当作界面图片加载。 */
 export function imagePreviewsFromToolResult(name: string, result?: string): MessageResource[] {

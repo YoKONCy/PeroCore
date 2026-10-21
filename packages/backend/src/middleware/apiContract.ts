@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 import type { MiddlewareHandler } from 'hono'
 import { CODE_MESSAGES, type ResponseCode } from '@infos/shared'
 import { createLogger } from '../lib/logger'
@@ -16,7 +17,10 @@ export const apiContractMiddleware: MiddlewareHandler = async (c, next) => {
     .catch(() => null)) as Record<string, unknown> | null
   if (!body || typeof body.code !== 'string') return
   if (!responseCodes.has(body.code)) {
-    logger.error('REST响应包含未注册业务码', { code: body.code, path: c.req.path })
+    logger.error(__t('logs.middleware', 'REST响应包含未注册业务码'), {
+      code: body.code,
+      path: c.req.path,
+    })
     body.code = 'INTERNAL_ERROR'
     body.message = CODE_MESSAGES.INTERNAL_ERROR
     c.res = rebuild(c.res, body, 500)

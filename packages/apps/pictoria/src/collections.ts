@@ -42,6 +42,21 @@ export function moveCanvas(store: Store, owner: string, raw: unknown) {
     )
   })
 }
+export function renameCanvas(store: Store, owner: string, raw: unknown) {
+  const input = z
+    .object({
+      id: identifier,
+      title: z.string().trim().min(1).max(120),
+      expectedRevision: z.number().int().positive(),
+    })
+    .strict()
+    .parse(raw)
+  return store.transaction(() => {
+    const canvas = store.get<CanvasDocument>(owner, 'project', input.id)
+    if (!canvas) throw new Error('画布不存在或不属于当前角色')
+    return store.put(owner, 'project', { ...canvas, title: input.title }, input.expectedRevision)
+  })
+}
 export function deleteCollection(store: Store, owner: string, raw: unknown) {
   const input = z
     .object({ id: identifier, expectedRevision: z.number().int().positive() })

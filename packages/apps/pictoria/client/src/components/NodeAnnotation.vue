@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import Icon from './PictoriaIcon.vue'
 const props = defineProps<{ text?: string; selected: boolean }>()
@@ -44,8 +46,8 @@ onBeforeUnmount(() => window.removeEventListener('pointerdown', outside, true))
   >
     <button
       class="annotation-label"
-      :title="text || '添加备注'"
-      :aria-label="text ? '编辑备注' : '添加备注'"
+      :title="text || __t('apps.pictoria.ui', '添加备注')"
+      :aria-label="text ? __t('apps.pictoria.ui', '编辑备注') : __t('apps.pictoria.ui', '添加备注')"
       @click="editing ? (editing = false) : edit()"
     >
       <Icon name="note" :size="13" />
@@ -62,8 +64,8 @@ onBeforeUnmount(() => window.removeEventListener('pointerdown', outside, true))
           v-model="draft"
           maxlength="2000"
           rows="3"
-          placeholder="备注（可选）"
-          aria-label="节点备注"
+          :placeholder="__t('apps.pictoria.ui', '备注（可选）')"
+          :aria-label="__t('apps.pictoria.ui', '节点备注')"
           @keydown.ctrl.enter.prevent.stop="save"
           @keydown.meta.enter.prevent.stop="save"
         />
@@ -78,11 +80,13 @@ onBeforeUnmount(() => window.removeEventListener('pointerdown', outside, true))
               }
             "
           >
-            清空
+            {{ __t('apps.pictoria.ui', '清空') }}
           </button>
           <span />
-          <button class="text-button" @click="editing = false">取消</button>
-          <button class="create-button" @click="save">保存</button>
+          <button class="text-button" @click="editing = false">
+            {{ __t('apps.pictoria.ui', '取消') }}
+          </button>
+          <button class="create-button" @click="save">{{ __t('apps.pictoria.ui', '保存') }}</button>
         </footer>
       </div>
     </Transition>

@@ -23,7 +23,13 @@ import { stepTemplates } from './templates'
 import { ServiceClient } from './serviceClient'
 import { ExecutionEngine } from './execution'
 import { libraryList, updateLibrary, searchPrompts } from './library'
-import { deleteCollection, moveCanvas, requireCollection, saveCollection } from './collections'
+import {
+  deleteCollection,
+  moveCanvas,
+  renameCanvas,
+  requireCollection,
+  saveCollection,
+} from './collections'
 import { dependencies } from './bindings'
 import { draftOperation, publishWorkflow } from './workflowDrafts'
 import {
@@ -134,6 +140,8 @@ export class PictoriaApplication {
         return deleteCollection(this.store, owner, value)
       case 'project.move':
         return moveCanvas(this.store, owner, value)
+      case 'project.rename':
+        return renameCanvas(this.store, owner, value)
       case 'prompt.search':
         return searchPrompts(this.store, owner, value)
       case 'provider.settings':

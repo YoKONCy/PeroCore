@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * WorkspaceService 共享持有器
  *
@@ -25,7 +26,7 @@ let workspaceService: WorkspaceService | null = null
  */
 export function setWorkspaceService(service: WorkspaceService): void {
   workspaceService = service
-  logger.info('WorkspaceService 已注入 (共享持有器)')
+  logger.info(__t('logs.tools', 'WorkspaceService 已注入 (共享持有器)'))
 }
 
 /** 获取 WorkspaceService，未注入时返回 null */

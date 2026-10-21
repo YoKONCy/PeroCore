@@ -29,6 +29,8 @@ export interface ObservedToolResult {
   name: string
   args: Record<string, unknown>
   output: string
+  /** 仅用于界面的完整 Diff 等结果，不参与模型观察预算。 */
+  displayOutput?: string
   isError: boolean
   callId: string
   metadata?: Record<string, unknown>

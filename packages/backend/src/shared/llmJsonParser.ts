@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * LLM JSON 鲁棒解析器
  *
@@ -77,7 +78,7 @@ export function parseLlmJson<T = unknown>(raw: string): T | null {
     /* noop */
   }
 
-  logger.debug(`无法解析 LLM JSON 输出: ${trimmed.slice(0, 100)}...`)
+  logger.debug(__t('logs.shared', '无法解析 LLM JSON 输出: {0}...', [trimmed.slice(0, 100)]))
   return null
 }
 

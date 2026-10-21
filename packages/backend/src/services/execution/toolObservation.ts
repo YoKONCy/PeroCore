@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 import { createHash, randomUUID } from 'node:crypto'
 import {
   mkdirSync,
@@ -63,7 +64,7 @@ function storeResult(ref: string, owner: ToolObservationOwner, text: string): bo
     } catch {
       /* 临时文件可能尚未建立。 */
     }
-    logger.warn('大结果持久副本保存失败，继续使用短期缓存', { error })
+    logger.warn(__t('logs.execution', '大结果持久副本保存失败，继续使用短期缓存'), { error })
     return false
   }
 }
@@ -273,7 +274,7 @@ export function releaseToolObservations(owner: ToolObservationOwner, deleteStore
         }
       } catch (error) {
         failures.push(error)
-        logger.warn('清理持久工具结果失败', { error })
+        logger.warn(__t('logs.execution', '清理持久工具结果失败'), { error })
       }
     }
     if (failures.length) throw new AggregateError(failures, '持久工具结果尚未清理完成')

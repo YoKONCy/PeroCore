@@ -1,0 +1,19 @@
+{
+  "未配置主模型，管家回退规则引擎": "The main model is not configured, and the housekeeper rolls back the rule engine.",
+  "管家 LLM 返回的 JSON 解析失败，回退规则引擎": "The JSON returned by the housekeeper LLM failed to parse, and the rule engine was rolled back.",
+  "管家 LLM 理解失败，回退规则引擎: {0}": "Butler LLM failed to understand, fallback rule engine: {0}",
+  "管家要创建的房间已存在: {0}": "The room that the housekeeper wants to create already exists: {0}",
+  "管家尝试删除「客厅」或空房间名，已拒绝": "The housekeeper tried to delete \"living room\" or empty room name, but it was rejected.",
+  "管家 LLM 返回未知动作，已忽略: {0}": "Butler LLM returned unknown action, ignored: {0}",
+  "管家维护指令映射失败，已跳过: {0} ({1})": "Butler maintenance command mapping failed, skipped: {0} ({1})",
+  "检查据点默认数据...": "Check base default data...",
+  "已创建默认设施: 我的据点": "Default facility created: My Stronghold",
+  "已创建默认房间: 客厅": "has created a default room: living room",
+  "据点默认数据检查完成": "base default data check completed",
+  "已清理未知据点角色记录: {0}": "Unknown stronghold character records have been cleared: {0}",
+  "房间已删除: {0}": "room deleted: {0}\nThe role whitelist format of",
+  "房间 {0} 的角色白名单格式无效，已按禁止进入处理": "room {0} is invalid and has been processed as prohibited.",
+  "Agent {0} 移动到房间 {1}": "Agent {0} moves to room {1}",
+  "忽略无法解析的据点传唤工具结果": "Ignore unparsable stronghold summons tool results",
+  "据点Agent回合已完成": "Stronghold Agent round has been completed"
+}

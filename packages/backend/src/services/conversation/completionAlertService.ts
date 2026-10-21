@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 import type {
   CompletionAlert,
   KernelCapabilityOffer,
@@ -46,9 +47,11 @@ export class CompletionAlertService {
       for (const [id, binding] of this.bindings)
         if (!online.has(id)) {
           this.bindings.delete(id)
-          void binding.scope
-            .dispose()
-            .catch((error) => logger.warn('释放离线完成提醒连接失败', { error: String(error) }))
+          void binding.scope.dispose().catch((error) =>
+            logger.warn(__t('logs.conversation', '释放离线完成提醒连接失败'), {
+              error: String(error),
+            }),
+          )
         }
     })
   }
@@ -94,7 +97,9 @@ export class CompletionAlertService {
     } catch (error) {
       void scope
         .dispose()
-        .catch((cause) => logger.warn('释放完成提醒连接失败', { error: String(cause) }))
+        .catch((cause) =>
+          logger.warn(__t('logs.conversation', '释放完成提醒连接失败'), { error: String(cause) }),
+        )
       throw error
     }
   }
@@ -119,7 +124,10 @@ export class CompletionAlertService {
             AbortSignal.timeout(8000),
           )
         } catch (error) {
-          logger.warn('完成提醒投递失败，任务结果不受影响', { id: alert.id, error: String(error) })
+          logger.warn(__t('logs.conversation', '完成提醒投递失败，任务结果不受影响'), {
+            id: alert.id,
+            error: String(error),
+          })
         }
       }),
     )

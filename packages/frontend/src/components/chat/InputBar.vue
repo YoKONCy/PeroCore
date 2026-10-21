@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /**
  * InputBar.vue — 界面组件
  *
@@ -6,13 +8,20 @@
  * 副作用在组件生命周期内建立并清理，避免跨页面残留监听器或异步状态。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import type { InteractionMode } from '@infos/shared'
-import { EXECUTION_MODE_OPTIONS, resolveExecutionMode, type ExecutionMode } from '@infos/shared'
+import type { ConversationQueueItem, InteractionMode, ThreadModelSettings } from '@infos/shared'
+import {
+  EXECUTION_MODE_OPTIONS,
+  resolveExecutionMode,
+  type ExecutionMode,
+  DOCUMENT_OFFICE_EXTENSIONS,
+  DOCUMENT_MAX_INPUT_BYTES,
+  isOfficeDocumentName,
+} from '@infos/shared'
 import PixelIcon from '../pixel/PixelIcon.vue'
 import { attachmentsApi, type AttachmentInfo } from '../../api/modules/attachmentsApi'
 import { ApiError } from '../../api/errors'
 import { configApi } from '../../api/modules/configApi'
-import { modelApi } from '../../api/modules/modelApi'
+import ThreadModelControls from './ThreadModelControls.vue'
 import { voiceApi } from '../../api/modules/voiceApi'
 import { useAgentStore, useNotificationStore, useThreadStore } from '../../stores'
 import {
@@ -25,6 +34,7 @@ import {
 import { toolDisplayColor, toolDisplayIcon } from '../../composables/tools/useToolDisplay'
 import { logger } from '../../lib/logger'
 import { sortThreadTools } from '../../lib/threadToolOrder'
+import { useMobileLayout } from '../../composables/ui/useMobileLayout'
 
 /** 可被 @ 的成员候选（group 模式 @ 弹窗数据源）。 */
 export interface MentionCandidate {
@@ -34,6 +44,9 @@ export interface MentionCandidate {
 }
 
 interface Props {
+  queueEnabled?: boolean
+  queuePending?: boolean
+  submissionBusy?: boolean
   draftRequest?: { text: string; revision: number }
   isSending?: boolean
   placeholder?: string
@@ -53,9 +66,12 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  queueEnabled: false,
+  queuePending: false,
+  submissionBusy: false,
   draftRequest: undefined,
   isSending: false,
-  placeholder: '向角色下达指令或输入 / 打开命令面板…',
+  placeholder: undefined,
   disabled: false,
   compact: false,
   channel: 'desktop',
@@ -87,9 +103,30 @@ interface PendingAttachment extends AttachmentInfo {
 }
 
 const threadStore = useThreadStore()
+const displayPlaceholder = computed(
+  () => props.placeholder ?? __t('ui.chat', '向角色下达指令或输入 / 打开命令面板…'),
+)
 const agentStore = useAgentStore()
 const notify = useNotificationStore()
+const { isMobile } = useMobileLayout()
 const inputText = ref('')
+const submitting = ref(false)
+const queueAction = computed(() => props.queueEnabled && (props.isSending || props.queuePending))
+const executionModeOptions = computed(() =>
+  EXECUTION_MODE_OPTIONS.map((option) => ({
+    ...option,
+    label: __t('common.interface', option.label),
+    description: __t('common.interface', option.description),
+  })),
+)
+const sendActionLabel = computed(() =>
+  submitting.value || props.submissionBusy
+    ? __t('ui.chat', '提交中…')
+    : queueAction.value
+      ? __t('ui.chat', '加入队列')
+      : __t('ui.chat', '发送'),
+)
+const restoredQueueDrafts = new Set<string>()
 watch(
   () => props.draftRequest,
   async (request) => {
@@ -113,7 +150,7 @@ const pdfAvailable = ref(false)
 const maxPdfBytes = ref(0)
 const fileAccept = computed(
   () =>
-    `image/png,image/jpeg,image/webp,image/gif,text/*,application/json,application/xml,application/yaml,application/x-yaml,application/javascript,application/sql,.txt,.md,.csv,.json,.xml,.yaml,.yml,.js,.ts,.py,.css,.c,.cpp,.java,.sql${pdfAvailable.value ? ',.pdf,application/pdf' : ''}`,
+    `image/png,image/jpeg,image/webp,image/gif,text/*,application/json,application/xml,application/yaml,application/x-yaml,application/javascript,application/sql,.txt,.md,.csv,.json,.xml,.yaml,.yml,.js,.ts,.py,.css,.c,.cpp,.java,.sql,${DOCUMENT_OFFICE_EXTENSIONS.map((extension) => `.${extension}`).join(',')}${pdfAvailable.value ? ',.pdf,application/pdf' : ''}`,
 )
 async function loadPdfCapabilities(): Promise<void> {
   try {
@@ -146,6 +183,58 @@ const threadTools = ref<ThreadToolSetting[]>([])
 const toolsLoading = ref(false)
 const toolsSaving = ref(false)
 const modeSaving = ref(false)
+const pendingInteractionMode = ref<InteractionMode | null>(null)
+const interactionModeOptions: Array<{
+  value: InteractionMode
+  label: string
+  icon: string
+  title: string
+}> = [
+  {
+    value: 'minimal',
+    get label() {
+      return __t('ui.chat', '极简')
+    },
+    icon: 'leaf',
+    get title() {
+      return __t('ui.chat', '极简模式：仅保留日常工具')
+    },
+  },
+  {
+    value: 'chat',
+    get label() {
+      return __t('ui.chat', '聊天')
+    },
+    icon: 'chat',
+    get title() {
+      return __t('ui.chat', '聊天模式')
+    },
+  },
+  {
+    value: 'work',
+    get label() {
+      return __t('ui.chat', '工作')
+    },
+    icon: 'tool',
+    get title() {
+      return __t('ui.chat', '工作模式')
+    },
+  },
+]
+const modeIndicatorIndex = computed(() =>
+  interactionModeOptions.findIndex(
+    (option) => option.value === (pendingInteractionMode.value ?? threadStore.interactionMode),
+  ),
+)
+const modeStatusLabel = computed(() => {
+  const option = interactionModeOptions.find(
+    (item) => item.value === (pendingInteractionMode.value ?? threadStore.interactionMode),
+  )
+  return __t('ui.chat', '{0}{1}模式', [
+    modeSaving.value ? __t('ui.chat', '正在切换为') : __t('ui.chat', '当前为'),
+    option?.label ?? __t('ui.chat', '聊天'),
+  ])
+})
 const disabledToolNames = ref<string[]>([])
 let toolsRequest = 0
 const executionMode = computed<ExecutionMode>({
@@ -222,9 +311,9 @@ function onInputPopoverKeydown(event: KeyboardEvent) {
 
 /** 识图方式按钮文案：跟随当前选择实时切换。 */
 const imageModeLabel = computed(() => {
-  if (imageMode.value === 'native') return '原生多模态'
-  if (imageMode.value === 'relay') return '多模态转述'
-  return '自动识图'
+  if (imageMode.value === 'native') return __t('ui.chat', '原生多模态')
+  if (imageMode.value === 'relay') return __t('ui.chat', '多模态转述')
+  return __t('ui.chat', '自动识图')
 })
 
 /** 切换识图方式弹层：打开时按触发按钮的真实位置计算 fixed 坐标。 */
@@ -258,6 +347,17 @@ function onDocumentClick(event: MouseEvent) {
 const commandQuery = ref('')
 const enableVision = ref(false)
 const enableAudioInput = ref(false)
+const modelSettingsBusy = ref(false)
+let capabilitiesRequest = 0
+
+function onThreadModelChanged(settings: ThreadModelSettings): void {
+  if (settings.threadId !== threadStore.threadId) return
+  enableVision.value = settings.effective.enableVision
+  enableAudioInput.value = settings.effective.enableAudioInput
+  tokenBudget.value = null
+  scheduleTokenBudgetRefresh()
+  void loadCapabilities()
+}
 const asrAvailable = ref(false)
 
 watch(
@@ -281,12 +381,22 @@ const isGroupChannel = computed(() => props.channel === 'group')
 const channelLabel = computed(
   () =>
     ({
-      desktop: '桌面会话',
-      group: '据点群聊',
-      companion: '陪伴会话',
-      social: '社交会话',
-      work: '工作会话',
-    })[props.channel] ?? '当前会话',
+      get desktop() {
+        return __t('ui.chat', '桌面会话')
+      },
+      get group() {
+        return __t('ui.chat', '据点群聊')
+      },
+      get companion() {
+        return __t('ui.chat', '陪伴会话')
+      },
+      get social() {
+        return __t('ui.chat', '社交会话')
+      },
+      get work() {
+        return __t('ui.chat', '工作会话')
+      },
+    })[props.channel] ?? __t('ui.chat', '当前会话'),
 )
 const successfulAttachments = computed(() =>
   pendingAttachments.value.filter((item) => item.uploadState === 'success'),
@@ -325,10 +435,16 @@ const displayedTokenBudget = computed(() => currentLiveContextBudget.value ?? to
 const tokenBudgetTitle = computed(() => {
   const budget = currentLiveContextBudget.value
   if (budget) {
-    return `当前 ReAct 第 ${budget.turn} 轮输入${budget.estimated ? '估算' : '实测'}：${tokenBudgetLabel.value}`
+    return __t('ui.chat', '第 {0} 轮输入{1}：{2}', [
+      budget.turn,
+      budget.estimated ? __t('ui.chat', '（估算）') : '',
+      tokenBudgetLabel.value,
+    ])
   }
-  const note = tokenBudget.value?.memoryRetrievalDeferred ? '（不含待检索记忆）' : ''
-  return `${budgetIsRunning.value ? '等待本轮输入统计' : `预计下一轮首个 ReAct${note}`}：${tokenBudgetLabel.value}`
+  const note = tokenBudget.value?.memoryRetrievalDeferred
+    ? __t('ui.chat', '（不含待检索记忆）')
+    : ''
+  return `${budgetIsRunning.value ? __t('ui.chat', '等待输入统计') : __t('ui.chat', '预计输入{0}', [note])}：${tokenBudgetLabel.value}`
 })
 const tokenBudgetRatio = computed(() => {
   const budget = displayedTokenBudget.value
@@ -396,7 +512,7 @@ async function refreshTokenBudget(): Promise<void> {
     )
       return
     tokenBudget.value = null
-    logger.warn('InputBar', '计算下一轮 Token 预算失败', error)
+    logger.warn('InputBar', __t('logs.frontend.chat', '计算下一轮 Token 预算失败'), error)
   }
 }
 
@@ -428,7 +544,7 @@ async function loadThreadTools(): Promise<void> {
       applyThreadTools(response.data)
     }
   } catch (error) {
-    logger.warn('InputBar', '加载本会话工具配置失败', error)
+    logger.warn('InputBar', __t('logs.frontend.chat', '加载本会话工具配置失败'), error)
     if (request === toolsRequest) threadTools.value = []
   } finally {
     if (request === toolsRequest) toolsLoading.value = false
@@ -439,6 +555,7 @@ async function switchInteractionMode(mode: InteractionMode): Promise<void> {
   if (modeSwitchDisabled.value || threadStore.interactionMode === mode) return
   toolsSaving.value = true
   modeSaving.value = true
+  pendingInteractionMode.value = mode
   let request = 0
   try {
     const threadId = await ensureThread()
@@ -449,9 +566,12 @@ async function switchInteractionMode(mode: InteractionMode): Promise<void> {
     if (response.data) applyThreadTools(response.data)
     scheduleTokenBudgetRefresh()
   } catch (error) {
-    notify.toast(error instanceof Error ? error.message : '切换会话模式失败', { type: 'error' })
+    notify.toast(error instanceof Error ? error.message : __t('ui.chat', '切换会话模式失败'), {
+      type: 'error',
+    })
   } finally {
     modeSaving.value = false
+    pendingInteractionMode.value = null
     toolsSaving.value = false
     if (request === toolsRequest) toolsLoading.value = false
   }
@@ -475,12 +595,16 @@ async function changeExecutionMode(nextMode: ExecutionMode): Promise<void> {
       response.data?.autoExecuteTools,
     )
     notify.toast(
-      `已切换为${EXECUTION_MODE_OPTIONS.find((option) => option.value === executionMode.value)?.label}`,
+      __t('ui.chat', '已切换为{0}', [
+        executionModeOptions.value.find((option) => option.value === executionMode.value)?.label,
+      ]),
       { type: 'success' },
     )
   } catch (error) {
     if (threadId === threadStore.threadId) executionMode.value = previous
-    notify.toast(error instanceof Error ? error.message : '保存执行模式失败', { type: 'error' })
+    notify.toast(error instanceof Error ? error.message : __t('ui.chat', '保存执行模式失败'), {
+      type: 'error',
+    })
   } finally {
     toolsSaving.value = false
   }
@@ -489,7 +613,7 @@ async function changeExecutionMode(nextMode: ExecutionMode): Promise<void> {
 async function toggleThreadTool(tool: ThreadToolSetting): Promise<void> {
   if (!tool.modeAllowed) return
   if (tool.locked) {
-    notify.toast(`${tool.label}属于系统协议，始终启用`, { type: 'info' })
+    notify.toast(__t('ui.chat', '{0}属于系统协议，始终启用', [tool.label]), { type: 'info' })
     return
   }
   if (toolsSaving.value || props.isSending || !threadStore.threadId) return
@@ -508,13 +632,21 @@ async function toggleThreadTool(tool: ThreadToolSetting): Promise<void> {
     toolsLoading.value = false
     if (response.data) applyThreadTools(response.data)
     scheduleTokenBudgetRefresh()
-    notify.toast(`${tool.label}已${tool.enabled ? '启用' : '禁用'}，仅影响本会话`, {
-      type: 'success',
-    })
+    notify.toast(
+      __t('ui.chat', '{0}已{1}，仅影响本会话', [
+        tool.label,
+        tool.enabled ? __t('ui.chat', '启用') : __t('ui.chat', '禁用'),
+      ]),
+      {
+        type: 'success',
+      },
+    )
   } catch (error) {
     tool.enabled = previous
     tool.userEnabled = previous
-    notify.toast(error instanceof Error ? error.message : '保存工具配置失败', { type: 'error' })
+    notify.toast(error instanceof Error ? error.message : __t('ui.chat', '保存工具配置失败'), {
+      type: 'error',
+    })
   } finally {
     toolsSaving.value = false
   }
@@ -538,7 +670,7 @@ async function loadFlowState(): Promise<void> {
     )
     flowStates.value = response.data ?? []
   } catch (error) {
-    logger.warn('InputBar', '加载会话心流失败', error)
+    logger.warn('InputBar', __t('logs.frontend.chat', '加载会话心流失败'), error)
     flowStates.value = []
   } finally {
     flowLoading.value = false
@@ -556,9 +688,11 @@ async function clearFlowState(agentId: string): Promise<void> {
   try {
     await threadsApi.clearFlowState(threadStore.threadId, agentId)
     await loadFlowState()
-    notify.toast('当前会话心流已清空', { type: 'success' })
+    notify.toast(__t('ui.chat', '当前会话心流已清空'), { type: 'success' })
   } catch (error) {
-    notify.toast(error instanceof Error ? error.message : '清空心流失败', { type: 'error' })
+    notify.toast(error instanceof Error ? error.message : __t('ui.chat', '清空心流失败'), {
+      type: 'error',
+    })
   } finally {
     flowClearing.value = false
   }
@@ -610,13 +744,50 @@ watch(
 
 /** 命令面板：基础操作 + 动态角色切换（不硬编码任何角色名）。 */
 const commands = computed(() => [
-  { id: 'new', label: '新会话', hint: '创建当前角色的新会话', keywords: 'new 新建' },
-  { id: 'clear', label: '清空输入', hint: '清除尚未发送的文字', keywords: 'clear 清除' },
-  { id: 'stop', label: '停止生成', hint: '中止当前回复', keywords: 'stop 停止' },
+  {
+    id: 'new',
+    get label() {
+      return __t('ui.chat', '新会话')
+    },
+    get hint() {
+      return __t('ui.chat', '创建当前角色的新会话')
+    },
+    get keywords() {
+      return __t('ui.chat', 'new 新建')
+    },
+  },
+  {
+    id: 'clear',
+    get label() {
+      return __t('ui.chat', '清空输入')
+    },
+    get hint() {
+      return __t('ui.chat', '清除尚未发送的文字')
+    },
+    get keywords() {
+      return __t('ui.chat', 'clear 清除')
+    },
+  },
+  {
+    id: 'stop',
+    get label() {
+      return __t('ui.chat', '停止生成')
+    },
+    get hint() {
+      return __t('ui.chat', '中止当前回复')
+    },
+    get keywords() {
+      return __t('ui.chat', 'stop 停止')
+    },
+  },
   ...agentStore.agents.map((agent) => ({
     id: agent.id,
-    label: `切换 ${agent.name || agent.id}`,
-    hint: '切换到该角色',
+    get label() {
+      return __t('ui.chat', '切换 {0}', [agent.name || agent.id])
+    },
+    get hint() {
+      return __t('ui.chat', '切换到该角色')
+    },
     keywords: `agent 角色 ${agent.name || agent.id}`,
   })),
 ])
@@ -624,32 +795,30 @@ const commands = computed(() => [
 async function loadCapabilities(): Promise<void> {
   // 据点群聊当前仅支持文本，不读取 desktop 模型和语音能力。
   if (isGroupChannel.value) return
+  const threadId = threadStore.threadId
+  const request = ++capabilitiesRequest
   try {
-    const [mainRes, voiceRes, relayRes] = await Promise.all([
-      configApi.get('model.main'),
+    const [modelRes, voiceRes, relayRes] = await Promise.all([
+      threadId ? threadsApi.getModelSettings(threadId) : Promise.resolve(null),
       voiceApi.getStatus(),
       configApi.batch(['multimodalRelay.enabled', 'multimodalRelay.modelConfigId']),
     ])
+    if (request !== capabilitiesRequest || threadId !== threadStore.threadId) return
     const relayConfig = relayRes.data ?? {}
     relayAvailable.value =
       relayConfig['multimodalRelay.enabled'] === 'true' &&
       Boolean(relayConfig['multimodalRelay.modelConfigId'])
     asrAvailable.value = voiceRes.data?.asr?.available === true
-    const mainId = String(mainRes.data?.value ?? '')
-    if (!mainId) {
-      enableVision.value = false
-      enableAudioInput.value = false
-      return
-    }
-    const model = await modelApi.getById(mainId)
-    enableVision.value = model.data?.enableVision === true
-    enableAudioInput.value = model.data?.enableAudioInput === true
+    enableVision.value = modelRes?.data?.effective.enableVision === true
+    enableAudioInput.value = modelRes?.data?.effective.enableAudioInput === true
   } catch (error) {
-    logger.error('InputBar', '读取输入能力状态失败', error)
+    logger.error('InputBar', __t('logs.frontend.chat', '读取输入能力状态失败'), error)
   }
 }
 
-watch(() => agentStore.activeAgentId, loadCapabilities, { immediate: true })
+watch([() => agentStore.activeAgentId, () => threadStore.threadId], loadCapabilities, {
+  immediate: true,
+})
 
 function onModelCapabilitiesChanged(): void {
   void loadCapabilities()
@@ -684,7 +853,7 @@ function saveInputHistory(text: string): void {
   try {
     localStorage.setItem(INPUT_HISTORY_KEY, JSON.stringify(inputHistory.value))
   } catch (error) {
-    logger.warn('InputBar', '保存本地输入历史失败', error)
+    logger.warn('InputBar', __t('logs.frontend.chat', '保存本地输入历史失败'), error)
   }
 }
 
@@ -731,6 +900,7 @@ function autoResize() {
 }
 
 function onKeydown(event: KeyboardEvent) {
+  if (event.isComposing || event.keyCode === 229) return
   // @ 弹窗打开时优先处理选择导航，避免 Enter 直接发送。
   if (mentionOpen.value) {
     if (event.key === 'ArrowDown') {
@@ -760,7 +930,11 @@ function onKeydown(event: KeyboardEvent) {
     showHistory(event.key === 'ArrowUp' ? -1 : 1)
     return
   }
-  if (event.key === 'Enter' && !event.shiftKey) {
+  if (
+    event.key === 'Enter' &&
+    !event.shiftKey &&
+    (!isMobile.value || event.ctrlKey || event.metaKey)
+  ) {
     event.preventDefault()
     send()
   } else if (event.key === 'Escape') {
@@ -774,19 +948,31 @@ async function ensureThread(): Promise<string> {
   return threadStore.threadId
 }
 
-function validateFile(file: File): 'image' | 'text' | 'pdf' | null {
+function validateFile(file: File): 'image' | 'text' | 'pdf' | 'file' | null {
   if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
     if (!pdfAvailable.value) {
-      notify.toast('请先在工具与扩展 → 拓展功能 → PDF 解析中启用解析来源', { type: 'warning' })
-      return null
-    }
-    if (file.size > maxPdfBytes.value) {
-      notify.toast(`当前 PDF 来源最多支持 ${maxPdfBytes.value / 1024 / 1024}MB`, {
+      notify.toast(__t('ui.chat', '请先在工具与扩展 → 拓展功能 → PDF 解析中启用解析来源'), {
         type: 'warning',
       })
       return null
     }
+    if (file.size > maxPdfBytes.value) {
+      notify.toast(
+        __t('ui.chat', '当前 PDF 来源最多支持 {0}MB', [maxPdfBytes.value / 1024 / 1024]),
+        {
+          type: 'warning',
+        },
+      )
+      return null
+    }
     return 'pdf'
+  }
+  if (isOfficeDocumentName(file.name)) {
+    if (file.size > DOCUMENT_MAX_INPUT_BYTES) {
+      notify.toast(__t('ui.chat', '文档不能超过 20MB'), { type: 'warning' })
+      return null
+    }
+    return 'file'
   }
   const imageTypes = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
   const textTypes = new Set([
@@ -811,19 +997,19 @@ function validateFile(file: File): 'image' | 'text' | 'pdf' | null {
   ])
   if (imageTypes.has(file.type)) {
     if (file.size > 20 * 1024 * 1024) {
-      notify.toast('图片不能超过 20MB', { type: 'warning' })
+      notify.toast(__t('ui.chat', '图片不能超过 20MB'), { type: 'warning' })
       return null
     }
     return 'image'
   }
   if (textTypes.has(file.type)) {
     if (file.size > 2 * 1024 * 1024) {
-      notify.toast('文本附件不能超过 2MB', { type: 'warning' })
+      notify.toast(__t('ui.chat', '文本附件不能超过 2MB'), { type: 'warning' })
       return null
     }
     return 'text'
   }
-  notify.toast('请选择受支持的图片、UTF-8 文本或已启用解析来源的 PDF', {
+  notify.toast(__t('ui.chat', '请选择图片、文本、PDF 或 Office 文档'), {
     type: 'warning',
   })
   return null
@@ -836,19 +1022,19 @@ async function uploadFile(file: File) {
   // 模型配置可能由设置页或其他窗口刚刚更新；上传前复核权威能力，避免使用陈旧快照。
   if (kind === 'image') await loadCapabilities()
   if (kind === 'image' && !enableVision.value && !relayAvailable.value) {
-    notify.toast('主模型不支持视觉，且尚未配置多模态转述模型', { type: 'warning' })
+    notify.toast(__t('ui.chat', '主模型不支持视觉，且尚未配置多模态转述模型'), { type: 'warning' })
     return
   }
   if (kind === 'image' && imageMode.value === 'native' && !enableVision.value) {
-    notify.toast('当前主模型不支持原生识图，请改用多模态转述', { type: 'warning' })
+    notify.toast(__t('ui.chat', '当前主模型不支持原生识图，请改用多模态转述'), { type: 'warning' })
     return
   }
   if (kind === 'image' && imageMode.value === 'relay' && !relayAvailable.value) {
-    notify.toast('多模态转述模型尚未配置', { type: 'warning' })
+    notify.toast(__t('ui.chat', '多模态转述模型尚未配置'), { type: 'warning' })
     return
   }
   if (pendingAttachments.value.length >= 5) {
-    notify.toast('每轮最多添加 5 个附件', { type: 'warning' })
+    notify.toast(__t('ui.chat', '每轮最多添加 5 个附件'), { type: 'warning' })
     return
   }
   const localKey = `${Date.now()}-${Math.random()}`
@@ -932,7 +1118,7 @@ async function cleanupPendingAttachment(item: AttachmentInfo): Promise<void> {
     await attachmentsApi.removeUnbound(item.id)
   } catch (error) {
     if (error instanceof ApiError && error.code === 'NOT_FOUND') return
-    logger.warn('InputBar', '待发送附件已移除，后台清理未完成', error)
+    logger.warn('InputBar', __t('logs.frontend.chat', '待发送附件已移除，后台清理未完成'), error)
   }
 }
 
@@ -1178,7 +1364,15 @@ const mentionOverlayHtml = computed(() => {
 })
 
 function send() {
-  if (modeSaving.value || props.isSending || props.disabled) return
+  if (
+    modelSettingsBusy.value ||
+    modeSaving.value ||
+    submitting.value ||
+    props.submissionBusy ||
+    (props.isSending && !props.queueEnabled) ||
+    props.disabled
+  )
+    return
   const text = inputText.value.trim()
   if ((!text && !successfulAttachments.value.length) || hasUploading.value) return
   const mentions = isGroupChannel.value ? resolveMentions(inputText.value) : []
@@ -1187,6 +1381,7 @@ function send() {
   const submissionVersion = ++attachmentDraftVersion
   sentAttachments.forEach((item) => submittedAttachments.add(item))
   let completed = false
+  submitting.value = true
   saveInputHistory(text)
   // 提交给流式管道后立刻清空本地输入，避免等待模型完整回复才更新指挥台。
   inputText.value = ''
@@ -1216,6 +1411,7 @@ function send() {
     (success) => {
       if (completed) return
       completed = true
+      submitting.value = false
       sentAttachments.forEach((item) => submittedAttachments.delete(item))
       if (success || submissionVersion !== attachmentDraftVersion) {
         sentAttachments.forEach(releaseAttachmentPreview)
@@ -1250,13 +1446,24 @@ async function executeCommand(id: string) {
   else {
     const target = agentStore.agents.find((agent) => agent.id.toLowerCase() === id)
     if (target) await agentStore.switchAgent(target.id)
-    else notify.toast(`未找到角色「${id}」`, { type: 'warning' })
+    else notify.toast(__t('ui.chat', '未找到角色「{0}」', [id]), { type: 'warning' })
   }
 }
 
 async function startAsr() {
   if (!asrAvailable.value) {
-    notify.toast('ASR 当前不可用，请先在语音配置中启用并配置服务', { type: 'warning' })
+    notify.toast(__t('ui.chat', 'ASR 当前不可用，请先在语音配置中启用并配置服务'), {
+      type: 'warning',
+    })
+    return
+  }
+  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+    notify.toast(
+      __t('ui.chat', '手机麦克风需要通过 HTTPS 访问 infOS；当前可继续使用文字与文件输入'),
+      {
+        type: 'warning',
+      },
+    )
     return
   }
   try {
@@ -1271,7 +1478,9 @@ async function startAsr() {
     recordingSeconds.value = 0
     recordingTimer = setInterval(() => recordingSeconds.value++, 1000)
   } catch (error) {
-    notify.toast(`无法使用麦克风：${(error as Error).message}`, { type: 'error' })
+    notify.toast(__t('ui.chat', '无法使用麦克风：{0}', [(error as Error).message]), {
+      type: 'error',
+    })
     cleanupRecorder()
   }
 }
@@ -1289,10 +1498,12 @@ function stopAsr(cancel = false) {
       const transcript = result.text?.trim()
       if (transcript)
         inputText.value = [inputText.value.trim(), transcript].filter(Boolean).join('\n')
-      else notify.toast('未识别到有效语音内容', { type: 'warning' })
+      else notify.toast(__t('ui.chat', '未识别到有效语音内容'), { type: 'warning' })
       await nextTick(autoResize)
     } catch (error) {
-      notify.toast(`语音转写失败：${(error as Error).message}`, { type: 'error' })
+      notify.toast(__t('ui.chat', '语音转写失败：{0}', [(error as Error).message]), {
+        type: 'error',
+      })
     } finally {
       isTranscribing.value = false
     }
@@ -1312,8 +1523,8 @@ function cleanupRecorder() {
 function nativeAudioNotice() {
   notify.toast(
     enableAudioInput.value
-      ? '原生音频输入暂未接入，当前为预留入口，暂不能发送音频'
-      : '原生音频输入暂未接入，且当前主模型未声明音频输入能力',
+      ? __t('ui.chat', '原生音频输入暂未接入，当前为预留入口，暂不能发送音频')
+      : __t('ui.chat', '原生音频输入暂未接入，且当前主模型未声明音频输入能力'),
     { type: 'warning' },
   )
 }
@@ -1350,7 +1561,75 @@ onBeforeUnmount(() => {
   void clearPendingAttachments()
 })
 
-defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments })
+/** 先确认附件与当前会话，再接收已由服务端移出派发队列的草稿。 */
+async function restoreQueuedDraft(
+  item: ConversationQueueItem,
+  isCurrent: () => boolean,
+): Promise<boolean> {
+  if (
+    !isCurrent() ||
+    props.disabled ||
+    submitting.value ||
+    threadStore.threadId !== item.input.threadId
+  )
+    return false
+  const version = attachmentDraftVersion
+  const ids = item.input.attachmentIds ?? []
+  const attachments = await Promise.all(
+    ids.map(async (id) => {
+      const attachment = (await attachmentsApi.get(id)).data
+      if (
+        !attachment ||
+        attachment.threadId !== item.input.threadId ||
+        attachment.messageId !== null ||
+        attachment.status !== 'uploaded'
+      ) {
+        throw new Error('附件暂不可用，编辑草稿已保留')
+      }
+      return attachment
+    }),
+  )
+  if (
+    !isCurrent() ||
+    props.disabled ||
+    version !== attachmentDraftVersion ||
+    threadStore.threadId !== item.input.threadId
+  )
+    return false
+  const additional = attachments.filter(
+    (attachment) => !pendingAttachments.value.some((entry) => entry.id === attachment.id),
+  )
+  if (pendingAttachments.value.length + additional.length > 5)
+    throw new Error('附件过多，请先整理输入栏')
+  const hadDraft = !!inputText.value.trim() || pendingAttachments.value.length > 0
+  if (!restoredQueueDrafts.has(item.id)) {
+    inputText.value = [inputText.value, item.input.content].filter(Boolean).join('\n\n')
+    restoredQueueDrafts.add(item.id)
+    if (!hadDraft && item.input.imageMode) imageMode.value = item.input.imageMode
+  }
+  pendingAttachments.value.push(
+    ...additional.map(
+      (attachment): PendingAttachment => ({
+        ...attachment,
+        uploadState: 'success',
+        localKey: `queue:${item.id}:${attachment.id}`,
+        previewUrl:
+          attachment.kind === 'image' ? attachmentsApi.contentUrl(attachment.id) : undefined,
+      }),
+    ),
+  )
+  nextTick(() => {
+    autoResize()
+    textareaRef.value?.focus()
+  })
+  return true
+}
+
+defineExpose({
+  focus: () => textareaRef.value?.focus(),
+  clearPendingAttachments,
+  restoreQueuedDraft,
+})
 </script>
 
 <template>
@@ -1368,32 +1647,32 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
           {{ participantLabel }}
         </span>
         <span class="deck-chip" :class="{ active: isSending }">
-          {{ isSending ? '等待角色回复' : '群聊就绪' }}
+          {{ isSending ? __t('ui.chat', '等待角色回复') : __t('ui.chat', '群聊就绪') }}
         </span>
       </template>
       <template v-else>
         <span class="deck-chip">
           <PixelIcon name="user" size="xs" />
-          {{ activeAgent?.name ?? '角色' }}
+          {{ activeAgent?.name ?? __t('ui.chat', '角色') }}
         </span>
         <span class="deck-chip">DESKTOP</span>
         <span class="deck-chip" :class="{ off: !enableVision }">
-          视觉 {{ enableVision ? 'ON' : 'OFF' }}
+          {{ __t('ui.chat', '视觉') }} {{ enableVision ? 'ON' : 'OFF' }}
         </span>
         <span class="deck-chip" :class="{ off: !asrAvailable }">
           ASR {{ asrAvailable ? 'READY' : 'OFF' }}
         </span>
         <span class="deck-chip" :class="{ active: isSending }">
-          工具 {{ isSending ? 'BUSY' : 'STANDBY' }}
+          {{ __t('ui.chat', '工具') }} {{ isSending ? 'BUSY' : 'STANDBY' }}
         </span>
         <button
           class="deck-flow-chip"
           :class="{ active: flowOpen }"
-          title="查看当前会话心流"
+          :title="__t('ui.chat', '查看当前会话心流')"
           @click="toggleFlowPanel"
         >
           <PixelIcon name="thought" size="xs" />
-          心流
+          {{ __t('ui.chat', '心流') }}
         </button>
       </template>
       <span v-if="!isGroupChannel" class="token-capacitor" :title="tokenBudgetTitle">
@@ -1415,19 +1694,19 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
         :class="{ 'attachment-card--image': item.previewUrl }"
       >
         <template v-if="item.previewUrl">
-          <img :src="item.previewUrl" alt="待发送图片" />
+          <img :src="item.previewUrl" :alt="__t('ui.chat', '待发送图片')" />
           <span
             class="attachment-image-state"
             :class="`attachment-image-state--${item.uploadState}`"
             :title="
               item.error ||
               (item.uploadState === 'uploading'
-                ? '上传中'
+                ? __t('ui.chat', '上传中')
                 : item.uploadState === 'checking'
-                  ? '确认附件状态中'
+                  ? __t('ui.chat', '确认附件状态中')
                   : item.uploadState === 'success'
-                    ? '已就绪'
-                    : '上传失败')
+                    ? __t('ui.chat', '已就绪')
+                    : __t('ui.chat', '上传失败'))
             "
           />
         </template>
@@ -1439,16 +1718,16 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
               {{ formatSize(item.sizeBytes) }} ·
               {{
                 item.uploadState === 'uploading'
-                  ? '上传中'
+                  ? __t('ui.chat', '上传中')
                   : item.uploadState === 'checking'
-                    ? '确认状态中'
+                    ? __t('ui.chat', '确认状态中')
                     : item.uploadState === 'processing'
-                      ? '解析中'
+                      ? __t('ui.chat', '解析中')
                       : item.uploadState === 'success'
-                        ? '已就绪'
+                        ? __t('ui.chat', '已就绪')
                         : item.kind === 'pdf'
-                          ? '解析失败'
-                          : '上传失败'
+                          ? __t('ui.chat', '解析失败')
+                          : __t('ui.chat', '上传失败')
               }}
             </span>
             <span v-if="item.error" class="attachment-error">{{ item.error }}</span>
@@ -1456,13 +1735,17 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
         </template>
         <button
           v-if="item.kind === 'pdf' && item.uploadState === 'failed' && item.id"
-          title="重试解析"
-          aria-label="重试解析"
+          :title="__t('ui.chat', '重试解析')"
+          :aria-label="__t('ui.chat', '重试解析')"
           @click="retryPdf(item)"
         >
           <PixelIcon name="refresh" size="xs" />
         </button>
-        <button title="取消附件" aria-label="取消附件" @click="removeAttachment(item)">
+        <button
+          :title="__t('ui.chat', '取消附件')"
+          :aria-label="__t('ui.chat', '取消附件')"
+          @click="removeAttachment(item)"
+        >
           <PixelIcon name="close" size="xs" />
         </button>
       </article>
@@ -1479,7 +1762,7 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
       <textarea
         ref="textareaRef"
         v-model="inputText"
-        :placeholder="placeholder"
+        :placeholder="displayPlaceholder"
         :disabled="disabled"
         rows="1"
         :class="{ 'deck-textarea-transparent': isGroupChannel }"
@@ -1502,28 +1785,36 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
             <PixelIcon v-else :name="candidate.agentId === '@all' ? 'users' : 'user'" size="xs" />
           </span>
           <strong>{{ candidate.name }}</strong>
-          <small v-if="candidate.agentId === '@all'">全体成员</small>
+          <small v-if="candidate.agentId === '@all'">{{ __t('ui.chat', '全体成员') }}</small>
         </button>
-        <p v-if="!mentionFiltered.length" class="mention-empty">没有匹配的成员</p>
+        <p v-if="!mentionFiltered.length" class="mention-empty">
+          {{ __t('ui.chat', '没有匹配的成员') }}
+        </p>
       </div>
     </div>
 
     <div v-if="!isGroupChannel && (isRecording || isTranscribing)" class="record-strip">
       <template v-if="isRecording">
         <span class="record-dot" />
-        正在录音 {{ recordingSeconds }}s
-        <button @click="stopAsr(false)">停止并转写</button>
-        <button @click="stopAsr(true)">取消</button>
+        {{ __t('ui.chat', '正在录音') }} {{ recordingSeconds }}s
+        <button @click="stopAsr(false)">{{ __t('ui.chat', '停止并转写') }}</button>
+        <button @click="stopAsr(true)">{{ __t('ui.chat', '取消') }}</button>
       </template>
       <template v-else>
         <PixelIcon name="refresh" size="xs" animation="spin" />
-        正在转写，请稍候…
+        {{ __t('ui.chat', '正在转写，请稍候…') }}
       </template>
     </div>
 
     <div class="deck-footer">
       <div v-if="!isGroupChannel" class="deck-tools">
-        <button title="命令" @click="commandOpen = !commandOpen">
+        <ThreadModelControls
+          :thread-id="threadStore.threadId"
+          :disabled="disabled || isSending || modeSaving || submissionBusy || submitting"
+          @changed="onThreadModelChanged"
+          @busy="modelSettingsBusy = $event"
+        />
+        <button :title="__t('ui.chat', '命令')" @click="commandOpen = !commandOpen">
           <PixelIcon name="terminal" size="xs" class="deck-tool-icon" />
           <span class="pixel-label">/ CMD</span>
         </button>
@@ -1532,7 +1823,7 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
           <button
             ref="imageModeToggleRef"
             class="image-mode-selector"
-            title="选择识图方式"
+            :title="__t('ui.chat', '选择识图方式')"
             @click.stop="toggleImageModePopover"
           >
             <PixelIcon name="image" size="xs" />
@@ -1546,27 +1837,29 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
               :style="imageModePopoverStyle"
               @click.stop
             >
-              <strong>识图方式</strong>
+              <strong>{{ __t('ui.chat', '识图方式') }}</strong>
               <button
                 v-for="option in [
                   {
                     value: 'auto',
-                    label: '自动选择',
+                    label: __t('ui.chat', '自动选择'),
                     hint: enableVision
-                      ? '优先主模型原生识图'
+                      ? __t('ui.chat', '优先主模型原生识图')
                       : relayAvailable
-                        ? '使用多模态转述'
-                        : '暂无可用能力',
+                        ? __t('ui.chat', '使用多模态转述')
+                        : __t('ui.chat', '暂无可用能力'),
                   },
                   {
                     value: 'native',
-                    label: '原生多模态',
-                    hint: enableVision ? '当前可用' : '当前模型不支持',
+                    label: __t('ui.chat', '原生多模态'),
+                    hint: enableVision
+                      ? __t('ui.chat', '当前可用')
+                      : __t('ui.chat', '当前模型不支持'),
                   },
                   {
                     value: 'relay',
-                    label: '多模态转述',
-                    hint: relayAvailable ? '当前可用' : '尚未配置',
+                    label: __t('ui.chat', '多模态转述'),
+                    hint: relayAvailable ? __t('ui.chat', '当前可用') : __t('ui.chat', '尚未配置'),
                   },
                 ]"
                 :key="option.value"
@@ -1583,25 +1876,29 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
           </Teleport>
         </div>
         <button
-          :title="pdfAvailable ? '添加图片、文本或 PDF 文件' : '添加图片或文本文件'"
+          :title="
+            pdfAvailable
+              ? __t('ui.chat', '添加图片、文本或 PDF 文件')
+              : __t('ui.chat', '添加图片或文本文件')
+          "
           @click="fileInputRef?.click()"
         >
           <PixelIcon name="file" size="xs" />
-          文件
+          {{ __t('ui.chat', '文件') }}
         </button>
         <div class="audio-input-control">
           <button
             ref="audioInputToggleRef"
             class="audio-input-selector"
             :disabled="disabled || isRecording || isTranscribing"
-            title="选择语音输入方式"
-            aria-label="选择语音输入方式"
+            :title="__t('ui.chat', '选择语音输入方式')"
+            :aria-label="__t('ui.chat', '选择语音输入方式')"
             aria-haspopup="menu"
             :aria-expanded="audioInputOpen"
             @click.stop="toggleAudioInputPopover"
           >
             <PixelIcon name="volume" size="xs" />
-            语音
+            {{ __t('ui.chat', '语音') }}
             <span class="image-mode-chevron">⌄</span>
           </button>
           <Teleport to="body">
@@ -1610,55 +1907,66 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
               class="deck-popover audio-input-popover"
               :style="audioInputPopoverStyle"
               role="menu"
-              aria-label="语音输入方式"
+              :aria-label="__t('ui.chat', '语音输入方式')"
               @click.stop
             >
-              <strong>语音输入</strong>
+              <strong>{{ __t('ui.chat', '语音输入') }}</strong>
               <button role="menuitem" @click="selectAudioInput('asr')">
-                <span>语音转写</span>
+                <span>{{ __t('ui.chat', '语音转写') }}</span>
                 <small>
-                  {{ asrAvailable ? '录音转成文字，可编辑后发送' : '尚未配置，点击查看说明' }}
+                  {{
+                    asrAvailable
+                      ? __t('ui.chat', '录音转成文字，可编辑后发送')
+                      : __t('ui.chat', '未配置')
+                  }}
                 </small>
               </button>
               <button role="menuitem" @click="selectAudioInput('native')">
-                <span>原生音频</span>
-                <small>预留功能，点击查看说明</small>
+                <span>{{ __t('ui.chat', '原生音频') }}</span>
+                <small>{{ __t('ui.chat', '预留功能，点击查看说明') }}</small>
               </button>
             </div>
           </Teleport>
         </div>
-        <div class="deck-mode" role="group" aria-label="会话模式" :aria-busy="modeSaving">
+        <div
+          class="deck-mode"
+          :class="{ 'is-saving': modeSaving }"
+          :style="{ '--mode-index': modeIndicatorIndex }"
+          role="group"
+          :aria-label="__t('ui.chat', '会话模式')"
+          :aria-busy="modeSaving"
+        >
           <button
+            v-for="mode in interactionModeOptions"
+            :key="mode.value"
             type="button"
-            :class="{ 'is-active': threadStore.interactionMode === 'chat' }"
-            :aria-pressed="threadStore.interactionMode === 'chat'"
+            :class="{
+              'is-active': !pendingInteractionMode && threadStore.interactionMode === mode.value,
+              'is-pending': pendingInteractionMode === mode.value,
+            }"
+            :aria-pressed="threadStore.interactionMode === mode.value"
             :disabled="modeSwitchDisabled"
-            title="聊天模式"
-            @click="switchInteractionMode('chat')"
+            :title="mode.title"
+            @click="switchInteractionMode(mode.value)"
           >
-            <PixelIcon name="chat" size="xs" />
-            聊天
+            <PixelIcon
+              :name="pendingInteractionMode === mode.value ? 'refresh' : mode.icon"
+              :animation="pendingInteractionMode === mode.value ? 'spin' : undefined"
+              size="xs"
+              aria-hidden="true"
+            />
+            {{ mode.label }}
           </button>
-          <button
-            type="button"
-            :class="{ 'is-active': threadStore.interactionMode === 'work' }"
-            :aria-pressed="threadStore.interactionMode === 'work'"
-            :disabled="modeSwitchDisabled"
-            title="工作模式"
-            @click="switchInteractionMode('work')"
-          >
-            <PixelIcon name="tool" size="xs" />
-            工作
-          </button>
+          <span class="sr-only" role="status">{{ modeStatusLabel }}</span>
         </div>
         <button
-          title="管理本会话可用工具"
+          :title="__t('ui.chat', '管理本会话可用工具')"
           :disabled="modeSaving"
           :class="{ reserved: toolOpen }"
           @click="toggleToolManager"
         >
           <PixelIcon name="tool" size="xs" />
-          会话工具
+          {{ __t('ui.chat', '会话工具') }}
           <span v-if="threadTools.length" class="tool-count">
             {{ enabledToolCount }}/{{ availableToolCount }}
           </span>
@@ -1668,36 +1976,58 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
         <button
           class="mention-btn"
           :disabled="disabled || !mentionCandidates.length"
-          title="提及成员：在当前光标处插入 @"
+          :title="__t('ui.chat', '提及成员：在当前光标处插入 @')"
           @click="openMentionPicker"
         >
           <span class="mention-btn-at">@</span>
-          <span>提及</span>
+          <span>{{ __t('ui.chat', '提及') }}</span>
         </button>
       </div>
-      <button v-if="isSending && !isGroupChannel" class="stop-btn" @click="emit('stop')">
-        <PixelIcon name="square" size="xs" />
-        停止
-      </button>
-      <button
-        v-else
-        class="send-btn"
-        :disabled="
-          disabled ||
-          isSending ||
-          modeSaving ||
-          hasUploading ||
-          (!inputText.trim() && !successfulAttachments.length)
-        "
-        @click="send"
-      >
-        <PixelIcon name="send" size="sm" />
-        <span>发送</span>
-      </button>
+      <div class="deck-actions">
+        <button
+          v-if="isSending && !isGroupChannel"
+          type="button"
+          class="stop-btn"
+          :aria-label="__t('ui.chat', '停止生成')"
+          :title="__t('ui.chat', '停止生成')"
+          @click="emit('stop')"
+        >
+          <i class="stop-btn-mark" aria-hidden="true" />
+          <span class="action-label">{{ __t('ui.chat', '停止') }}</span>
+        </button>
+        <button
+          v-if="!isSending || queueEnabled"
+          type="button"
+          class="send-btn"
+          :class="{ 'send-btn--queue': queueAction }"
+          :aria-label="sendActionLabel"
+          :title="sendActionLabel"
+          :aria-busy="submitting || submissionBusy"
+          :disabled="
+            disabled ||
+            (isSending && !queueEnabled) ||
+            submitting ||
+            submissionBusy ||
+            modelSettingsBusy ||
+            modeSaving ||
+            hasUploading ||
+            (!inputText.trim() && !successfulAttachments.length)
+          "
+          @click="send"
+        >
+          <PixelIcon
+            :name="submitting || submissionBusy ? 'refresh' : queueAction ? 'list' : 'send'"
+            :animation="submitting || submissionBusy ? 'spin' : undefined"
+            size="sm"
+            aria-hidden="true"
+          />
+          <span class="action-label">{{ sendActionLabel }}</span>
+        </button>
+      </div>
     </div>
 
     <div v-if="commandOpen" class="deck-popover command-popover">
-      <input v-model="commandQuery" autofocus placeholder="搜索命令…" />
+      <input v-model="commandQuery" autofocus :placeholder="__t('ui.chat', '搜索命令…')" />
       <button
         v-for="command in filteredCommands"
         :key="command.id"
@@ -1706,29 +2036,35 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
         <strong>/ {{ command.label }}</strong>
         <span>{{ command.hint }}</span>
       </button>
-      <p v-if="!filteredCommands.length">没有匹配的命令</p>
+      <p v-if="!filteredCommands.length">{{ __t('ui.chat', '没有匹配的命令') }}</p>
     </div>
 
     <div v-if="flowOpen" class="deck-popover flow-popover">
       <header class="flow-panel__head">
         <div>
-          <strong>私有临时心流</strong>
-          <span>当前会话 · Agent 自维护</span>
+          <strong>{{ __t('ui.chat', '私有临时心流') }}</strong>
+          <span>{{ __t('ui.chat', '当前会话 · Agent 自维护') }}</span>
         </div>
         <div class="flow-panel__actions">
-          <button title="刷新心流" :disabled="flowLoading" @click="loadFlowState">
+          <button
+            :title="__t('ui.chat', '刷新心流')"
+            :disabled="flowLoading"
+            @click="loadFlowState"
+          >
             <PixelIcon name="refresh" size="xs" :animation="flowLoading ? 'spin' : undefined" />
           </button>
-          <button title="收起心流" @click="flowOpen = false">
+          <button :title="__t('ui.chat', '收起心流')" @click="flowOpen = false">
             <PixelIcon name="chevron-down" size="xs" />
           </button>
         </div>
       </header>
       <div v-if="flowLoading && !flowStates.length" class="flow-panel__empty">
         <PixelIcon name="refresh" size="xs" animation="spin" />
-        正在读取心流…
+        {{ __t('ui.chat', '正在读取心流…') }}
       </div>
-      <div v-else-if="!flowStates.length" class="flow-panel__empty">当前会话还没有心流</div>
+      <div v-else-if="!flowStates.length" class="flow-panel__empty">
+        {{ __t('ui.chat', '当前会话还没有心流') }}
+      </div>
       <article v-for="state in flowStates" v-else :key="state.agentId" class="flow-state-card">
         <header>
           <span>
@@ -1739,51 +2075,69 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
           <b>REV.{{ state.revision }}</b>
         </header>
         <section>
-          <small>当前目标</small>
-          <p>{{ state.currentGoal || '暂无明确的持续目标。' }}</p>
+          <small>{{ __t('ui.chat', '当前目标') }}</small>
+          <p>{{ state.currentGoal || __t('ui.chat', '暂无明确的持续目标。') }}</p>
         </section>
         <section class="flow-state-card__private">
-          <small>私有事实</small>
-          <p>{{ state.privateFacts || '暂无需要私下持续记住的事实。' }}</p>
+          <small>{{ __t('ui.chat', '私有事实') }}</small>
+          <p>{{ state.privateFacts || __t('ui.chat', '暂无需要私下持续记住的事实。') }}</p>
         </section>
         <footer>
-          <time>{{ state.updatedAt ? `更新于 ${state.updatedAt}` : '尚未更新' }}</time>
+          <time>
+            {{
+              state.updatedAt
+                ? __t('ui.chat', '更新于 {0}', [state.updatedAt])
+                : __t('ui.chat', '尚未更新')
+            }}
+          </time>
           <button
             :disabled="flowClearing || (!state.currentGoal && !state.privateFacts)"
             @click="clearFlowState(state.agentId)"
           >
             <PixelIcon name="trash" size="xs" />
-            清空
+            {{ __t('ui.chat', '清空') }}
           </button>
         </footer>
       </article>
-      <p class="flow-panel__notice">
-        私有心流不会写入聊天记录或长期记忆；近期工具结果随会话上下文自动管理。
-      </p>
+      <p class="flow-panel__notice">{{ __t('ui.chat', '仅用于当前会话，不存入长期记忆。') }}</p>
     </div>
 
     <div v-if="toolOpen" class="deck-popover tool-popover">
       <header class="tool-manager__head">
         <div>
-          <strong>本会话工具</strong>
+          <strong>{{ __t('ui.chat', '本会话工具') }}</strong>
           <span>
             {{ channelLabel }} ·
-            {{ threadStore.interactionMode === 'chat' ? '聊天模式' : '工作模式' }}
+            {{
+              threadStore.interactionMode === 'minimal'
+                ? __t('ui.chat', '极简模式')
+                : threadStore.interactionMode === 'chat'
+                  ? __t('ui.chat', '聊天模式')
+                  : __t('ui.chat', '工作模式')
+            }}
           </span>
         </div>
-        <b>{{ enabledToolCount }}/{{ availableToolCount }} 启用</b>
+        <b>{{ enabledToolCount }}/{{ availableToolCount }} {{ __t('ui.chat', '启用') }}</b>
       </header>
-      <section class="execution-policy" aria-label="本会话执行权限" :aria-busy="toolsSaving">
+      <section
+        class="execution-policy"
+        :aria-label="__t('ui.chat', '本会话执行权限')"
+        :aria-busy="toolsSaving"
+      >
         <div class="execution-policy__head">
           <span>
             <PixelIcon name="shield" size="xs" />
-            执行权限
+            {{ __t('ui.chat', '执行权限') }}
           </span>
-          <small>仅当前会话</small>
+          <small>{{ __t('ui.chat', '仅当前会话') }}</small>
         </div>
-        <div class="execution-policy__options" role="group" aria-label="选择执行权限">
+        <div
+          class="execution-policy__options"
+          role="group"
+          :aria-label="__t('ui.chat', '选择执行权限')"
+        >
           <button
-            v-for="option in EXECUTION_MODE_OPTIONS"
+            v-for="option in executionModeOptions"
             :key="option.value"
             type="button"
             class="execution-policy__option"
@@ -1806,15 +2160,15 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
           </button>
         </div>
       </section>
-      <p class="tool-manager__notice">仅影响本会话；系统必需项不可关闭。</p>
+      <p class="tool-manager__notice">{{ __t('ui.chat', '仅影响本会话；系统必需项不可关闭。') }}</p>
       <label class="tool-manager__search">
         <PixelIcon name="search" size="xs" />
-        <input v-model="toolQuery" placeholder="搜索功能名称或用途…" />
+        <input v-model="toolQuery" :placeholder="__t('ui.chat', '搜索功能名称或用途…')" />
       </label>
       <div class="tool-manager__list">
         <div v-if="toolsLoading" class="tool-manager__empty">
           <PixelIcon name="refresh" size="xs" animation="spin" />
-          正在加载工具权限…
+          {{ __t('ui.chat', '正在加载工具权限…') }}
         </div>
         <button
           v-for="tool in visibleThreadTools"
@@ -1840,25 +2194,29 @@ defineExpose({ focus: () => textareaRef.value?.focus(), clearPendingAttachments 
             <span class="tool-manager__tooltip" role="tooltip">
               <b>{{ tool.label }}</b>
               <span>
-                {{ tool.description || '暂无工具介绍' }}
+                {{ tool.description || __t('ui.chat', '暂无工具介绍') }}
               </span>
             </span>
           </span>
-          <span v-if="!tool.modeAllowed" class="tool-manager__protocol">模式未开放</span>
-          <span v-else-if="tool.locked" class="tool-manager__protocol">系统必需</span>
+          <span v-if="!tool.modeAllowed" class="tool-manager__protocol">
+            {{ __t('ui.chat', '模式未开放') }}
+          </span>
+          <span v-else-if="tool.locked" class="tool-manager__protocol">
+            {{ __t('ui.chat', '系统必需') }}
+          </span>
           <span
             v-else
             class="tool-manager__switch"
-            :aria-label="tool.enabled ? '已启用' : '已禁用'"
+            :aria-label="tool.enabled ? __t('ui.chat', '已启用') : __t('ui.chat', '已禁用')"
           >
             <i />
           </span>
         </button>
         <div v-if="!toolsLoading && !visibleThreadTools.length" class="tool-manager__empty">
-          当前会话没有匹配的功能。
+          {{ __t('ui.chat', '当前会话没有匹配的功能。') }}
         </div>
       </div>
-      <footer v-if="isSending">助手工作期间暂不能修改功能设置</footer>
+      <footer v-if="isSending">{{ __t('ui.chat', '助手工作期间暂不能修改功能设置') }}</footer>
     </div>
 
     <input
@@ -2218,16 +2576,35 @@ button {
   overflow-x: auto;
 }
 .deck-mode {
-  display: inline-flex;
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: repeat(3, minmax(58px, 1fr));
   flex: 0 0 auto;
   align-items: stretch;
-  gap: 2px;
+  gap: 0;
   padding: 2px;
   border: 1px solid var(--ui-border-subtle);
   background: var(--ui-bg-surface-soft);
   box-shadow: inset 1px 1px 0 color-mix(in srgb, var(--ui-text-primary) 5%, transparent);
 }
+.deck-mode::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc((100% - 4px) / 3);
+  border: 1px solid color-mix(in srgb, var(--ui-accent-primary) 40%, var(--ui-border-subtle));
+  background: var(--ui-accent-primary-soft);
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--ui-accent-primary) 32%, transparent);
+  transform: translateX(calc(var(--mode-index, 1) * 100%));
+  transition: transform var(--ui-duration-normal) var(--ui-ease-standard);
+  pointer-events: none;
+}
 .deck-tools .deck-mode button {
+  position: relative;
+  z-index: 1;
+  justify-content: center;
   border-radius: 0;
   min-height: 24px;
   padding: 0 7px;
@@ -2235,20 +2612,31 @@ button {
   background: transparent;
   font-family: var(--font-pixel);
   box-shadow: none;
+  transition:
+    color var(--ui-duration-fast) var(--ui-ease-standard),
+    transform var(--ui-duration-fast) var(--ui-ease-standard);
 }
-.deck-tools .deck-mode button.is-active {
+.deck-tools .deck-mode button.is-active,
+.deck-tools .deck-mode button.is-pending {
   color: var(--ui-accent-primary);
-  border-color: color-mix(in srgb, var(--ui-accent-primary) 40%, var(--ui-border-subtle));
-  background: var(--ui-accent-primary-soft);
-  box-shadow:
-    inset 1px 1px 0 color-mix(in srgb, var(--ui-bg-surface) 75%, transparent),
-    inset -1px -1px 0 color-mix(in srgb, var(--ui-accent-primary) 22%, transparent);
+}
+.deck-tools .deck-mode button:not(:disabled):hover {
+  color: var(--ui-accent-primary);
+  border-color: transparent;
+  transform: translateY(-1px);
+}
+.deck-tools .deck-mode button:not(:disabled):active {
+  transform: scale(var(--ui-motion-scale-press));
+}
+.deck-mode.is-saving::before {
+  border-style: dashed;
 }
 .deck-tools .deck-mode button:focus-visible {
   outline: 1px solid var(--ui-accent-primary);
   outline-offset: 2px;
 }
-.deck-tools .deck-mode button.is-active:disabled {
+.deck-tools .deck-mode button.is-active:disabled,
+.deck-tools .deck-mode button.is-pending:disabled {
   opacity: 0.8;
 }
 .image-mode-control,
@@ -2408,19 +2796,83 @@ button {
   background: var(--ui-accent-purple-soft);
   box-shadow: 0 0 12px rgba(139, 92, 246, 0.3);
 }
+.deck-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  margin-left: auto;
+}
+.deck-actions > button {
+  min-height: 32px;
+  gap: 7px;
+  padding: 0 12px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ui-text-inverse) 8%, transparent);
+  transition:
+    background-color var(--ui-duration-fast) var(--ui-ease-standard),
+    border-color var(--ui-duration-fast) var(--ui-ease-standard),
+    color var(--ui-duration-fast) var(--ui-ease-standard),
+    box-shadow var(--ui-duration-fast) var(--ui-ease-standard),
+    transform var(--ui-duration-instant) var(--ui-ease-standard);
+}
+.deck-actions > button:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: none;
+}
+.deck-actions > button:focus-visible {
+  outline: 2px solid var(--ui-focus-color);
+  outline-offset: 3px;
+}
+.deck-actions :deep(.pixel-icon) {
+  flex-shrink: 0;
+}
 .send-btn {
+  --ui-focus-color: var(--ui-accent-primary);
   background: var(--ui-accent-primary);
   border-color: var(--ui-accent-primary);
-  color: #fff;
+  color: var(--ui-text-inverse);
 }
-.send-btn:disabled {
-  opacity: 0.4;
+.send-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ui-accent-primary) 88%, var(--ui-text-primary));
+  border-color: var(--ui-accent-primary);
+}
+.send-btn--queue {
+  background: var(--ui-accent-primary-soft);
+  border-color: color-mix(in srgb, var(--ui-accent-primary) 30%, transparent);
+  color: var(--ui-accent-primary);
+}
+.send-btn--queue:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ui-accent-primary) 18%, var(--ui-bg-surface));
+  border-color: var(--ui-accent-primary);
+}
+.deck-actions .send-btn:disabled {
+  background: var(--ui-bg-surface-soft);
+  border-color: var(--ui-border-subtle);
+  color: var(--ui-text-disabled);
+  box-shadow: none;
+  cursor: not-allowed;
 }
 .stop-btn {
   --ui-focus-color: var(--ui-danger);
+  border-color: color-mix(in srgb, var(--ui-danger) 30%, transparent);
+  background: var(--ui-danger-soft);
+  color: var(--ui-danger);
+}
+.stop-btn:hover {
   border-color: var(--ui-danger);
-  background: var(--ui-danger);
-  color: #fff;
+  background: color-mix(in srgb, var(--ui-danger) 18%, var(--ui-bg-surface));
+}
+.stop-btn-mark {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-radius: 2px;
+  background: currentColor;
 }
 .record-strip {
   display: flex;
@@ -3094,13 +3546,13 @@ button {
 .deck--compact .image-mode-chevron {
   display: none;
 }
-.deck--compact .send-btn {
+.deck--compact .deck-actions > button {
   width: 34px;
   min-width: 34px;
   padding: 0;
   justify-content: center;
 }
-.deck--compact .send-btn span {
+.deck--compact .deck-actions .action-label {
   display: none;
 }
 
@@ -3123,8 +3575,13 @@ button {
   .deck-tools button :deep(.pixel-icon) {
     font-size: initial;
   }
-  .send-btn span {
+  .deck-actions .action-label {
     display: none;
+  }
+  .deck-actions > button {
+    width: 34px;
+    min-width: 34px;
+    padding: 0;
   }
 }
 [data-theme='dark'] .deck {

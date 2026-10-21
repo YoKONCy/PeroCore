@@ -1,3 +1,5 @@
+import { t as __t } from '../utils/i18n'
+import { getClientCredential } from '../utils/clientCredential'
 /**
  * Steam Cloud 完整快照适配器。
  *
@@ -37,7 +39,8 @@ class CloudSyncService {
     if (this.steamCloud) return true
     if (!IS_STEAM()) return false
     this.steamCloud = getSteamCloudApi()
-    if (!this.steamCloud) logger.warn('CloudSync', 'Steam Cloud API 不可用')
+    if (!this.steamCloud)
+      logger.warn('CloudSync', __t('electron.logs.cloudSync', 'Steam Cloud API 不可用'))
     return Boolean(this.steamCloud)
   }
 
@@ -63,7 +66,10 @@ class CloudSyncService {
     try {
       return this.steamCloud?.writeFile(key, content) === true
     } catch (error) {
-      logger.error('CloudSync', `写入 Steam Cloud 失败: ${key} — ${error}`)
+      logger.error(
+        'CloudSync',
+        __t('electron.logs.cloudSync', '写入 Steam Cloud 失败: {0} — {1}', [key, error]),
+      )
       return false
     }
   }
@@ -74,7 +80,10 @@ class CloudSyncService {
       const content = this.steamCloud?.readFile(key)
       return typeof content === 'string' ? content : null
     } catch (error) {
-      logger.error('CloudSync', `读取 Steam Cloud 失败: ${key} — ${error}`)
+      logger.error(
+        'CloudSync',
+        __t('electron.logs.cloudSync', '读取 Steam Cloud 失败: {0} — {1}', [key, error]),
+      )
       return null
     }
   }
@@ -109,7 +118,10 @@ class CloudSyncService {
       const port = Number(process.env.PERO_PORT ?? 9120)
       const response = await fetch(`http://127.0.0.1:${port}/api/distributed/snapshot`, {
         method: 'POST',
-        headers: { 'X-Sync-Transfer-Key': key.toString('base64') },
+        headers: {
+          Authorization: `Bearer ${getClientCredential()}`,
+          'X-Sync-Transfer-Key': key.toString('base64'),
+        },
       })
       if (!response.ok) throw new Error(`Daemon 返回 HTTP ${response.status}`)
       const bytes = Buffer.from(await response.arrayBuffer())
@@ -141,6 +153,7 @@ class CloudSyncService {
         method: 'POST',
         headers: {
           'Content-Type': 'application/vnd.infos.full-sync',
+          Authorization: `Bearer ${getClientCredential()}`,
           'X-Sync-Transfer-Key': key.toString('base64'),
         },
         body: Buffer.from(content.slice(7), 'base64'),
@@ -168,7 +181,11 @@ class CloudSyncService {
     if (!this.ensureSteamCloud()) return false
     const files = this.listCloudFiles().filter((file) => file.name.startsWith(CLOUD_PREFIX))
     const cleared = files.every((file) => this.deleteCloudFile(file.name))
-    if (cleared) logger.info('CloudSync', `已清除 ${files.length} 个云端快照文件`)
+    if (cleared)
+      logger.info(
+        'CloudSync',
+        __t('electron.logs.cloudSync', '已清除 {0} 个云端快照文件', [files.length]),
+      )
     return cleared
   }
 

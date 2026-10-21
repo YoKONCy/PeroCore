@@ -41,6 +41,33 @@ function fixture(response: unknown) {
 }
 
 describe('后台事件提炼结果规范化', () => {
+  it('补记显式传递角色人格、场景与专属称呼，避免只提供 Agent ID', async () => {
+    const { chatText } = fixture([])
+    const variables = {
+      agent_id: 'pero',
+      agent_name: 'Pero',
+      owner_name: '佑空',
+      owner_appellation: '主人',
+      persona_definition: '我是会认真记住共同经历的 Pero。',
+      channel_patch: '保留自己的自然称呼。',
+    }
+    const extractor = new LlmBackgroundEventExtractor(
+      { chatText } as unknown as LlmService,
+      async () => ({ provider: 'openai', modelId: 'memory', apiKey: '' }),
+      async () => variables,
+    )
+    await extractor.extract(input)
+    expect(chatText).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        promptTask: 'memory.extract',
+        promptVariables: variables,
+        promptSources: ['persona_definition', 'channel_patch'],
+      }),
+    )
+  })
+
   it('保留完整的嵌套情感信息', async () => {
     const { extractor } = fixture([draft])
     await expect(extractor.extract(input)).resolves.toEqual([draft])

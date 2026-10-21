@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import { computed } from 'vue'
 import PSelect, { type SelectOption } from '../pixel/PSelect.vue'
 import BrandIcon from './BrandIcon.vue'
@@ -18,7 +20,7 @@ const props = withDefaults(
     teleport?: boolean
     size?: 'sm' | 'md' | 'lg'
   }>(),
-  { fallback: 'model', placeholder: '请选择...', disabled: false, teleport: false, size: 'md' },
+  { fallback: 'model', placeholder: undefined, disabled: false, teleport: false, size: 'md' },
 )
 const emit = defineEmits<{
   'update:modelValue': [value: string | number]
@@ -26,13 +28,14 @@ const emit = defineEmits<{
 }>()
 // 选项较多时也只建一次映射，不为每行反复遍历远程模型列表。
 const brands = computed(() => new Map(props.options.map((option) => [option.value, option.brand])))
+const displayPlaceholder = computed(() => props.placeholder ?? __t('ui.brands', '请选择...'))
 </script>
 
 <template>
   <PSelect
     :model-value="modelValue"
     :options="options"
-    :placeholder="placeholder"
+    :placeholder="displayPlaceholder"
     :disabled="disabled"
     :teleport="teleport"
     :size="size"
@@ -44,7 +47,7 @@ const brands = computed(() => new Map(props.options.map((option) => [option.valu
         <BrandIcon :brand="brands.get(option.value)" :fallback="fallback" />
         <span>{{ option.label }}</span>
       </span>
-      <span v-else>{{ placeholder }}</span>
+      <span v-else>{{ displayPlaceholder }}</span>
     </template>
     <template #option="{ option }">
       <span class="brand-select-line" :title="option.label">

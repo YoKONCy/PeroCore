@@ -1,3 +1,4 @@
+import { t as __t } from '../../i18n/index'
 /**
  * Chat 对话管道 Composable
  *
@@ -9,7 +10,7 @@
  * @module packages/frontend/src/composables/chat/useChat
  */
 
-import type { ConversationMessageProjection } from '@infos/shared'
+import { publishWorkspaceChanges } from './workspaceChanges'
 import { computed } from 'vue'
 import { useCompositorStore, useThreadStore } from '../../stores'
 import { useAgentStore } from '../../stores'
@@ -55,34 +56,6 @@ export function useChat(options: UseChatOptions = {}) {
   let recoveryAbort: AbortController | null = null
   let requestEpoch = 0
 
-  function publishWorkspaceChanges(
-    message: ConversationMessageProjection,
-    requestAgentId: string,
-    requestThreadId: string,
-  ): void {
-    for (const call of message.toolCalls) {
-      if (call.isError || !call.result || !['write_file', 'edit_file'].includes(call.name)) continue
-      try {
-        const args = JSON.parse(call.args) as Record<string, unknown>
-        const result = JSON.parse(call.result) as Record<string, unknown>
-        const path = String(result.path ?? args.path ?? args.file_path ?? '')
-        if (!path || result.error) continue
-        window.dispatchEvent(
-          new CustomEvent('infos:workspace-file-changed', {
-            detail: {
-              agentId: requestAgentId,
-              threadId: requestThreadId,
-              path,
-              operation: result.operation ?? (call.name === 'write_file' ? 'write' : 'edit'),
-            },
-          }),
-        )
-      } catch (error) {
-        logger.warn('useChat', '无法解析文件工具结果，跳过工作区自动刷新', error)
-      }
-    }
-  }
-
   /**
    * 发送消息（流式）
    *
@@ -115,7 +88,9 @@ export function useChat(options: UseChatOptions = {}) {
         taskToast.push({
           type: 'task_failed',
           agentId: requestAgentId,
-          title: '聊天会话',
+          get title() {
+            return __t('ui.chat', '聊天会话')
+          },
           message,
         })
         return false
@@ -126,8 +101,12 @@ export function useChat(options: UseChatOptions = {}) {
       taskToast.push({
         type: 'task_failed',
         agentId: requestAgentId,
-        title: '聊天会话',
-        message: '无法建立当前角色的有效会话，请重试',
+        get title() {
+          return __t('ui.chat', '聊天会话')
+        },
+        get message() {
+          return __t('ui.chat', '无法建立当前角色的有效会话，请重试')
+        },
       })
       return false
     }
@@ -229,25 +208,24 @@ export function useChat(options: UseChatOptions = {}) {
             resolve(false)
             return
           }
-          // 先结束本地流，再立即回灌后端已持久化的失败消息和真实数据库 ID。
-          // 刷新失败时才保留本地错误文本，确保用户仍能看到失败原因。
+          // 执行失败回灌持久消息；网络断流保留已有画面，只恢复后台任务的观察。
+          const disconnected = ['STREAM_TRUNCATED', 'STREAM_ERROR', 'NETWORK_ERROR'].includes(
+            data.code,
+          )
           const failedMessageId = threadStore.streamingMessageId
           let failedShell: import('../../stores').ChatMessage | undefined
           if (ownsRequestView()) {
-            threadStore.failStreaming(data.code, data.message || '对话生成失败')
+            if (disconnected) {
+              threadStore.setRagProgress('连接暂时中断，正在同步后台执行进度……')
+            } else {
+              threadStore.failStreaming(data.code, data.message || '对话生成失败')
+              threadStore.finishStreaming()
+            }
             failedShell = threadStore.messages.find((message) => message.id === failedMessageId)
-            threadStore.finishStreaming()
           }
           const failedSurface = compositor.get(failedShell?.surfaceId)
           currentAbort = null
           resolve(false)
-          const disconnected = ['STREAM_TRUNCATED', 'STREAM_ERROR', 'NETWORK_ERROR'].includes(
-            data.code,
-          )
-          if (disconnected && ownsRequestView()) {
-            threadStore.generationState = 'thinking'
-            threadStore.streamingMessageId = failedMessageId
-          }
           recoveryAbort?.abort()
           const recovery = new AbortController()
           recoveryAbort = recovery
@@ -266,17 +244,24 @@ export function useChat(options: UseChatOptions = {}) {
                       ['running', 'paused'].includes(task.state),
                   )
                 ) {
-                  threadStore.generationState = 'thinking'
-                  threadStore.failStreaming(
-                    'STREAM_RECONNECTING',
-                    '连接暂时中断，后台仍在继续，正在同步结果……',
-                  )
+                  // 断流期间从权威快照接续进度，保留已有工具和正文，不反复把整条消息标成失败。
+                  if (!threadStore.isLoadingHistory)
+                    await threadStore.loadThreadMessages(
+                      requestThreadId,
+                      requestAgentId,
+                      recovery.signal,
+                    )
+                  if (recovery.signal.aborted || !ownsRequestView()) return
+                  if (!threadStore.isGenerating) threadStore.generationState = 'thinking'
+                  threadStore.setRagProgress('后台仍在继续，正在自动同步执行进度……')
                 } else {
                   threadStore.finishStreaming()
                   const result = await threadStore.loadThreadMessages(
                     requestThreadId,
                     requestAgentId,
+                    recovery.signal,
                   )
+                  if (recovery.signal.aborted || !ownsRequestView()) return
                   if (result.status !== 'failed') {
                     // 编译上下文等较早失败可能尚未产生持久 Assistant，不能让空历史覆盖错误卡片。
                     if (
@@ -309,7 +294,11 @@ export function useChat(options: UseChatOptions = {}) {
                   }
                 }
               } catch (error) {
-                logger.warn('useChat', '流结束后的会话同步暂时失败，稍后重试', error)
+                logger.warn(
+                  'useChat',
+                  __t('logs.frontend.chat', '流结束后的会话同步暂时失败，稍后重试'),
+                  error,
+                )
               }
               if (Date.now() >= recoveryDeadline) {
                 if (ownsRequestView()) threadStore.finishStreaming()
@@ -319,10 +308,16 @@ export function useChat(options: UseChatOptions = {}) {
                 const finish = () => {
                   clearTimeout(timer)
                   recovery.signal.removeEventListener('abort', finish)
+                  window.removeEventListener('online', finish)
+                  window.removeEventListener('pageshow', finish)
+                  window.removeEventListener('infos:gateway-ready', finish)
                   done()
                 }
                 const timer = setTimeout(finish, 3_000)
                 recovery.signal.addEventListener('abort', finish, { once: true })
+                window.addEventListener('online', finish, { once: true })
+                window.addEventListener('pageshow', finish, { once: true })
+                window.addEventListener('infos:gateway-ready', finish, { once: true })
               })
             }
           })().finally(() => {
@@ -333,8 +328,10 @@ export function useChat(options: UseChatOptions = {}) {
             taskToast.push({
               type: 'task_failed',
               agentId: requestAgentId,
-              title: '对话生成失败',
-              message: data.message || '对话生成失败',
+              get title() {
+                return __t('ui.chat', '对话生成失败')
+              },
+              message: data.message || __t('ui.chat', '对话生成失败'),
             })
         },
       })

@@ -1,3 +1,4 @@
+import { t as __t } from './i18n'
 import { app, type BrowserWindow } from 'electron'
 import { logger } from './logger'
 
@@ -58,7 +59,10 @@ function getWindowsIconApi(): WindowsIconApi | null {
     return windowsApi
   } catch (error) {
     windowsApi = null
-    logger.warn('AppIdentity', `Windows 原生窗口图标组件加载失败：${String(error)}`)
+    logger.warn(
+      'AppIdentity',
+      __t('electron.logs.utils', 'Windows 原生窗口图标组件加载失败：{0}', [String(error)]),
+    )
     return null
   }
 }
@@ -107,13 +111,19 @@ export function applyWindowsTaskbarIcon(window: BrowserWindow, iconPath: string)
         reportedSuccess = true
         logger.info(
           'AppIdentity',
-          `Windows 窗口大、小图标已设置并回读确认：窗口 ${window.id}，${iconPath}`,
+          __t('electron.logs.utils', 'Windows 窗口大、小图标已设置并回读确认：窗口 {0}，{1}', [
+            window.id,
+            iconPath,
+          ]),
         )
       }
     } catch (error) {
       if (reportedFailure) return
       reportedFailure = true
-      logger.warn('AppIdentity', `Windows 窗口图标设置失败：${String(error)}`)
+      logger.warn(
+        'AppIdentity',
+        __t('electron.logs.utils', 'Windows 窗口图标设置失败：{0}', [String(error)]),
+      )
     }
   }
 
@@ -122,9 +132,13 @@ export function applyWindowsTaskbarIcon(window: BrowserWindow, iconPath: string)
   try {
     const taskbarCreated = api.registerMessage('TaskbarButtonCreated')
     if (taskbarCreated) window.hookWindowMessage(taskbarCreated, refresh)
-    else logger.warn('AppIdentity', 'Windows 任务栏按钮重建消息注册失败')
+    else
+      logger.warn('AppIdentity', __t('electron.logs.utils', 'Windows 任务栏按钮重建消息注册失败'))
   } catch (error) {
-    logger.warn('AppIdentity', `Windows 任务栏按钮重建监听失败：${String(error)}`)
+    logger.warn(
+      'AppIdentity',
+      __t('electron.logs.utils', 'Windows 任务栏按钮重建监听失败：{0}', [String(error)]),
+    )
   }
   window.on('show', refresh)
   window.on('restore', refresh)

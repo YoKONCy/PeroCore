@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /**
  * PDialog — 像素风通用对话框
  *
@@ -22,20 +24,23 @@ interface Props {
   confirmVariant?: 'primary' | 'danger'
   /** 自定义宽度 */
   width?: string
+  /** 关闭后由内容区域自行管理滚动，适用于多栏布局。 */
+  bodyScroll?: boolean
   loading?: boolean
   autoClose?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  title: '确认',
+  title: undefined,
   message: '',
   mode: 'confirm',
-  confirmText: '确定',
-  cancelText: '取消',
+  confirmText: undefined,
+  cancelText: undefined,
   placeholder: '',
   defaultValue: '',
   confirmVariant: 'primary',
   width: '',
+  bodyScroll: true,
   loading: false,
   autoClose: true,
 })
@@ -46,10 +51,13 @@ const emit = defineEmits<{
   cancel: []
 }>()
 
-import { ref, watch, useSlots } from 'vue'
+import { computed, ref, watch, useSlots } from 'vue'
 import PButton from './PButton.vue'
 
 const slots = useSlots()
+const displayTitle = computed(() => props.title ?? __t('ui.pixel', '确认'))
+const displayConfirmText = computed(() => props.confirmText ?? __t('ui.pixel', '确定'))
+const displayCancelText = computed(() => props.cancelText ?? __t('ui.pixel', '取消'))
 const inputValue = ref(props.defaultValue)
 const overlayPointerDown = ref(false)
 
@@ -106,11 +114,11 @@ function close() {
       >
         <div class="p-dialog" :style="width ? { minWidth: width, maxWidth: width } : {}">
           <div class="p-dialog-header">
-            <span>{{ title }}</span>
+            <span>{{ displayTitle }}</span>
             <button class="p-dialog-close" @click="close">✕</button>
           </div>
 
-          <div class="p-dialog-body">
+          <div class="p-dialog-body" :class="{ 'p-dialog-body--contained': !bodyScroll }">
             <p v-if="message" class="p-dialog-message">{{ message }}</p>
             <input
               v-if="mode === 'prompt'"
@@ -130,7 +138,7 @@ function close() {
             </template>
             <template v-else>
               <PButton variant="secondary" size="sm" :disabled="loading" @click="handleCancel">
-                {{ cancelText }}
+                {{ displayCancelText }}
               </PButton>
               <PButton
                 :variant="confirmVariant"
@@ -138,7 +146,7 @@ function close() {
                 :disabled="loading"
                 @click="handleConfirm"
               >
-                {{ loading ? '处理中…' : confirmText }}
+                {{ loading ? __t('ui.pixel', '处理中…') : displayConfirmText }}
               </PButton>
             </template>
           </div>
@@ -174,6 +182,7 @@ function close() {
 }
 
 .p-dialog-header {
+  flex-shrink: 0;
   padding: 12px 16px;
   border-bottom: 2px solid var(--ui-border-default);
   font-weight: 700;
@@ -213,6 +222,12 @@ function close() {
   overscroll-behavior: contain;
   padding: 16px;
 }
+.p-dialog-body--contained {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow: hidden;
+}
 .p-dialog-message {
   font-size: 14px;
   line-height: 1.6;
@@ -244,6 +259,7 @@ function close() {
 }
 
 .p-dialog-footer {
+  flex-shrink: 0;
   padding: 12px 16px;
   border-top: 2px solid var(--ui-border-default);
   display: flex;

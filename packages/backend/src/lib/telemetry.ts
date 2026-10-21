@@ -1,3 +1,4 @@
+import { t as __t } from './i18n'
 /**
  * telemetry — 通用基础设施
  *
@@ -54,8 +55,8 @@ export function initTelemetry(): void {
   provider.register()
   logger.info(
     endpoint
-      ? `OpenTelemetry 已启用，导出到 ${normalizeTraceEndpoint(endpoint)}`
-      : 'OpenTelemetry 已启用（仅上下文传播，未配置导出器）',
+      ? __t('logs.lib', 'OpenTelemetry 已启用，导出到 {0}', [normalizeTraceEndpoint(endpoint)])
+      : __t('logs.lib', 'OpenTelemetry 已启用（仅上下文传播，未配置导出器）'),
   )
 }
 

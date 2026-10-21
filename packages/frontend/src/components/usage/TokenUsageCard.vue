@@ -1,10 +1,15 @@
 <script setup lang="ts">
+import { getDisplayLocale } from '../../i18n/index'
+
+import { t as __t } from '../../i18n/index'
+
 import { computed, inject, onMounted, onUnmounted, ref, watch, type Ref } from 'vue'
 import type {
   TokenUsagePeriod,
   TokenUsagePurpose,
   TokenUsageStatistics,
   TokenUsageTotals,
+  TokenUsageFilterOptions,
 } from '@infos/shared'
 import { PCard, PSelect, PixelIcon } from '../pixel'
 import BrandIcon from '../brands/BrandIcon.vue'
@@ -17,6 +22,46 @@ const surfaceVisible = inject<Ref<boolean>>('infos:main-surface-visible', ref(tr
 const expanded = ref(false)
 const period = ref<TokenUsagePeriod>('today')
 const selectedAgent = ref('')
+const selectedThread = ref('')
+const selectedModel = ref('')
+const filterOptions = ref<TokenUsageFilterOptions>({ threads: [], models: [] })
+let filterRequest = 0
+const threadBinding = computed({
+  get: () => selectedThread.value,
+  set: (value: string | number) => {
+    selectedThread.value = String(value)
+  },
+})
+const modelBinding = computed({
+  get: () => selectedModel.value,
+  set: (value: string | number) => {
+    selectedModel.value = String(value)
+  },
+})
+const threadOptions = computed(() => [
+  {
+    value: '',
+    get label() {
+      return __t('ui.usage', '全部会话')
+    },
+  },
+  ...filterOptions.value.threads.map((thread) => ({
+    value: thread.id,
+    label: `${thread.title || __t('ui.usage', '会话')} · ${thread.id}`,
+  })),
+])
+const modelOptions = computed(() => [
+  {
+    value: '',
+    get label() {
+      return __t('ui.usage', '全部模型')
+    },
+  },
+  ...filterOptions.value.models.map((model) => ({
+    value: JSON.stringify([model.provider, model.modelId]),
+    label: `${model.modelId} · ${model.provider}`,
+  })),
+])
 const distribution = ref<'models' | 'purposes' | 'channels'>('models')
 const today = ref<TokenUsageStatistics | null>(null)
 const history = ref<TokenUsageStatistics | null>(null)
@@ -27,9 +72,24 @@ let request: AbortController | undefined
 let timer: ReturnType<typeof setInterval> | undefined
 let localDay = ''
 const periods: Array<{ value: TokenUsagePeriod; label: string }> = [
-  { value: 'today', label: '今天' },
-  { value: '7d', label: '近 7 天' },
-  { value: '30d', label: '近 30 天' },
+  {
+    value: 'today',
+    get label() {
+      return __t('ui.usage', '今天')
+    },
+  },
+  {
+    value: '7d',
+    get label() {
+      return __t('ui.usage', '近 7 天')
+    },
+  },
+  {
+    value: '30d',
+    get label() {
+      return __t('ui.usage', '近 30 天')
+    },
+  },
 ]
 const purposes: Record<TokenUsagePurpose, string> = {
   conversation: '日常对话',
@@ -47,7 +107,12 @@ const channels: Record<string, string> = {
   unknown: '未标记通道',
 }
 const agentOptions = computed(() => [
-  { value: '', label: '全部角色' },
+  {
+    value: '',
+    get label() {
+      return __t('ui.usage', '全部角色')
+    },
+  },
   ...agentStore.agents.map((agent) => ({ value: agent.id, label: agent.name })),
 ])
 const agentBinding = computed({
@@ -63,8 +128,12 @@ const selectedAgentLabel = computed(
 )
 const summaryCalls = computed(() =>
   today.value
-    ? `${selectedAgent.value ? `${selectedAgentLabel.value} · ` : ''}${today.value.totals.requests} 次调用`
-    : '正在读取…',
+    ? __t('ui.usage', '{0}{1}{2} 次调用', [
+        selectedAgent.value ? `${selectedAgentLabel.value} · ` : '',
+        selectedThread.value || selectedModel.value ? __t('ui.usage', '已筛选 · ') : '',
+        today.value.totals.requests,
+      ])
+    : __t('ui.usage', '正在读取…'),
 )
 const detail = computed(() => (period.value === 'today' ? today.value : history.value))
 const rows = computed(() => detail.value?.[distribution.value] ?? [])
@@ -79,15 +148,15 @@ function cacheRate(totals?: TokenUsageTotals): number | null {
 function cacheLabel(totals?: TokenUsageTotals): string {
   const rate = cacheRate(totals)
   if (rate !== null) return `${rate.toFixed(2)}%`
-  return totals?.requests && !totals.cacheReportedRequests ? '未上报' : '—'
+  return totals?.requests && !totals.cacheReportedRequests ? __t('ui.usage', '未上报') : '—'
 }
 function cacheTitle(totals?: TokenUsageTotals): string {
-  if (!totals) return '正在读取缓存统计'
+  if (!totals) return __t('ui.usage', '正在读取缓存统计')
   return (
-    `命中率按输入 Token 加权；仅计入输入与缓存读取均有效上报的调用。` +
-    `已上报 ${totals.cacheReportedRequests} / ${totals.requests} 次，` +
-    `其中 ${totals.cacheHitRequests} 次发生缓存命中。` +
-    `缓存写入单独计数，不算命中。`
+    __t('ui.usage', '输入 Token 命中率；已上报 {0}/{1} 次。', [
+      totals.cacheReportedRequests,
+      totals.requests,
+    ]) + __t('ui.usage', '缓存写入不计入命中。')
   )
 }
 function format(value: number): string {
@@ -126,13 +195,21 @@ function share(value: number, total: number): string {
   return `${total > 0 ? Math.min(100, (value / total) * 100) : 0}%`
 }
 function bucketTitle(bucket: TokenUsageTotals & { label: string }): string {
-  return `${bucket.label} · 输入 ${bucket.inputTokens.toLocaleString()} · 输出 ${bucket.outputTokens.toLocaleString()} · 总计 ${bucket.totalTokens.toLocaleString()} · ${bucket.requests} 次调用${bucket.unreportedRequests ? ` · ${bucket.unreportedRequests} 次未上报` : ''} · 缓存命中 ${cacheLabel(bucket)}`
+  return __t('ui.usage', '{0} · 输入 {1} · 输出 {2} · 总计 {3} · {4} 次调用{5} · 缓存命中 {6}', [
+    bucket.label,
+    bucket.inputTokens.toLocaleString(),
+    bucket.outputTokens.toLocaleString(),
+    bucket.totalTokens.toLocaleString(),
+    bucket.requests,
+    bucket.unreportedRequests ? ` · ${bucket.unreportedRequests} 次未上报` : '',
+    cacheLabel(bucket),
+  ])
 }
 function labelAt(index: number, count: number): boolean {
   return index === 0 || index === count - 1 || index % (count > 24 ? 5 : count > 7 ? 4 : 1) === 0
 }
 function recordedLabel(value: string): string {
-  return new Date(value).toLocaleString('zh-CN', {
+  return new Date(value).toLocaleString(getDisplayLocale(), {
     timeZone: timeZone.value,
     month: 'numeric',
     day: 'numeric',
@@ -159,10 +236,22 @@ async function refresh(): Promise<void> {
   const agent = selectedAgent.value || undefined
   const requestedPeriod = period.value
   const needsHistory = expanded.value && requestedPeriod !== 'today'
+  const [provider, modelId] = selectedModel.value
+    ? (JSON.parse(selectedModel.value) as [string, string])
+    : []
+  const filters = { threadId: selectedThread.value || undefined, provider, modelId }
   const results = await Promise.allSettled([
-    tokenUsageApi.statistics('today', timeZone.value, agent, controller.signal),
+    tokenUsageApi.statistics('today', timeZone.value, agent, controller.signal, filters),
     ...(needsHistory
-      ? [tokenUsageApi.statistics(requestedPeriod, timeZone.value, agent, controller.signal)]
+      ? [
+          tokenUsageApi.statistics(
+            requestedPeriod,
+            timeZone.value,
+            agent,
+            controller.signal,
+            filters,
+          ),
+        ]
       : []),
   ])
   if (controller.signal.aborted) return
@@ -174,7 +263,26 @@ async function refresh(): Promise<void> {
   else if (needsHistory) error.value = '统计暂时无法获取'
   loading.value = false
 }
+async function loadFilters(): Promise<void> {
+  const sequence = ++filterRequest
+  try {
+    const response = await tokenUsageApi.filters(selectedAgent.value || undefined)
+    if (sequence === filterRequest && response.data) filterOptions.value = response.data
+  } catch {
+    if (sequence === filterRequest) error.value = '筛选选项暂时无法获取'
+  }
+}
 watch(selectedAgent, () => {
+  selectedThread.value = ''
+  selectedModel.value = ''
+  filterOptions.value = { threads: [], models: [] }
+  void loadFilters()
+})
+function refreshAll(): void {
+  void loadFilters()
+  void refresh()
+}
+watch([selectedAgent, selectedThread, selectedModel], () => {
   today.value = null
   history.value = null
   void refresh()
@@ -183,7 +291,8 @@ watch(period, () => {
   history.value = null
   void refresh()
 })
-watch(expanded, () => {
+watch(expanded, (value) => {
+  if (value) void loadFilters()
   void refresh()
 })
 watch(surfaceVisible, (value) => {
@@ -201,6 +310,7 @@ function visibilityChanged(): void {
   }
 }
 onMounted(() => {
+  void loadFilters()
   void refresh()
   timer = setInterval(() => {
     if (!loading.value) void refresh()
@@ -208,6 +318,7 @@ onMounted(() => {
   document.addEventListener('visibilitychange', visibilityChanged)
 })
 onUnmounted(() => {
+  filterRequest++
   request?.abort()
   if (timer) clearInterval(timer)
   document.removeEventListener('visibilitychange', visibilityChanged)
@@ -219,7 +330,7 @@ onUnmounted(() => {
     pixel
     padding="md"
     class="token-usage-card"
-    aria-label="今日 Token 用量"
+    :aria-label="__t('ui.usage', '今日 Token 用量')"
     :aria-busy="loading"
   >
     <button
@@ -231,7 +342,7 @@ onUnmounted(() => {
     >
       <span class="usage-caption">
         <PixelIcon name="cpu" size="sm" />
-        今日 Token
+        {{ __t('ui.usage', '今日 Token') }}
         <PixelIcon
           class="usage-chevron"
           :name="expanded ? 'chevron-up' : 'chevron-down'"
@@ -244,13 +355,13 @@ onUnmounted(() => {
       </span>
       <span class="usage-split">
         <span class="usage-input">
-          输入
+          {{ __t('ui.usage', '输入') }}
           <b>
             {{ today && known(today.totals, 'input') ? compact(today.totals.inputTokens) : '—' }}
           </b>
         </span>
         <span class="usage-output">
-          输出
+          {{ __t('ui.usage', '输出') }}
           <b>
             {{ today && known(today.totals, 'output') ? compact(today.totals.outputTokens) : '—' }}
           </b>
@@ -261,7 +372,7 @@ onUnmounted(() => {
         :class="{ 'is-reported': cacheRate(today?.totals) !== null }"
         :title="cacheTitle(today?.totals)"
       >
-        <span>缓存命中</span>
+        <span>{{ __t('ui.usage', '缓存命中') }}</span>
         <b>{{ cacheLabel(today?.totals) }}</b>
       </span>
       <span class="usage-meter" aria-hidden="true">
@@ -277,10 +388,12 @@ onUnmounted(() => {
       <span class="usage-summary-footer">
         <span>{{ error || summaryCalls }}</span>
         <span v-if="today?.totals.unreportedRequests">
-          {{ today.totals.unreportedRequests }} 次未上报
+          {{ today.totals.unreportedRequests }} {{ __t('ui.usage', '次未上报') }}
         </span>
-        <span v-else-if="today?.totals.incompleteRequests">部分上报</span>
-        <span v-else>{{ expanded ? '收起统计' : '查看统计' }}</span>
+        <span v-else-if="today?.totals.incompleteRequests">{{ __t('ui.usage', '部分上报') }}</span>
+        <span v-else>
+          {{ expanded ? __t('ui.usage', '收起统计') : __t('ui.usage', '查看统计') }}
+        </span>
       </span>
     </button>
   </PCard>
@@ -291,15 +404,15 @@ onUnmounted(() => {
       pixel
       padding="md"
       class="token-usage-details"
-      aria-label="Token 用量统计"
+      :aria-label="__t('ui.usage', 'Token 用量统计')"
       :aria-busy="loading"
     >
       <header class="usage-detail-header">
         <h3>
           <PixelIcon name="chart" size="sm" />
-          用量统计
+          {{ __t('ui.usage', '用量统计') }}
         </h3>
-        <div class="usage-range" role="group" aria-label="统计时间范围">
+        <div class="usage-range" role="group" :aria-label="__t('ui.usage', '统计时间范围')">
           <button
             v-for="item in periods"
             :key="item.value"
@@ -316,21 +429,38 @@ onUnmounted(() => {
           size="sm"
           teleport
           class="usage-agent-filter"
-          aria-label="筛选角色"
+          :aria-label="__t('ui.usage', '筛选角色')"
+        />
+        <PSelect
+          v-model="threadBinding"
+          :options="threadOptions"
+          size="sm"
+          teleport
+          class="usage-scope-filter"
+          :aria-label="__t('ui.usage', '筛选会话')"
+        />
+        <PSelect
+          v-model="modelBinding"
+          :options="modelOptions"
+          size="sm"
+          teleport
+          class="usage-scope-filter"
+          :aria-label="__t('ui.usage', '筛选模型')"
+          :title="__t('ui.usage', '按服务商和模型 ID 统计')"
         />
         <button
           class="usage-icon-button"
           type="button"
           :disabled="loading"
-          aria-label="刷新用量"
-          @click="refresh"
+          :aria-label="__t('ui.usage', '刷新用量')"
+          @click="refreshAll"
         >
           <PixelIcon name="refresh" size="sm" :animation="loading ? 'spin' : ''" />
         </button>
         <button
           class="usage-icon-button"
           type="button"
-          aria-label="收起统计"
+          :aria-label="__t('ui.usage', '收起统计')"
           @click="expanded = false"
         >
           <PixelIcon name="close" size="sm" />
@@ -338,57 +468,61 @@ onUnmounted(() => {
       </header>
       <p v-if="error" class="usage-notice" role="status">
         {{ error }}
-        <button type="button" @click="refresh">重试</button>
+        <button type="button" @click="refreshAll">{{ __t('ui.usage', '重试') }}</button>
       </p>
       <template v-if="detail">
         <div class="usage-detail-metrics">
           <div>
-            <span>总 Token</span>
+            <span>{{ __t('ui.usage', '总 Token') }}</span>
             <strong>{{ known(detail.totals) ? format(detail.totals.totalTokens) : '—' }}</strong>
           </div>
           <div class="usage-input">
-            <span>输入</span>
+            <span>{{ __t('ui.usage', '输入') }}</span>
             <strong>
               {{ known(detail.totals, 'input') ? format(detail.totals.inputTokens) : '—' }}
             </strong>
           </div>
           <div class="usage-output">
-            <span>输出</span>
+            <span>{{ __t('ui.usage', '输出') }}</span>
             <strong>
               {{ known(detail.totals, 'output') ? format(detail.totals.outputTokens) : '—' }}
             </strong>
           </div>
           <div>
             <span>
-              调用{{
-                detail.totals.failedRequests ? ` · ${detail.totals.failedRequests} 次未完成` : ''
+              {{ __t('ui.usage', '调用')
+              }}{{
+                detail.totals.failedRequests
+                  ? __t('ui.usage', ' · {0} 次未完成', [detail.totals.failedRequests])
+                  : ''
               }}
             </span>
             <strong>
               {{ detail.totals.requests }}
-              <small>次</small>
+              <small>{{ __t('ui.usage', '次') }}</small>
             </strong>
           </div>
         </div>
-        <section class="usage-cache" aria-label="缓存命中统计">
+        <section class="usage-cache" :aria-label="__t('ui.usage', '缓存命中统计')">
           <div class="usage-chart-heading">
-            <span>缓存</span>
+            <span>{{ __t('ui.usage', '缓存') }}</span>
             <span :title="cacheTitle(detail.totals)">
-              {{ detail.totals.cacheReportedRequests }} / {{ detail.totals.requests }} 次已上报
+              {{ detail.totals.cacheReportedRequests }} / {{ detail.totals.requests }}
+              {{ __t('ui.usage', '次已上报') }}
             </span>
           </div>
           <div class="usage-detail-metrics usage-cache-metrics">
             <div :class="{ 'usage-cache-accent': cacheRate(detail.totals) !== null }">
-              <span>命中率</span>
+              <span>{{ __t('ui.usage', '命中率') }}</span>
               <strong :title="cacheTitle(detail.totals)">{{ cacheLabel(detail.totals) }}</strong>
             </div>
             <div>
-              <span>命中 Token</span>
+              <span>{{ __t('ui.usage', '命中 Token') }}</span>
               <strong
                 :title="
                   detail.totals.cacheReportedRequests
                     ? `${detail.totals.cacheHitTokens.toLocaleString()} Token`
-                    : '未上报缓存统计'
+                    : __t('ui.usage', '未上报缓存统计')
                 "
               >
                 {{
@@ -397,12 +531,12 @@ onUnmounted(() => {
               </strong>
             </div>
             <div>
-              <span>未命中 Token</span>
+              <span>{{ __t('ui.usage', '未命中 Token') }}</span>
               <strong
                 :title="
                   detail.totals.cacheReportedRequests
                     ? `${detail.totals.cacheMissTokens.toLocaleString()} Token`
-                    : '未上报缓存统计'
+                    : __t('ui.usage', '未上报缓存统计')
                 "
               >
                 {{
@@ -411,10 +545,12 @@ onUnmounted(() => {
               </strong>
             </div>
             <div>
-              <span>命中调用</span>
+              <span>{{ __t('ui.usage', '命中调用') }}</span>
               <strong :title="cacheTitle(detail.totals)">
                 {{ detail.totals.cacheReportedRequests ? detail.totals.cacheHitRequests : '—' }}
-                <small>/ {{ detail.totals.cacheReportedRequests }} 次</small>
+                <small>
+                  / {{ detail.totals.cacheReportedRequests }} {{ __t('ui.usage', '次') }}
+                </small>
               </strong>
             </div>
           </div>
@@ -422,7 +558,7 @@ onUnmounted(() => {
             v-if="cacheRate(detail.totals) !== null"
             class="usage-cache-meter"
             role="meter"
-            aria-label="输入缓存命中率"
+            :aria-label="__t('ui.usage', '输入缓存命中率')"
             aria-valuemin="0"
             aria-valuemax="100"
             :aria-valuenow="cacheRate(detail.totals) ?? 0"
@@ -431,27 +567,27 @@ onUnmounted(() => {
             <i :style="{ width: `${cacheRate(detail.totals)}%` }" />
           </div>
           <p v-if="detail.totals.cachedWriteTokens" class="usage-cache-write">
-            缓存写入 {{ compact(detail.totals.cachedWriteTokens) }} Token
+            {{ __t('ui.usage', '缓存写入') }} {{ compact(detail.totals.cachedWriteTokens) }} Token
           </p>
         </section>
         <div class="usage-chart-heading">
-          <span>用量走势</span>
+          <span>{{ __t('ui.usage', '用量走势') }}</span>
           <span class="usage-chart-legend">
             <i class="is-input" />
-            输入
+            {{ __t('ui.usage', '输入') }}
             <i class="is-output" />
-            输出
+            {{ __t('ui.usage', '输出') }}
             <template
               v-if="
                 detail.totals.totalTokens > detail.totals.inputTokens + detail.totals.outputTokens
               "
             >
               <i class="is-other" />
-              未细分
+              {{ __t('ui.usage', '未细分') }}
             </template>
           </span>
         </div>
-        <div class="usage-chart" role="list" aria-label="按时间统计 Token 用量">
+        <div class="usage-chart" role="list" :aria-label="__t('ui.usage', '按时间统计 Token 用量')">
           <div
             v-for="(bucket, index) in detail.buckets"
             :key="bucket.key"
@@ -486,7 +622,9 @@ onUnmounted(() => {
             </span>
           </div>
         </div>
-        <p v-if="!detail.totals.requests" class="usage-empty">这段时间暂无用量记录</p>
+        <p v-if="!detail.totals.requests" class="usage-empty">
+          {{ __t('ui.usage', '这段时间暂无用量记录') }}
+        </p>
         <p
           v-else-if="detail.totals.unreportedRequests || detail.totals.incompleteRequests"
           class="usage-notice"
@@ -494,37 +632,37 @@ onUnmounted(() => {
         >
           {{
             detail.totals.unreportedRequests
-              ? `${detail.totals.unreportedRequests} 次调用未上报用量`
+              ? __t('ui.usage', '{0} 次调用未上报用量', [detail.totals.unreportedRequests])
               : ''
           }}{{ detail.totals.unreportedRequests && detail.totals.incompleteRequests ? ' · ' : ''
           }}{{
             detail.totals.incompleteRequests
-              ? `${detail.totals.incompleteRequests} 次仅部分上报`
+              ? __t('ui.usage', '{0} 次仅部分上报', [detail.totals.incompleteRequests])
               : ''
-          }}，统计可能不完整
+          }}{{ __t('ui.usage', '，统计可能不完整') }}
         </p>
         <div class="usage-distribution-heading">
-          <div class="usage-range" role="group" aria-label="用量分布">
+          <div class="usage-range" role="group" :aria-label="__t('ui.usage', '用量分布')">
             <button
               type="button"
               :aria-pressed="distribution === 'models'"
               @click="distribution = 'models'"
             >
-              按模型
+              {{ __t('ui.usage', '按模型') }}
             </button>
             <button
               type="button"
               :aria-pressed="distribution === 'purposes'"
               @click="distribution = 'purposes'"
             >
-              按用途
+              {{ __t('ui.usage', '按用途') }}
             </button>
             <button
               type="button"
               :aria-pressed="distribution === 'channels'"
               @click="distribution = 'channels'"
             >
-              按通道
+              {{ __t('ui.usage', '按通道') }}
             </button>
           </div>
         </div>
@@ -549,7 +687,7 @@ onUnmounted(() => {
                       ? row.modelId
                       : distribution === 'channels'
                         ? channels[row.key] || row.key
-                        : purposes[row.key as TokenUsagePurpose] || '系统调用'
+                        : purposes[row.key as TokenUsagePurpose] || __t('ui.usage', '系统调用')
                   }}
                 </strong>
                 <b>{{ known(row) ? compact(row.totalTokens) : '—' }}</b>
@@ -557,8 +695,12 @@ onUnmounted(() => {
               <div class="usage-row-meta">
                 <span>
                   {{ distribution === 'models' ? row.provider : ''
-                  }}{{ distribution === 'models' ? ' · ' : '' }}{{ row.requests }} 次调用{{
-                    row.unreportedRequests ? ` · ${row.unreportedRequests} 次未上报` : ''
+                  }}{{ distribution === 'models' ? ' · ' : '' }}{{ row.requests }}
+                  {{ __t('ui.usage', '次调用')
+                  }}{{
+                    row.unreportedRequests
+                      ? __t('ui.usage', ' · {0} 次未上报', [row.unreportedRequests])
+                      : ''
                   }}
                 </span>
                 <span>
@@ -574,10 +716,10 @@ onUnmounted(() => {
                 :class="{ 'is-reported': cacheRate(row) !== null }"
                 :title="cacheTitle(row)"
               >
-                <span>缓存命中 {{ cacheLabel(row) }}</span>
+                <span>{{ __t('ui.usage', '缓存命中') }} {{ cacheLabel(row) }}</span>
                 <span v-if="row.cacheReportedRequests">
                   {{ compact(row.cacheHitTokens) }} Token · {{ row.cacheHitRequests }} /
-                  {{ row.cacheReportedRequests }} 次
+                  {{ row.cacheReportedRequests }} {{ __t('ui.usage', '次') }}
                 </span>
               </div>
               <span class="usage-row-meter" aria-hidden="true">
@@ -587,14 +729,15 @@ onUnmounted(() => {
           </li>
         </ul>
         <footer class="usage-detail-footer">
-          <span>{{ timeZone }} · 每 30 秒更新</span>
+          <span>{{ timeZone }} {{ __t('ui.usage', '· 每 30 秒更新') }}</span>
           <span v-if="detail.firstRecordedAt">
-            自 {{ recordedLabel(detail.firstRecordedAt) }} 起记录
+            {{ __t('ui.usage', '自') }} {{ recordedLabel(detail.firstRecordedAt) }}
+            {{ __t('ui.usage', '起记录') }}
           </span>
-          <span v-else>从启用统计后开始记录</span>
+          <span v-else>{{ __t('ui.usage', '从启用统计后开始记录') }}</span>
         </footer>
       </template>
-      <p v-else-if="!error" class="usage-empty">正在读取统计…</p>
+      <p v-else-if="!error" class="usage-empty">{{ __t('ui.usage', '正在读取统计…') }}</p>
     </PCard>
   </Transition>
 </template>

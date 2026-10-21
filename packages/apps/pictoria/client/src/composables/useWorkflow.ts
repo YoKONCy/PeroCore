@@ -1,3 +1,4 @@
+import { t as __t } from '../i18n'
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch, type Ref } from 'vue'
 import type { CanvasItem, Run, Step } from '../types'
 import type { Binding, WorkflowDraft, WorkflowIssue, WorkflowNode } from '../workflowTypes'
@@ -990,7 +991,15 @@ export function useWorkflow(owner: Ref<string>) {
     }
     checkpoint()
     const id = crypto.randomUUID()
-    doc.notes.push({ id, title: '备注', text: '', x, y })
+    doc.notes.push({
+      id,
+      get title() {
+        return __t('apps.pictoria.ui', '备注')
+      },
+      text: '',
+      x,
+      y,
+    })
     selected.value = [`__note:${id}`]
   }
   const navigationStore = {

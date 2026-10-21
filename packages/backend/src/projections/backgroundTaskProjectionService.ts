@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 import type {
   ApprovalSurfaceProps,
   BackgroundTaskProjectionSnapshot,
@@ -97,7 +98,7 @@ export class BackgroundTaskProjectionService {
             inputId: input.id,
             inputKind: 'agent_question',
             principalId: input.agentId,
-            title: '想问问你',
+            title: __t('server.projections', '想问问你'),
             question: input.question,
             questions: input.questions,
             context:
@@ -108,10 +109,10 @@ export class BackgroundTaskProjectionService {
             allowFreeText: input.allowFreeText,
             required: input.required,
             actions: input.required
-              ? [{ id: 'answer', label: '回答并继续', tone: 'primary' }]
+              ? [{ id: 'answer', label: __t('server.projections', '回答并继续'), tone: 'primary' }]
               : [
-                  { id: 'skip', label: '暂时跳过', tone: 'neutral' },
-                  { id: 'answer', label: '回答并继续', tone: 'primary' },
+                  { id: 'skip', label: __t('server.projections', '暂时跳过'), tone: 'neutral' },
+                  { id: 'answer', label: __t('server.projections', '回答并继续'), tone: 'primary' },
                 ],
           },
         ),

@@ -24,15 +24,28 @@ export default defineConfig({
     },
   },
   server: {
+    host: '127.0.0.1',
     port: 7359,
+    strictPort: true,
+    hmr: { path: '/__infos_hmr' },
+    fs: {
+      allow: [
+        __dirname,
+        resolve(__dirname, '../shared/src'),
+        resolve(__dirname, '../avatar-assets/src'),
+        resolve(__dirname, '../apps/arca/src'),
+        resolve(__dirname, '../../node_modules'),
+        resolve(__dirname, '../../public'),
+      ],
+    },
     // 开发时代理后端 API
     proxy: {
       '/api': {
-        target: 'http://localhost:9120',
-        changeOrigin: true,
+        target: `http://127.0.0.1:${process.env.PERO_PORT || 9120}`,
+        changeOrigin: false,
       },
       '/ws': {
-        target: 'ws://localhost:9120',
+        target: `ws://127.0.0.1:${process.env.PERO_PORT || 9120}`,
         ws: true,
       },
     },

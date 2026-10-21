@@ -102,7 +102,7 @@
     },
     {
       "name": "set_reminder",
-      "description": "按指定时间创建提醒、话题或预设反应。",
+      "description": "按指定时间创建提醒、话题或预设反应，可选择固定间隔重复；周期计划可在任务中心暂停、恢复和取消。",
       "display": {
         "label": "设置提醒",
         "icon": "clock",
@@ -124,6 +124,12 @@
             "type": "string",
             "description": "类型: \"reminder\" (一次性提醒，默认) | \"topic\" (想找主人聊的话题) | \"reaction\" (预设反应)",
             "enum": ["reminder", "topic", "reaction"]
+          },
+          "repeat_interval_minutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 525600,
+            "description": "可选：固定重复间隔，单位分钟。不传为一次性；停机错过的多次提醒合并为一次，避免补发轰炸。"
           }
         },
         "required": ["time", "content"]

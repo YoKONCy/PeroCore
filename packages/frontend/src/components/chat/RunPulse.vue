@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /**
  * RunPulse.vue — 界面组件
  *
@@ -77,15 +79,33 @@ onBeforeUnmount(stopTimer)
 const text = computed(() => {
   if (props.label) return props.label
   const labels: Record<RunPulseState, string> = {
-    thinking: '正在思考……',
-    assembling: '正在生成工具调用……',
-    generating: '正在打字……',
-    calling: '正在等待工具回传……',
-    waiting: '正在等待你的回应……',
-    paused: '任务已暂停',
-    cancelled: '已终止',
-    completed: '回复完成',
-    failed: '运行遇到问题',
+    get thinking() {
+      return __t('ui.chat', '正在思考……')
+    },
+    get assembling() {
+      return __t('ui.chat', '正在生成工具调用……')
+    },
+    get generating() {
+      return __t('ui.chat', '正在打字……')
+    },
+    get calling() {
+      return __t('ui.chat', '正在等待工具回传……')
+    },
+    get waiting() {
+      return __t('ui.chat', '正在等待你的回应……')
+    },
+    get paused() {
+      return __t('ui.chat', '任务已暂停')
+    },
+    get cancelled() {
+      return __t('ui.chat', '已终止')
+    },
+    get completed() {
+      return __t('ui.chat', '回复完成')
+    },
+    get failed() {
+      return __t('ui.chat', '运行遇到问题')
+    },
   }
   return labels[props.state]
 })

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../../i18n/index'
+
 /** ToolCardSearch — 搜索索引表，使用文件/坐标/内容列而非结果卡片。 */
 import { computed } from 'vue'
 import { parseToolSearchResult, toolSearchSummary } from '../../../lib/toolSearchResult'
@@ -18,9 +20,9 @@ const result = computed(() => (props.isError ? undefined : parseToolSearchResult
 const query = computed(() => String(args.value.query ?? args.value.pattern ?? ''))
 const matches = computed(() => result.value?.rows ?? [])
 const summary = computed(() => {
-  if (props.isError) return '搜索失败'
-  if (props.result === undefined) return '等待结果'
-  return result.value ? toolSearchSummary(result.value) : '搜索结果'
+  if (props.isError) return __t('ui.tools', '搜索失败')
+  if (props.result === undefined) return __t('ui.tools', '等待结果')
+  return result.value ? toolSearchSummary(result.value) : __t('ui.tools', '搜索结果')
 })
 const partialPreview = computed(() => result.value?.previewTruncated || matches.value.length > 8)
 </script>
@@ -47,18 +49,23 @@ const partialPreview = computed(() => result.value?.previewTruncated || matches.
           }}
         </code>
         <div>
-          <strong>{{ match.file || '未知位置' }}</strong>
+          <strong>{{ match.file || __t('ui.tools', '未知位置') }}</strong>
           <span v-if="match.content">{{ match.content }}</span>
         </div>
       </div>
     </div>
     <pre v-else-if="isError" class="search-error">{{ props.result }}</pre>
-    <div v-else-if="props.result === undefined" class="search-empty">等待搜索结果……</div>
-    <div v-else-if="result?.auditOnly" class="search-empty">已保留数量，正文需重新搜索</div>
-    <div v-else-if="result" class="search-empty">未找到匹配项</div>
+    <div v-else-if="props.result === undefined" class="search-empty">
+      {{ __t('ui.tools', '等待搜索结果……') }}
+    </div>
+    <div v-else-if="result?.auditOnly" class="search-empty">
+      {{ __t('ui.tools', '已保留数量，正文需重新搜索') }}
+    </div>
+    <div v-else-if="result" class="search-empty">{{ __t('ui.tools', '未找到匹配项') }}</div>
     <pre v-else class="search-raw">{{ props.result }}</pre>
     <footer v-if="partialPreview && matches.length" class="search-note">
-      仅展示前 {{ Math.min(8, matches.length) }} 项
+      {{ __t('ui.tools', '仅展示前') }} {{ Math.min(8, matches.length) }}
+      {{ __t('ui.tools', '项') }}
     </footer>
   </section>
 </template>

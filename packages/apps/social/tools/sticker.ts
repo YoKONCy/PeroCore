@@ -1,3 +1,4 @@
+import { t as __t } from '../runtime/i18n'
 import type { SocialStoragePort } from '@infos/shared'
 import type { StickerService } from '../runtime/stickerService'
 
@@ -16,6 +17,7 @@ export async function executeSocialSticker(
   args: Record<string, unknown>,
 ): Promise<string> {
   const action = String(args.action ?? '')
+  let stage = 'preflight'
   try {
     if (action === 'list' || action === 'search') {
       const result = await service.list(
@@ -30,7 +32,7 @@ export async function executeSocialSticker(
         ...result,
         stickers: result.stickers.map(({ id, description }) => ({
           id,
-          description: description || '暂无描述，可用 read 查看',
+          description: description || __t('apps.social.ui', '暂无描述，可用 read 查看'),
         })),
       })
     }
@@ -44,7 +46,7 @@ export async function executeSocialSticker(
     if (action === 'collect') {
       const messageId = String(args.message_id ?? '')
       if (!messageId || messageId.length > 100) throw new Error('收藏需要提供来源 message_id')
-      const row = await storage.getByMsgId(scope.agentId, messageId)
+      const row = await storage.getByMsgId(scope.agentId, messageId, scope.accountId)
       if (
         !row ||
         row.platform !== 'qq' ||
@@ -69,7 +71,11 @@ export async function executeSocialSticker(
       if (!Number.isInteger(index) || index < 1)
         throw new Error('image_index 必须是从 1 开始的整数')
       const url = images[index - 1]?.data?.url
-      if (!url) throw new Error('该消息中没有对应图片或原图链接已不可用')
+      if (!url)
+        throw new Error(
+          '该消息中没有对应图片或原图链接已不可用；系统/商城表情可用 emoji_list 查询来源，不能据此断言 QQ 不支持收藏',
+        )
+      stage = 'collect'
       const result = await service.collect(
         scope.accountId,
         url,
@@ -83,6 +89,7 @@ export async function executeSocialSticker(
     }
     if (action === 'describe') {
       if (typeof args.description !== 'string') throw new Error('请提供 description')
+      stage = 'describe'
       const sticker = await service.describe(
         scope.accountId,
         String(args.sticker_id ?? ''),
@@ -94,6 +101,7 @@ export async function executeSocialSticker(
       })
     }
     if (action === 'delete') {
+      stage = 'delete'
       return JSON.stringify({
         success: true,
         ...(await service.remove(scope.accountId, String(args.sticker_id ?? ''))),
@@ -101,11 +109,29 @@ export async function executeSocialSticker(
     }
     throw new Error('未知表情操作')
   } catch (error) {
+    const detail = error as {
+      rejected?: boolean
+      uncertain?: boolean
+      code?: string
+      stage?: string
+    }
+    const mutation = ['collect', 'describe', 'delete'].includes(action)
+    const uncertain =
+      detail.uncertain === true || (mutation && stage !== 'preflight' && detail.rejected !== true)
     return JSON.stringify({
       success: false,
       error: error instanceof Error ? error.message : String(error),
-      ...(['collect', 'describe', 'delete'].includes(action)
-        ? { hint: '写操作失败或结果未确认时，先 refresh 查询再决定是否重试' }
+      code: detail.code ?? (uncertain ? 'STICKER_WRITE_UNCERTAIN' : 'STICKER_OPERATION_FAILED'),
+      stage: detail.stage ?? stage,
+      rejected: !uncertain,
+      uncertain,
+      ...(uncertain
+        ? {
+            hint: __t(
+              'apps.social.ui',
+              '请用 sticker_list 的 refresh:true 强制核验；确认前不要重复提交，也不要猜测平台能力限制',
+            ),
+          }
         : {}),
     })
   }

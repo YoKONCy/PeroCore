@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { getDisplayLocale } from '../../../i18n/index'
+
+import { t as __t } from '../../../i18n/index'
+
 /**
  * MemoryInspector — 记忆详情检查器（右侧常驻面板）
  *
@@ -38,14 +42,30 @@ const semanticRelations = computed(
 )
 
 const relationLabels: Record<string, string> = {
-  temporal_next: '时间后继',
-  temporal_prev: '时间前驱',
-  caused_by: '因果',
-  same_event: '同一事件',
-  same_topic: '同主题',
-  involves_person: '涉及人物',
-  involves_place: '涉及地点',
-  involves_object: '涉及物品',
+  get temporal_next() {
+    return __t('ui.settings', '时间后继')
+  },
+  get temporal_prev() {
+    return __t('ui.settings', '时间前驱')
+  },
+  get caused_by() {
+    return __t('ui.settings', '因果')
+  },
+  get same_event() {
+    return __t('ui.settings', '同一事件')
+  },
+  get same_topic() {
+    return __t('ui.settings', '同主题')
+  },
+  get involves_person() {
+    return __t('ui.settings', '涉及人物')
+  },
+  get involves_place() {
+    return __t('ui.settings', '涉及地点')
+  },
+  get involves_object() {
+    return __t('ui.settings', '涉及物品')
+  },
 }
 
 function relationLabel(relation: string): string {
@@ -54,7 +74,7 @@ function relationLabel(relation: string): string {
 
 function formatTime(value: string | null | undefined): string {
   if (!value) return '—'
-  return new Date(value).toLocaleString('zh-CN', { hour12: false })
+  return new Date(value).toLocaleString(getDisplayLocale(), { hour12: false })
 }
 
 function otherSide(relation: { sourceId: string; targetId: string }, selfId: string): string {
@@ -74,13 +94,15 @@ function openSource(): void {
     <div v-if="!selected && !detailLoading && !detailError" class="inspector-empty">
       <PixelIcon name="brain" size="3xl" class="inspector-empty-icon" />
       <p class="font-pixel">MEMORY INSPECTOR</p>
-      <p class="inspector-empty-hint">在左侧选择一条记忆，查看事件详情、关系与原始对话</p>
+      <p class="inspector-empty-hint">
+        {{ __t('ui.settings', '在左侧选择一条记忆，查看事件详情、关系与原始对话') }}
+      </p>
     </div>
 
     <!-- 加载中 -->
     <div v-else-if="detailLoading" class="inspector-empty">
       <PixelIcon name="refresh" size="sm" animation="spin" />
-      <p class="inspector-empty-hint">加载事件详情...</p>
+      <p class="inspector-empty-hint">{{ __t('ui.settings', '加载事件详情...') }}</p>
     </div>
 
     <!-- 详情错误 -->
@@ -96,7 +118,7 @@ function openSource(): void {
         <p class="narrative-text">{{ selected.narrative }}</p>
         <div v-if="selected.status === 'archived'" class="archive-badge">
           <PixelIcon name="alert" size="xs" />
-          该事件已归档，且不再进入对话记忆检索
+          {{ __t('ui.settings', '该事件已归档，且不再进入对话记忆检索') }}
         </div>
       </section>
 
@@ -104,31 +126,37 @@ function openSource(): void {
       <section class="panel">
         <h4 class="panel-title">
           <span class="panel-title-bar" />
-          基本信息
+          {{ __t('ui.settings', '基本信息') }}
         </h4>
         <dl class="info-grid">
-          <dt>事件时间</dt>
+          <dt>{{ __t('ui.settings', '事件时间') }}</dt>
           <dd>{{ formatTime(selected.eventAt) }}</dd>
-          <dt>记录时间</dt>
+          <dt>{{ __t('ui.settings', '记录时间') }}</dt>
           <dd>{{ formatTime(selected.createdAt) }}</dd>
-          <dt>重要度</dt>
+          <dt>{{ __t('ui.settings', '重要度') }}</dt>
           <dd class="font-pixel">{{ selected.importance }} / 10</dd>
-          <dt>情感</dt>
+          <dt>{{ __t('ui.settings', '情感') }}</dt>
           <dd>
-            {{ selected.affect.tones.join('、') || '未标注' }}
+            {{ selected.affect.tones.join('、') || __t('ui.settings', '未标注') }}
             <span class="info-dim">
-              · 效价 {{ selected.affect.valence }}/10 · 唤醒 {{ selected.affect.arousal }}/10
+              {{ __t('ui.settings', '· 效价') }} {{ selected.affect.valence
+              }}{{ __t('ui.settings', '/10 · 唤醒') }} {{ selected.affect.arousal }}/10
             </span>
           </dd>
-          <dt>来源</dt>
+          <dt>{{ __t('ui.settings', '来源') }}</dt>
           <dd>
             {{ selected.origin.channel }}
             <span class="info-dim">
-              · {{ selected.origin.mode === 'active' ? '主动记事' : '后台炼化' }}
+              ·
+              {{
+                selected.origin.mode === 'active'
+                  ? __t('ui.settings', '主动记事')
+                  : __t('ui.settings', '后台炼化')
+              }}
             </span>
           </dd>
-          <dt>对话 Pair</dt>
-          <dd>{{ selected.origin.pairIds.length }} 组</dd>
+          <dt>{{ __t('ui.settings', '对话 Pair') }}</dt>
+          <dd>{{ selected.origin.pairIds.length }} {{ __t('ui.settings', '组') }}</dd>
         </dl>
       </section>
 
@@ -136,11 +164,11 @@ function openSource(): void {
       <section class="panel">
         <h4 class="panel-title">
           <span class="panel-title-bar" />
-          关联实体
+          {{ __t('ui.settings', '关联实体') }}
         </h4>
         <div class="entity-groups">
           <div v-if="selected.participants.length" class="entity-group">
-            <span class="entity-label">人物</span>
+            <span class="entity-label">{{ __t('ui.settings', '人物') }}</span>
             <div class="entity-tags">
               <span
                 v-for="name in selected.participants"
@@ -152,7 +180,7 @@ function openSource(): void {
             </div>
           </div>
           <div v-if="selected.places.length" class="entity-group">
-            <span class="entity-label">地点</span>
+            <span class="entity-label">{{ __t('ui.settings', '地点') }}</span>
             <div class="entity-tags">
               <span v-for="name in selected.places" :key="name" class="entity-tag entity-tag-place">
                 {{ name }}
@@ -160,7 +188,7 @@ function openSource(): void {
             </div>
           </div>
           <div v-if="selected.objects.length" class="entity-group">
-            <span class="entity-label">物品</span>
+            <span class="entity-label">{{ __t('ui.settings', '物品') }}</span>
             <div class="entity-tags">
               <span
                 v-for="name in selected.objects"
@@ -172,7 +200,7 @@ function openSource(): void {
             </div>
           </div>
           <div v-if="selected.topics.length" class="entity-group">
-            <span class="entity-label">主题</span>
+            <span class="entity-label">{{ __t('ui.settings', '主题') }}</span>
             <div class="entity-tags">
               <span v-for="name in selected.topics" :key="name" class="entity-tag entity-tag-topic">
                 {{ name }}
@@ -188,7 +216,7 @@ function openSource(): void {
             "
             class="entity-empty"
           >
-            未标注实体
+            {{ __t('ui.settings', '未标注实体') }}
           </p>
         </div>
       </section>
@@ -197,7 +225,7 @@ function openSource(): void {
       <section class="panel">
         <h4 class="panel-title">
           <span class="panel-title-bar" />
-          时间轴
+          {{ __t('ui.settings', '时间轴') }}
         </h4>
         <div class="timeline-nav">
           <button
@@ -207,11 +235,13 @@ function openSource(): void {
           >
             <PixelIcon name="chevron-down" size="xs" class="rotate-90" />
             <span class="timeline-nav-body">
-              <span class="timeline-nav-label">前一个事件</span>
+              <span class="timeline-nav-label">{{ __t('ui.settings', '前一个事件') }}</span>
               <span class="timeline-nav-text">{{ selected.previous.narrative }}</span>
             </span>
           </button>
-          <p v-else class="timeline-nav-empty">已是时间轴上最早的事件</p>
+          <p v-else class="timeline-nav-empty">
+            {{ __t('ui.settings', '已是时间轴上最早的事件') }}
+          </p>
 
           <button
             v-if="selected.next"
@@ -219,12 +249,14 @@ function openSource(): void {
             @click="emit('select', selected.next)"
           >
             <span class="timeline-nav-body">
-              <span class="timeline-nav-label">后一个事件</span>
+              <span class="timeline-nav-label">{{ __t('ui.settings', '后一个事件') }}</span>
               <span class="timeline-nav-text">{{ selected.next.narrative }}</span>
             </span>
             <PixelIcon name="chevron-down" size="xs" class="-rotate-90" />
           </button>
-          <p v-else class="timeline-nav-empty">已是时间轴上最近的事件</p>
+          <p v-else class="timeline-nav-empty">
+            {{ __t('ui.settings', '已是时间轴上最近的事件') }}
+          </p>
         </div>
       </section>
 
@@ -232,10 +264,10 @@ function openSource(): void {
       <section v-if="sameEventRelations.length || semanticRelations.length" class="panel">
         <h4 class="panel-title">
           <span class="panel-title-bar" />
-          事件关系
+          {{ __t('ui.settings', '事件关系') }}
         </h4>
         <div v-if="sameEventRelations.length" class="relation-group">
-          <span class="relation-group-label">同一事件簇</span>
+          <span class="relation-group-label">{{ __t('ui.settings', '同一事件簇') }}</span>
           <div class="relation-list">
             <button
               v-for="relation in sameEventRelations"
@@ -249,7 +281,7 @@ function openSource(): void {
           </div>
         </div>
         <div v-if="semanticRelations.length" class="relation-group">
-          <span class="relation-group-label">语义关系</span>
+          <span class="relation-group-label">{{ __t('ui.settings', '语义关系') }}</span>
           <div class="relation-list">
             <span
               v-for="relation in semanticRelations"
@@ -267,12 +299,12 @@ function openSource(): void {
 
       <section v-if="selected.status === 'active'" class="panel archive-action">
         <div>
-          <strong>归档记忆</strong>
-          <span>退出自动召回，可在归档页恢复。</span>
+          <strong>{{ __t('ui.settings', '归档记忆') }}</strong>
+          <span>{{ __t('ui.settings', '退出自动召回，可在归档页恢复。') }}</span>
         </div>
         <PButton variant="danger" size="sm" @click="emit('archive', selected)">
           <PixelIcon name="trash" size="xs" />
-          归档
+          {{ __t('ui.settings', '归档') }}
         </PButton>
       </section>
 
@@ -283,9 +315,11 @@ function openSource(): void {
           variant="ghost"
           @click="emit('restore', selected)"
         >
-          恢复
+          {{ __t('ui.settings', '恢复') }}
         </PButton>
-        <PButton variant="danger" size="sm" @click="emit('delete', selected)">永久删除</PButton>
+        <PButton variant="danger" size="sm" @click="emit('delete', selected)">
+          {{ __t('ui.settings', '永久删除') }}
+        </PButton>
       </section>
 
       <!-- 原始对话 -->
@@ -293,18 +327,20 @@ function openSource(): void {
         <div class="source-head">
           <h4 class="panel-title">
             <span class="panel-title-bar" />
-            原始对话
+            {{ __t('ui.settings', '原始对话') }}
           </h4>
           <PButton variant="ghost" size="sm" :loading="sourceLoading" @click="openSource">
             <PixelIcon :name="showSource ? 'chevron-up' : 'chevron-down'" size="xs" />
-            {{ showSource ? '收起' : '展开' }}
+            {{ showSource ? __t('ui.settings', '收起') : __t('ui.settings', '展开') }}
           </PButton>
         </div>
         <div v-if="showSource" class="source-body">
           <p v-if="sourceError" class="source-error">{{ sourceError }}</p>
-          <p v-else-if="sourceLoading" class="source-hint">加载来源对话...</p>
+          <p v-else-if="sourceLoading" class="source-hint">
+            {{ __t('ui.settings', '加载来源对话...') }}
+          </p>
           <p v-else-if="source && !source.available" class="source-hint">
-            原文不可用（原始消息可能已被清理）
+            {{ __t('ui.settings', '原文不可用（原始消息可能已被清理）') }}
           </p>
           <div v-else-if="source" class="source-messages">
             <article

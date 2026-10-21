@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import type { DocumentNodeId, DocumentSnapshot, JsonValue } from '@infos/document-engine'
 import {
@@ -54,20 +56,68 @@ const store = useWorkbenchStore(),
   selection = ref<OfficeSelection>()
 const ribbon = ref<'home' | 'insert' | 'layout' | 'review'>('home')
 const ribbonTabs = [
-  { id: 'home', label: '开始' },
-  { id: 'insert', label: '插入' },
-  { id: 'layout', label: '页面' },
-  { id: 'review', label: '审阅' },
+  {
+    id: 'home',
+    get label() {
+      return __t('apps.arca.ui', '开始')
+    },
+  },
+  {
+    id: 'insert',
+    get label() {
+      return __t('apps.arca.ui', '插入')
+    },
+  },
+  {
+    id: 'layout',
+    get label() {
+      return __t('apps.arca.ui', '页面')
+    },
+  },
+  {
+    id: 'review',
+    get label() {
+      return __t('apps.arca.ui', '审阅')
+    },
+  },
 ] as const
 const paragraphOptions: Array<{ value: number | 'paragraph' | 'quote'; label: string }> = [
-  { value: 'paragraph', label: '正文' },
-  ...Array.from({ length: 6 }, (_, index) => ({ value: index + 1, label: '标题 ' + (index + 1) })),
-  { value: 'quote', label: '引用' },
+  {
+    value: 'paragraph',
+    get label() {
+      return __t('apps.arca.ui', '正文')
+    },
+  },
+  ...Array.from({ length: 6 }, (_, index) => ({
+    value: index + 1,
+    label: __t('apps.arca.ui', '标题 ') + (index + 1),
+  })),
+  {
+    value: 'quote',
+    get label() {
+      return __t('apps.arca.ui', '引用')
+    },
+  },
 ]
 const fontOptions = [
-  { value: 'system-ui', label: '系统字体' },
-  { value: 'Microsoft YaHei', label: '微软雅黑' },
-  { value: 'SimSun', label: '宋体' },
+  {
+    value: 'system-ui',
+    get label() {
+      return __t('apps.arca.ui', '系统字体')
+    },
+  },
+  {
+    value: 'Microsoft YaHei',
+    get label() {
+      return __t('apps.arca.ui', '微软雅黑')
+    },
+  },
+  {
+    value: 'SimSun',
+    get label() {
+      return __t('apps.arca.ui', '宋体')
+    },
+  },
   { value: 'Arial', label: 'Arial' },
   { value: 'Times New Roman', label: 'Times New Roman' },
 ].map((option) => ({ ...option, fontFamily: option.value }))
@@ -491,7 +541,15 @@ function format(patch: Partial<OfficeMarks>): void {
     typing.value = {
       nodeId: point.nodeId,
       offset: point.offset,
-      marks: normalizeRuns([{ text: '占位', marks: { ...marks, ...patch } }])[0]?.marks ?? {},
+      marks:
+        normalizeRuns([
+          {
+            get text() {
+              return __t('apps.arca.ui', '占位')
+            },
+            marks: { ...marks, ...patch },
+          },
+        ])[0]?.marks ?? {},
     }
     message.value = ''
     return
@@ -1406,7 +1464,9 @@ async function saveCopy(): Promise<void> {
       {
         documentId: current.baseline.documentId,
         baseRevisionId: current.baseline.revisionId,
-        title: `${current.content.title}（草稿副本）`,
+        get title() {
+          return __t('apps.arca.ui', '{0}（草稿副本）', [current.content.title])
+        },
         content: current.content,
         surfaceSessionToken: store.session.token,
       },
@@ -1565,7 +1625,7 @@ defineExpose({
 <template>
   <section ref="editorElement" class="office-editor">
     <div v-if="!toolbarTarget" class="editor-commandbar">
-      <nav v-if="editable" class="ribbon-tabs" aria-label="编辑工具">
+      <nav v-if="editable" class="ribbon-tabs" :aria-label="__t('apps.arca.ui', '编辑工具')">
         <button
           v-for="tab in ribbonTabs"
           :key="tab.id"
@@ -1578,40 +1638,54 @@ defineExpose({
           {{ tab.label }}
         </button>
       </nav>
-      <span v-else class="reader-label">{{ props.writable ? '阅读' : '只读' }}</span>
+      <span v-else class="reader-label">
+        {{ props.writable ? __t('apps.arca.ui', '阅读') : __t('apps.arca.ui', '只读') }}
+      </span>
       <span class="toolbar-spacer" />
-      <span v-if="uploads" class="upload-status" role="status">上传中…</span>
+      <span v-if="uploads" class="upload-status" role="status">
+        {{ __t('apps.arca.ui', '上传中…') }}
+      </span>
       <details class="editor-file-menu">
         <summary>
-          文件
+          {{ __t('apps.arca.ui', '文件') }}
           <span aria-hidden="true">⌄</span>
         </summary>
         <div class="context-menu" @click="closeFileMenu">
-          <button type="button" @click="preview()">预览与打印</button>
-          <button type="button" @click="preview(true)">导出 HTML</button>
-          <button type="button" @click="emit('exportProject')">导出工程</button>
-          <button type="button" @click="emit('importProject')">导入工程</button>
-          <button type="button" @click="backup">备份</button>
-          <button v-if="session?.hasChanges" type="button" @click="saveCopy">另存副本</button>
+          <button type="button" @click="preview()">{{ __t('apps.arca.ui', '预览与打印') }}</button>
+          <button type="button" @click="preview(true)">
+            {{ __t('apps.arca.ui', '导出 HTML') }}
+          </button>
+          <button type="button" @click="emit('exportProject')">
+            {{ __t('apps.arca.ui', '导出工程') }}
+          </button>
+          <button type="button" @click="emit('importProject')">
+            {{ __t('apps.arca.ui', '导入工程') }}
+          </button>
+          <button type="button" @click="backup">{{ __t('apps.arca.ui', '备份') }}</button>
+          <button v-if="session?.hasChanges" type="button" @click="saveCopy">
+            {{ __t('apps.arca.ui', '另存副本') }}
+          </button>
         </div>
       </details>
     </div>
     <Teleport :to="toolbarTarget ?? 'body'" :disabled="!toolbarTarget">
       <div v-show="mode !== 'review'" class="editor-ribbon-stack">
         <div v-if="!editable" class="reader-toolbar">
-          <span>{{ writable ? '阅读模式' : '只读文稿' }}</span>
+          <span>
+            {{ writable ? __t('apps.arca.ui', '阅读模式') : __t('apps.arca.ui', '只读文稿') }}
+          </span>
           <span class="toolbar-spacer" />
-          <button @click="preview()">预览与打印</button>
-          <button @click="emit('inspect', 'outline')">大纲</button>
-          <button @click="showFind">查找</button>
+          <button @click="preview()">{{ __t('apps.arca.ui', '预览与打印') }}</button>
+          <button @click="emit('inspect', 'outline')">{{ __t('apps.arca.ui', '大纲') }}</button>
+          <button @click="showFind">{{ __t('apps.arca.ui', '查找') }}</button>
         </div>
         <fieldset v-if="editable" :key="ribbon" class="ribbon-controls" :disabled="composing">
           <template v-if="ribbon === 'home'">
             <div class="ribbon-group">
               <button
                 class="icon-button"
-                title="撤销（Ctrl+Z）"
-                aria-label="撤销"
+                :title="__t('apps.arca.ui', '撤销（Ctrl+Z）')"
+                :aria-label="__t('apps.arca.ui', '撤销')"
                 :disabled="!session?.history.length"
                 @mousedown.prevent
                 @click="session?.undo()"
@@ -1620,8 +1694,8 @@ defineExpose({
               </button>
               <button
                 class="icon-button"
-                title="重做（Ctrl+Y）"
-                aria-label="重做"
+                :title="__t('apps.arca.ui', '重做（Ctrl+Y）')"
+                :aria-label="__t('apps.arca.ui', '重做')"
                 :disabled="!session?.future.length"
                 @mousedown.prevent
                 @click="session?.redo()"
@@ -1631,7 +1705,7 @@ defineExpose({
             </div>
             <div class="ribbon-group">
               <ArcaSelect
-                aria-label="段落样式"
+                :aria-label="__t('apps.arca.ui', '段落样式')"
                 :model-value="
                   selected?.type === 'heading'
                     ? Number(selected.attributes.level) || 1
@@ -1644,7 +1718,7 @@ defineExpose({
               />
               <ArcaSelect
                 v-model="fontFamily"
-                aria-label="字体"
+                :aria-label="__t('apps.arca.ui', '字体')"
                 :options="fontOptions"
                 @change="format({ fontFamily })"
               />
@@ -1653,15 +1727,15 @@ defineExpose({
                 type="number"
                 min="8"
                 max="96"
-                title="字号"
-                aria-label="字号"
+                :title="__t('apps.arca.ui', '字号')"
+                :aria-label="__t('apps.arca.ui', '字号')"
                 @change="format({ fontSize: Math.max(8, Math.min(96, Number(fontSize) || 12)) })"
               />
             </div>
             <div class="ribbon-group mark-tools">
               <button
-                aria-label="加粗"
-                title="加粗（Ctrl+B）"
+                :aria-label="__t('apps.arca.ui', '加粗')"
+                :title="__t('apps.arca.ui', '加粗（Ctrl+B）')"
                 :aria-pressed="!!currentMarks.bold"
                 :class="{ active: currentMarks.bold }"
                 @mousedown.prevent
@@ -1670,8 +1744,8 @@ defineExpose({
                 <b>B</b>
               </button>
               <button
-                aria-label="斜体"
-                title="斜体（Ctrl+I）"
+                :aria-label="__t('apps.arca.ui', '斜体')"
+                :title="__t('apps.arca.ui', '斜体（Ctrl+I）')"
                 :aria-pressed="!!currentMarks.italic"
                 :class="{ active: currentMarks.italic }"
                 @mousedown.prevent
@@ -1680,8 +1754,8 @@ defineExpose({
                 <i>I</i>
               </button>
               <button
-                aria-label="下划线"
-                title="下划线（Ctrl+U）"
+                :aria-label="__t('apps.arca.ui', '下划线')"
+                :title="__t('apps.arca.ui', '下划线（Ctrl+U）')"
                 :aria-pressed="!!currentMarks.underline"
                 :class="{ active: currentMarks.underline }"
                 @mousedown.prevent
@@ -1690,11 +1764,13 @@ defineExpose({
                 <u>U</u>
               </button>
               <details class="ribbon-format-menu">
-                <summary aria-label="更多文字格式"><ArcaIcon name="more" :size="16" /></summary>
+                <summary :aria-label="__t('apps.arca.ui', '更多文字格式')">
+                  <ArcaIcon name="more" :size="16" />
+                </summary>
                 <div class="context-menu">
                   <button
-                    aria-label="删除线"
-                    title="删除线"
+                    :aria-label="__t('apps.arca.ui', '删除线')"
+                    :title="__t('apps.arca.ui', '删除线')"
                     :aria-pressed="!!currentMarks.strike"
                     :class="{ active: currentMarks.strike }"
                     @mousedown.prevent
@@ -1703,20 +1779,20 @@ defineExpose({
                     <s>S</s>
                   </button>
                   <label>
-                    文字颜色
+                    {{ __t('apps.arca.ui', '文字颜色') }}
                     <input
                       v-model="color"
                       type="color"
-                      aria-label="文字颜色"
+                      :aria-label="__t('apps.arca.ui', '文字颜色')"
                       @change="format({ color })"
                     />
                   </label>
                   <label>
-                    高亮颜色
+                    {{ __t('apps.arca.ui', '高亮颜色') }}
                     <input
                       v-model="highlight"
                       type="color"
-                      aria-label="高亮颜色"
+                      :aria-label="__t('apps.arca.ui', '高亮颜色')"
                       @change="format({ highlight })"
                     />
                   </label>
@@ -1728,8 +1804,8 @@ defineExpose({
                 :class="{
                   active: selected?.attributes.align === 'left' || !selected?.attributes.align,
                 }"
-                title="左对齐"
-                aria-label="左对齐"
+                :title="__t('apps.arca.ui', '左对齐')"
+                :aria-label="__t('apps.arca.ui', '左对齐')"
                 @mousedown.prevent
                 @click="attributes({ align: 'left' })"
               >
@@ -1737,8 +1813,8 @@ defineExpose({
               </button>
               <button
                 :class="{ active: selected?.attributes.align === 'center' }"
-                title="居中"
-                aria-label="居中"
+                :title="__t('apps.arca.ui', '居中')"
+                :aria-label="__t('apps.arca.ui', '居中')"
                 @mousedown.prevent
                 @click="attributes({ align: 'center' })"
               >
@@ -1746,64 +1822,80 @@ defineExpose({
               </button>
               <button
                 :class="{ active: selected?.attributes.align === 'right' }"
-                title="右对齐"
-                aria-label="右对齐"
+                :title="__t('apps.arca.ui', '右对齐')"
+                :aria-label="__t('apps.arca.ui', '右对齐')"
                 @mousedown.prevent
                 @click="attributes({ align: 'right' })"
               >
                 <ArcaIcon name="alignRight" :size="16" />
               </button>
-              <button @mousedown.prevent @click="list(false)">项目符号</button>
-              <button @mousedown.prevent @click="list(true)">编号</button>
+              <button @mousedown.prevent @click="list(false)">
+                {{ __t('apps.arca.ui', '项目符号') }}
+              </button>
+              <button @mousedown.prevent @click="list(true)">
+                {{ __t('apps.arca.ui', '编号') }}
+              </button>
             </div>
             <div v-if="selected?.type === 'list-item'" class="ribbon-group">
-              <button @mousedown.prevent @click="nestList(false)">增加层级</button>
-              <button @mousedown.prevent @click="nestList(true)">减少层级</button>
+              <button @mousedown.prevent @click="nestList(false)">
+                {{ __t('apps.arca.ui', '增加层级') }}
+              </button>
+              <button @mousedown.prevent @click="nestList(true)">
+                {{ __t('apps.arca.ui', '减少层级') }}
+              </button>
             </div>
           </template>
           <template v-else-if="ribbon === 'insert'">
             <div class="ribbon-group">
-              <button @mousedown.prevent @click="fileInput?.click()">图片</button>
-              <button @mousedown.prevent @click="table">表格</button>
-              <button @mousedown.prevent @click="link">链接</button>
+              <button @mousedown.prevent @click="fileInput?.click()">
+                {{ __t('apps.arca.ui', '图片') }}
+              </button>
+              <button @mousedown.prevent @click="table">{{ __t('apps.arca.ui', '表格') }}</button>
+              <button @mousedown.prevent @click="link">{{ __t('apps.arca.ui', '链接') }}</button>
             </div>
             <div class="ribbon-group">
-              <button @mousedown.prevent @click="referenceOpen = true">引用与脚注</button>
+              <button @mousedown.prevent @click="referenceOpen = true">
+                {{ __t('apps.arca.ui', '引用与脚注') }}
+              </button>
               <button
                 :class="{ active: root.attributes.showToc }"
                 @mousedown.prevent
                 @click="
-                  edit('切换文稿目录', (content) => {
+                  edit(__t('apps.arca.ui', '切换文稿目录'), (content) => {
                     const node = content.nodes.find((node) => node.type === 'document-root')!
                     node.attributes.showToc = !node.attributes.showToc
                   })
                 "
               >
-                目录
+                {{ __t('apps.arca.ui', '目录') }}
               </button>
-              <button @mousedown.prevent @click="paragraph('quote')">引用段落</button>
-              <button @mousedown.prevent @click="paragraph('code-block')">代码块</button>
+              <button @mousedown.prevent @click="paragraph('quote')">
+                {{ __t('apps.arca.ui', '引用段落') }}
+              </button>
+              <button @mousedown.prevent @click="paragraph('code-block')">
+                {{ __t('apps.arca.ui', '代码块') }}
+              </button>
             </div>
             <div class="ribbon-group">
               <button @mousedown.prevent @click="attributes({ pageBreakBefore: true })">
-                分页符
+                {{ __t('apps.arca.ui', '分页符') }}
               </button>
               <button
                 v-if="selected?.attributes.pageBreakBefore"
                 @mousedown.prevent
                 @click="attributes({ pageBreakBefore: false })"
               >
-                移除分页符
+                {{ __t('apps.arca.ui', '移除分页符') }}
               </button>
             </div>
           </template>
           <template v-else-if="ribbon === 'layout'">
             <div class="ribbon-group">
               <label>
-                纸张
+                {{ __t('apps.arca.ui', '纸张') }}
                 <ArcaSelect
                   v-model="pageSize"
-                  aria-label="纸张"
+                  :aria-label="__t('apps.arca.ui', '纸张')"
                   :options="[
                     { value: 'A4', label: 'A4' },
                     { value: 'Letter', label: 'Letter' },
@@ -1813,15 +1905,15 @@ defineExpose({
               </label>
               <ArcaSelect
                 v-model="orientation"
-                aria-label="纸张方向"
+                :aria-label="__t('apps.arca.ui', '纸张方向')"
                 :options="[
-                  { value: 'portrait', label: '纵向' },
-                  { value: 'landscape', label: '横向' },
+                  { value: 'portrait', label: __t('apps.arca.ui', '纵向') },
+                  { value: 'landscape', label: __t('apps.arca.ui', '横向') },
                 ]"
                 @change="pageSettings"
               />
               <label>
-                页边距
+                {{ __t('apps.arca.ui', '页边距') }}
                 <input
                   v-model.number="margin"
                   type="number"
@@ -1834,34 +1926,34 @@ defineExpose({
             </div>
             <div class="ribbon-group">
               <label>
-                页眉
+                {{ __t('apps.arca.ui', '页眉') }}
                 <input
                   v-model="header"
                   class="page-text"
-                  placeholder="页眉"
+                  :placeholder="__t('apps.arca.ui', '页眉')"
                   @change="pageSettings"
                 />
               </label>
               <label>
-                页脚
+                {{ __t('apps.arca.ui', '页脚') }}
                 <input
                   v-model="footer"
                   class="page-text"
-                  placeholder="页脚"
+                  :placeholder="__t('apps.arca.ui', '页脚')"
                   @change="pageSettings"
                 />
               </label>
               <label>
                 <input v-model="pageNumbers" type="checkbox" @change="pageSettings" />
-                页码
+                {{ __t('apps.arca.ui', '页码') }}
               </label>
             </div>
             <div class="ribbon-group">
               <button :disabled="!activeId" @mousedown.prevent @click="move(activeId, -1)">
-                上移
+                {{ __t('apps.arca.ui', '上移') }}
               </button>
               <button :disabled="!activeId" @mousedown.prevent @click="move(activeId, 1)">
-                下移
+                {{ __t('apps.arca.ui', '下移') }}
               </button>
             </div>
           </template>
@@ -1869,33 +1961,42 @@ defineExpose({
             <div class="ribbon-group">
               <button @mousedown.prevent @click="emit('collaborate', activeId || undefined)">
                 <ArcaIcon name="sparkle" :size="16" />
-                协作修改
+                {{ __t('apps.arca.ui', '协作修改') }}
               </button>
               <button :disabled="!activeId" @mousedown.prevent @click="emit('comment', activeId)">
                 <ArcaIcon name="comment" :size="16" />
-                添加评论
+                {{ __t('apps.arca.ui', '添加评论') }}
               </button>
             </div>
             <div class="ribbon-group">
               <button @click="emit('inspect', 'review')">
                 <ArcaIcon name="compare" :size="16" />
-                待审修改
+                {{ __t('apps.arca.ui', '待审修改') }}
               </button>
               <button @click="emit('inspect', 'revisions')">
                 <ArcaIcon name="clock" :size="16" />
-                历史版本
+                {{ __t('apps.arca.ui', '历史版本') }}
               </button>
-              <button @click="emit('inspect', 'activity')">协作活动</button>
+              <button @click="emit('inspect', 'activity')">
+                {{ __t('apps.arca.ui', '协作活动') }}
+              </button>
             </div>
           </template>
           <span class="toolbar-spacer" />
           <div class="ribbon-group">
-            <button :disabled="!selected" @click="emit('inspect', 'properties')">属性</button>
+            <button :disabled="!selected" @click="emit('inspect', 'properties')">
+              {{ __t('apps.arca.ui', '属性') }}
+            </button>
             <button @click="emit('inspect', 'outline')">
               <ArcaIcon name="panel" :size="16" />
-              大纲
+              {{ __t('apps.arca.ui', '大纲') }}
             </button>
-            <button class="icon-button" title="查找" aria-label="查找" @click="showFind">
+            <button
+              class="icon-button"
+              :title="__t('apps.arca.ui', '查找')"
+              :aria-label="__t('apps.arca.ui', '查找')"
+              @click="showFind"
+            >
               <ArcaIcon name="search" :size="16" />
             </button>
           </div>
@@ -1904,37 +2005,61 @@ defineExpose({
           v-if="cell && editable"
           class="table-contextbar"
           :disabled="composing"
-          aria-label="表格工具"
+          :aria-label="__t('apps.arca.ui', '表格工具')"
         >
-          <span>表格</span>
-          <button @mousedown.prevent @click="changeTable('row')">插入行</button>
-          <button @mousedown.prevent @click="changeTable('column')">插入列</button>
-          <button @mousedown.prevent @click="changeTable('merge-right')">向右合并</button>
-          <button @mousedown.prevent @click="changeTable('merge-down')">向下合并</button>
-          <button @mousedown.prevent @click="changeTable('split')">拆分</button>
-          <button @mousedown.prevent @click="changeTable('delete-row')">删除行</button>
-          <button @mousedown.prevent @click="changeTable('delete-column')">删除列</button>
+          <span>{{ __t('apps.arca.ui', '表格') }}</span>
+          <button @mousedown.prevent @click="changeTable('row')">
+            {{ __t('apps.arca.ui', '插入行') }}
+          </button>
+          <button @mousedown.prevent @click="changeTable('column')">
+            {{ __t('apps.arca.ui', '插入列') }}
+          </button>
+          <button @mousedown.prevent @click="changeTable('merge-right')">
+            {{ __t('apps.arca.ui', '向右合并') }}
+          </button>
+          <button @mousedown.prevent @click="changeTable('merge-down')">
+            {{ __t('apps.arca.ui', '向下合并') }}
+          </button>
+          <button @mousedown.prevent @click="changeTable('split')">
+            {{ __t('apps.arca.ui', '拆分') }}
+          </button>
+          <button @mousedown.prevent @click="changeTable('delete-row')">
+            {{ __t('apps.arca.ui', '删除行') }}
+          </button>
+          <button @mousedown.prevent @click="changeTable('delete-column')">
+            {{ __t('apps.arca.ui', '删除列') }}
+          </button>
         </fieldset>
         <div v-if="findOpen" class="find-bar">
           <input
             ref="findInput"
             v-model="findText"
             type="search"
-            aria-label="查找（区分大小写）"
-            placeholder="查找"
+            :aria-label="__t('apps.arca.ui', '查找（区分大小写）')"
+            :placeholder="__t('apps.arca.ui', '查找')"
             @input="searchIndex = 0"
             @keydown.enter.prevent="findNext"
             @keydown.esc.stop="findOpen = false"
           />
-          <span>{{ matches.length }} 处</span>
-          <button :disabled="!matches.length" @click="findNext">下一处</button>
+          <span>{{ matches.length }} {{ __t('apps.arca.ui', '处') }}</span>
+          <button :disabled="!matches.length" @click="findNext">
+            {{ __t('apps.arca.ui', '下一处') }}
+          </button>
           <template v-if="editable">
-            <input v-model="replacementText" aria-label="替换为" placeholder="替换为" />
+            <input
+              v-model="replacementText"
+              :aria-label="__t('apps.arca.ui', '替换为')"
+              :placeholder="__t('apps.arca.ui', '替换为')"
+            />
             <button :disabled="!matches.length || composing" @mousedown.prevent @click="replaceAll">
-              全部替换
+              {{ __t('apps.arca.ui', '全部替换') }}
             </button>
           </template>
-          <button class="icon-button" aria-label="关闭查找" @click="findOpen = false">
+          <button
+            class="icon-button"
+            :aria-label="__t('apps.arca.ui', '关闭查找')"
+            @click="findOpen = false"
+          >
             <ArcaIcon name="close" :size="16" />
           </button>
         </div>
@@ -1942,11 +2067,13 @@ defineExpose({
     </Teleport>
     <div v-if="message || session?.error" class="office-message" role="status">
       <span>{{ message || session?.error }}</span>
-      <button @click="flush().catch((error) => (message = String(error)))">重试保存</button>
-      <button @click="reload()">重新读取</button>
+      <button @click="flush().catch((error) => (message = String(error)))">
+        {{ __t('apps.arca.ui', '重试保存') }}
+      </button>
+      <button @click="reload()">{{ __t('apps.arca.ui', '重新读取') }}</button>
       <button
         class="icon-button"
-        aria-label="关闭提示"
+        :aria-label="__t('apps.arca.ui', '关闭提示')"
         @click="
           () => {
             message = ''
@@ -1986,13 +2113,13 @@ defineExpose({
           <h1
             v-if="!hasDocumentTitle"
             class="office-document-title"
-            title="双击重命名"
+            :title="__t('apps.arca.ui', '双击重命名')"
             @dblclick="emit('rename')"
           >
             {{ content.title }}
           </h1>
-          <nav v-if="root.attributes.showToc" aria-label="文稿目录">
-            <strong>目录</strong>
+          <nav v-if="root.attributes.showToc" :aria-label="__t('apps.arca.ui', '文稿目录')">
+            <strong>{{ __t('apps.arca.ui', '目录') }}</strong>
             <ol>
               <li
                 v-for="heading in headings"
@@ -2000,7 +2127,7 @@ defineExpose({
                 :style="{ marginLeft: `${(Number(heading.attributes.level) || 1) - 1}em` }"
               >
                 <a :href="`#node-${heading.nodeId}`" @click.prevent="navigate(heading.nodeId)">
-                  {{ heading.text || '未命名章节' }}
+                  {{ heading.text || __t('apps.arca.ui', '未命名章节') }}
                 </a>
               </li>
             </ol>
@@ -2028,10 +2155,10 @@ defineExpose({
             type="button"
             @click="insert()"
           >
-            开始输入正文
+            {{ __t('apps.arca.ui', '开始输入正文') }}
           </button>
-          <section v-if="references.length" aria-label="参考资料与脚注">
-            <h2>参考资料与脚注</h2>
+          <section v-if="references.length" :aria-label="__t('apps.arca.ui', '参考资料与脚注')">
+            <h2>{{ __t('apps.arca.ui', '参考资料与脚注') }}</h2>
             <ol>
               <li
                 v-for="reference in references"
@@ -2046,7 +2173,7 @@ defineExpose({
                   target="_blank"
                   rel="noopener noreferrer"
                 >
-                  查看来源
+                  {{ __t('apps.arca.ui', '查看来源') }}
                 </a>
                 <p v-if="reference.note">{{ reference.note }}</p>
               </li>
@@ -2069,92 +2196,117 @@ defineExpose({
         class="selection-toolbar"
         :style="selectionPosition"
         role="toolbar"
-        aria-label="选中文字工具"
+        :aria-label="__t('apps.arca.ui', '选中文字工具')"
         @mousedown.prevent
       >
-        <button aria-label="加粗" :aria-pressed="!!currentMarks.bold" @click="toggleMark('bold')">
+        <button
+          :aria-label="__t('apps.arca.ui', '加粗')"
+          :aria-pressed="!!currentMarks.bold"
+          @click="toggleMark('bold')"
+        >
           <b>B</b>
         </button>
         <button
-          aria-label="斜体"
+          :aria-label="__t('apps.arca.ui', '斜体')"
           :aria-pressed="!!currentMarks.italic"
           @click="toggleMark('italic')"
         >
           <i>I</i>
         </button>
         <button
-          aria-label="下划线"
+          :aria-label="__t('apps.arca.ui', '下划线')"
           :aria-pressed="!!currentMarks.underline"
           @click="toggleMark('underline')"
         >
           <u>U</u>
         </button>
-        <button :disabled="!activeId" @click="emit('comment', activeId)">评论</button>
-        <button @click="emit('collaborate', activeId || undefined)">协作</button>
+        <button :disabled="!activeId" @click="emit('comment', activeId)">
+          {{ __t('apps.arca.ui', '评论') }}
+        </button>
+        <button @click="emit('collaborate', activeId || undefined)">
+          {{ __t('apps.arca.ui', '协作') }}
+        </button>
       </div>
     </Teleport>
-    <ArcaDialog :open="linkOpen" title="链接" @close="linkOpen = false">
+    <ArcaDialog :open="linkOpen" :title="__t('apps.arca.ui', '链接')" @close="linkOpen = false">
       <form id="office-link" class="form-stack" @submit.prevent="applyLink()">
         <label>
-          地址
+          {{ __t('apps.arca.ui', '地址') }}
           <input v-model="linkValue" placeholder="https://" />
         </label>
         <p v-if="linkError" class="form-error">{{ linkError }}</p>
       </form>
       <template #footer>
-        <button @click="applyLink(true)">移除链接</button>
-        <button class="primary-button" type="submit" form="office-link">应用</button>
+        <button @click="applyLink(true)">{{ __t('apps.arca.ui', '移除链接') }}</button>
+        <button class="primary-button" type="submit" form="office-link">
+          {{ __t('apps.arca.ui', '应用') }}
+        </button>
       </template>
     </ArcaDialog>
-    <ArcaDialog :open="referenceOpen" title="引用与脚注" @close="referenceOpen = false">
+    <ArcaDialog
+      :open="referenceOpen"
+      :title="__t('apps.arca.ui', '引用与脚注')"
+      @close="referenceOpen = false"
+    >
       <form id="office-reference" class="form-stack" @submit.prevent="addReference">
         <label>
-          标题
+          {{ __t('apps.arca.ui', '标题') }}
           <input v-model="referenceTitle" required />
         </label>
         <label>
-          来源
-          <input v-model="referenceUrl" type="url" placeholder="可选" />
+          {{ __t('apps.arca.ui', '来源') }}
+          <input v-model="referenceUrl" type="url" :placeholder="__t('apps.arca.ui', '可选')" />
         </label>
         <label>
-          脚注
-          <textarea v-model="referenceNote" rows="3" placeholder="可选" />
+          {{ __t('apps.arca.ui', '脚注') }}
+          <textarea v-model="referenceNote" rows="3" :placeholder="__t('apps.arca.ui', '可选')" />
         </label>
         <p v-if="message" class="form-error">{{ message }}</p>
       </form>
       <template #footer>
-        <button @click="referenceOpen = false">取消</button>
+        <button @click="referenceOpen = false">{{ __t('apps.arca.ui', '取消') }}</button>
         <button
           class="primary-button"
           type="submit"
           form="office-reference"
           :disabled="!referenceTitle.trim()"
         >
-          插入
+          {{ __t('apps.arca.ui', '插入') }}
         </button>
       </template>
     </ArcaDialog>
-    <ArcaDialog :open="reloadOpen" title="重新读取文稿？" @close="reloadOpen = false">
-      <p>当前未保存的草稿将被替换。</p>
+    <ArcaDialog
+      :open="reloadOpen"
+      :title="__t('apps.arca.ui', '重新读取文稿？')"
+      @close="reloadOpen = false"
+    >
+      <p>{{ __t('apps.arca.ui', '当前未保存的草稿将被替换。') }}</p>
       <template #footer>
-        <button @click="backup">备份</button>
-        <button @click="reloadOpen = false">取消</button>
-        <button class="danger-button" @click="reload(true)">重新读取</button>
+        <button @click="backup">{{ __t('apps.arca.ui', '备份') }}</button>
+        <button @click="reloadOpen = false">{{ __t('apps.arca.ui', '取消') }}</button>
+        <button class="danger-button" @click="reload(true)">
+          {{ __t('apps.arca.ui', '重新读取') }}
+        </button>
       </template>
     </ArcaDialog>
-    <ArcaDialog :open="Boolean(previewHtml)" title="预览" wide @close="previewHtml = ''">
+    <ArcaDialog
+      :open="Boolean(previewHtml)"
+      :title="__t('apps.arca.ui', '预览')"
+      wide
+      @close="previewHtml = ''"
+    >
       <iframe
         ref="previewFrame"
         class="history-preview"
-        title="文稿预览"
+        :title="__t('apps.arca.ui', '文稿预览')"
         sandbox="allow-same-origin allow-modals"
         :srcdoc="previewHtml"
         @load="previewReady = true"
       />
       <template #footer>
-        <button @click="previewHtml = ''">关闭</button>
+        <button @click="previewHtml = ''">{{ __t('apps.arca.ui', '关闭') }}</button>
         <button class="primary-button" :disabled="!previewReady" @click="printPreview">
-          打印 / PDF
+          {{ __t('apps.arca.ui', '打印 / PDF') }}
         </button>
       </template>
     </ArcaDialog>

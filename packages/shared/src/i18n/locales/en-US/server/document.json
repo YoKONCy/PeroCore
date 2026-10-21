@@ -1,0 +1,10 @@
+{
+  "工作表名称不能重复": "worksheet name cannot be repeated",
+  "单次最多导出 50000 个单元格": "can export up to 50,000 cells at a time",
+  "工作表名称不能以单引号开头或结尾": "The worksheet name cannot start or end with a single quotation mark",
+  "请提供 source": "Please provide source",
+  "请提供导出格式": "Please provide the export format",
+  "source、content 和 workbook 必须且只能提供一个": "source, content and workbook must and can only provide one",
+  "workbook 仅用于 XLSX 导出": "workbook only for XLSX export",
+  "Chromium 仅用于 PDF 导出": "Chromium only for PDF export"
+}

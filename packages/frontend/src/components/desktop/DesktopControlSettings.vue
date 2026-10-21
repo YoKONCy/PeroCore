@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import { onBeforeUnmount, onDeactivated, ref } from 'vue'
 import { useDesktopControl } from '../../composables/useDesktopControl'
 import { invoke } from '../../utils/ipcAdapter'
@@ -57,19 +59,19 @@ onDeactivated(() => {
   <PCard v-if="supported" pixel padding="lg" overflow-visible>
     <h3 class="desktop-settings-title">
       <PixelIcon name="monitor" size="sm" />
-      桌面操作
+      {{ __t('ui.desktop', '桌面操作') }}
     </h3>
     <div class="desktop-settings-row">
       <div>
-        <strong>允许桌面操作</strong>
-        <p>用户操作鼠标键盘时暂停，继续后重新观察界面。</p>
+        <strong>{{ __t('ui.desktop', '允许桌面操作') }}</strong>
+        <p>{{ __t('ui.desktop', '用户操作鼠标键盘时暂停，继续后重新观察界面。') }}</p>
       </div>
       <PSwitch :model-value="settings.enabled" @update:model-value="update({ enabled: $event })" />
     </div>
     <div class="desktop-settings-row">
-      <label>停止快捷键</label>
+      <label>{{ __t('ui.desktop', '停止快捷键') }}</label>
       <PButton variant="ghost" @click="beginCapture" @keydown="capture" @blur="endCapture">
-        {{ capturing ? '按下快捷键…' : settings.stopShortcut }}
+        {{ capturing ? __t('ui.desktop', '按下快捷键…') : settings.stopShortcut }}
       </PButton>
     </div>
     <p v-if="error || captureError" role="alert">{{ error || captureError }}</p>

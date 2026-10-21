@@ -5,47 +5,40 @@ import {
   EventMemoryFallbackService,
   type EventMemoryFallbackOptions,
 } from '@infos/backend/services/memory/eventMemoryFallbackService'
+import type { EventNoteDraftInput } from '@infos/shared'
 
 afterEach(() => vi.restoreAllMocks())
 
-function message(id: number, pairId: string, content: string) {
-  return {
-    id,
+function rounds(count: number) {
+  return Array.from({ length: count * 2 }, (_, index) => ({
+    id: index + 1,
     threadId: 'thread-1',
-    role: id % 2 ? 'user' : 'assistant',
-    content,
+    role: index % 2 ? 'assistant' : 'user',
+    content: `第${Math.floor(index / 2) + 1}轮${index % 2 ? '回复' : '问题'}`,
     rawContent: null,
-    pairId,
+    pairId: `pair-${Math.floor(index / 2) + 1}`,
     senderId: null,
     agentId: 'pero',
     metadataJson: '{}',
     scorerStatus: 'pending',
     revision: 0,
-    timestamp: new Date(2026, 7, 27, 12, 0, id).toISOString(),
+    timestamp: new Date(2026, 9, 21, 12, 0, index).toISOString(),
     status: 'active',
-  }
+  }))
 }
 
-function rounds(count: number) {
-  return Array.from({ length: count }, (_, index) => [
-    message(index * 2 + 1, `pair-${index + 1}`, `第${index + 1}轮用户消息`),
-    message(index * 2 + 2, `pair-${index + 1}`, `第${index + 1}轮助手回复`),
-  ]).flat()
+const draft: EventNoteDraftInput = {
+  narrative: '主人和我约好了，以后每周一起复盘。',
+  importance: 6,
+  affect: { tones: ['期待'], valence: 7, arousal: 4 },
 }
 
-function fixture(extracted: unknown[] = [], options: EventMemoryFallbackOptions = {}) {
-  let time = new Date(2026, 7, 27, 12).getTime()
-  const advanceTime = (milliseconds = 60_000) => {
-    time += milliseconds
-  }
+function fixture(options: EventMemoryFallbackOptions = {}, drafts: EventNoteDraftInput[] = []) {
+  let now = new Date(2026, 9, 21, 12).getTime()
+  let messages = rounds(1)
   const timers = new Map<string, number>()
-  const operations = new Map<string, { payload: unknown }>()
   const coverage = new Set<string>()
-  const saveCoverage = vi.fn(async (value: { pairIds: string[] }) => {
-    value.pairIds.forEach((id) => coverage.add(id))
-  })
-  const create = vi.fn(async (_input: unknown, operationId: string) => ({ id: operationId }))
-  const messages = [message(1, 'pair-1', '用户消息'), message(2, 'pair-1', '助手回复')]
+  const operations = new Map<string, { payload: unknown }>()
   const repo = {
     readTimer: vi.fn(async (key: string) => timers.get(key) ?? 0),
     checkpointTimer: vi.fn(async (key: string, value: number) => {
@@ -66,438 +59,303 @@ function fixture(extracted: unknown[] = [], options: EventMemoryFallbackOptions 
     coveredPairIds: vi.fn(async () => new Set(coverage)),
     claimCoverageRange: vi.fn().mockResolvedValue(true),
     releaseCoverageClaim: vi.fn(),
-    commitCoverageUnderClaim: saveCoverage,
+    renewCoverageClaim: vi.fn(),
+    commitCoverageUnderClaim: vi.fn(async (value: { pairIds: string[] }) => {
+      value.pairIds.forEach((id) => coverage.add(id))
+    }),
     findOperation: vi.fn(async (id: string) => operations.get(id)),
-    createOperation: vi.fn(
-      async (id: string, _agentId: string, _operation: string, payload: unknown) => {
-        if (operations.has(id)) return false
-        operations.set(id, { payload })
-        return true
-      },
-    ),
+    createOperation: vi.fn(async (id: string, _agent: string, _kind: string, payload: unknown) => {
+      if (operations.has(id)) return false
+      operations.set(id, { payload })
+      return true
+    }),
     markOperationCommitted: vi.fn(),
   }
   const threads = {
     getThread: vi.fn().mockResolvedValue({ id: 'thread-1', agentId: 'pero', status: 'active' }),
     listThreads: vi.fn().mockResolvedValue({
-      items: [
-        {
-          id: 'thread-1',
-          agentId: 'pero',
-          channel: 'desktop',
-          lastMessageAt: '2026-08-27T10:00:00.000Z',
-        },
-      ],
+      items: [{ id: 'thread-1', agentId: 'pero', channel: 'desktop' }],
       total: 1,
     }),
-    queryActiveMessagePairs: vi
-      .fn<() => Promise<ReturnType<typeof message>[]>>()
-      .mockResolvedValue(messages),
-    findMessagesByPairIds: vi.fn(
-      async (_threadId: string, pairIds: string[]): Promise<ReturnType<typeof message>[]> =>
-        (await threads.queryActiveMessagePairs()).filter((item) => pairIds.includes(item.pairId)),
+    latestMemoryMessageId: vi.fn(async () => Math.max(0, ...messages.map((m) => m.id))),
+    queryMemoryMessagesThrough: vi.fn(async (_thread: string, fence: number) =>
+      messages.filter((m) => m.id <= fence),
+    ),
+    findMessagesByPairIds: vi.fn(async (_thread: string, pairs: string[]) =>
+      messages.filter((m) => pairs.includes(m.pairId)),
     ),
   }
-  const extractor = {
-    extract: vi
-      .fn<(input: { messages: ReturnType<typeof message>[] }) => Promise<unknown[]>>()
-      .mockResolvedValue(extracted),
-  }
+  const extractor = { extract: vi.fn().mockResolvedValue(drafts) }
+  const create = vi.fn(async (_input: unknown, id: string) => ({ id }))
   const restart = () =>
     new EventMemoryFallbackService(
       repo as never,
       threads as never,
       { create } as never,
-      extractor as never,
+      extractor,
       {
-        agentSilenceSeconds: 60,
-        threadIdleSeconds: 120,
+        intervalSeconds: 60,
         safeInputTokens: 24_000,
-        now: () => new Date(time),
+        now: () => new Date(now),
         ...options,
       },
     )
+  const service = restart()
+  const advance = (seconds: number) => {
+    now += seconds * 1000
+  }
+  const online = async (seconds: number, current = service, agents = ['pero']) => {
+    while (seconds > 0) {
+      const step = Math.min(30, seconds)
+      advance(step)
+      await current.checkpointRuntime(agents)
+      seconds -= step
+    }
+  }
   return {
-    service: restart(),
+    service,
     repo,
-    extractor,
-    saveCoverage,
-    create,
     threads,
-    advanceTime,
+    extractor,
+    create,
+    timers,
+    coverage,
+    advance,
+    online,
     restart,
+    setMessages: (value: ReturnType<typeof rounds>) => {
+      messages = value
+    },
   }
 }
 
-describe('EventMemoryFallbackService动态兜底', () => {
-  it('后台开关关闭时不扫描对话，重新开启后正常恢复提炼', async () => {
-    const background = new MemoryBackgroundControl()
-    background.setEnabled(false)
-    const { service, threads, extractor } = fixture([], { background })
-    threads.queryActiveMessagePairs.mockResolvedValue(rounds(8))
-    await service.tick(['pero'])
-    expect(threads.listThreads).not.toHaveBeenCalled()
-    expect(extractor.extract).not.toHaveBeenCalled()
-    background.setEnabled(true)
-    await service.tick(['pero'])
-    expect(extractor.extract).toHaveBeenCalledOnce()
+describe('Agent 累计在线八小时补记', () => {
+  it('八小时之前再多轮数、再长正文和日界都不能提前触发', async () => {
+    const f = fixture({ intervalSeconds: 8 * 60 * 60, safeInputTokens: 500 })
+    f.setMessages(rounds(100))
+    await f.service.tick(['pero'])
+    await f.online(8 * 60 * 60 - 30)
+    await f.service.tick(['pero'])
+    expect(f.extractor.extract).not.toHaveBeenCalled()
+    await f.online(30)
+    await f.service.tick(['pero'])
+    expect(f.extractor.extract).toHaveBeenCalled()
+    expect(f.coverage.size).toBe(100)
   })
 
-  it('关闭期间迟到的提炼结果不能写入记忆，也不能标记原对话已覆盖', async () => {
-    const background = new MemoryBackgroundControl()
-    const { service, threads, extractor, create, saveCoverage, repo } = fixture([], { background })
-    threads.queryActiveMessagePairs.mockResolvedValue(rounds(8))
-    let complete!: (drafts: unknown[]) => void
-    extractor.extract.mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          complete = resolve
-        }),
-    )
-    const processing = service.tick(['pero'])
-    await vi.waitFor(() => expect(extractor.extract).toHaveBeenCalledOnce())
-    background.setEnabled(false)
-    complete([{ narrative: '迟到的结果' }])
-    await processing
-    expect(create).not.toHaveBeenCalled()
-    expect(saveCoverage).not.toHaveBeenCalled()
-    expect(repo.releaseCoverageClaim).toHaveBeenCalledOnce()
+  it('关机和进程重启保留累计值，但离线十二小时不能推进计时', async () => {
+    const f = fixture({ intervalSeconds: 8 * 60 * 60 })
+    await f.online(4 * 60 * 60)
+    f.advance(12 * 60 * 60)
+    const restarted = f.restart()
+    await restarted.tick(['pero'])
+    expect(f.timers.get('background-runtime:pero')).toBe(4 * 60 * 60)
+    expect(f.extractor.extract).not.toHaveBeenCalled()
+    await f.online(4 * 60 * 60, restarted)
+    await restarted.tick(['pero'])
+    expect(f.extractor.extract).toHaveBeenCalledOnce()
   })
 
-  it('只提炼真正滑出窗口的完整旧轮次，保留窗口内的新对话', async () => {
-    const { service, repo, extractor, threads } = fixture([])
-    const messages = [...rounds(12), message(25, 'pair-13', '当前问题')]
-    threads.queryActiveMessagePairs.mockResolvedValue(messages)
-    threads.findMessagesByPairIds.mockImplementation(async (_threadId: string, pairIds: string[]) =>
-      messages.filter((item) => pairIds.includes(item.pairId)),
-    )
+  it('系统挂起的大间隔不算在线运行，恢复后从原累计值接续', async () => {
+    const f = fixture()
+    await f.online(30)
+    f.advance(6 * 60 * 60)
+    await f.service.tick(['pero'])
+    expect(f.timers.get('background-runtime:pero')).toBe(30)
+    expect(f.extractor.extract).not.toHaveBeenCalled()
+    await f.online(30)
+    await f.service.tick(['pero'])
+    expect(f.extractor.extract).toHaveBeenCalledOnce()
+  })
 
-    await service.ensureContextWindowCoverage({
-      agentId: 'pero',
-      threadId: 'thread-1',
-      channel: 'desktop',
-      contextPairs: 5,
-    })
-
-    const expectedPairs = Array.from({ length: 8 }, (_, index) => `pair-${index + 1}`)
-    expect(repo.claimCoverageRange).toHaveBeenCalledTimes(1)
-    expect(repo.claimCoverageRange).toHaveBeenCalledWith(
-      expect.objectContaining({ pairIds: expectedPairs }),
-    )
-    expect(extractor.extract).toHaveBeenCalledTimes(1)
-    expect(extractor.extract).toHaveBeenCalledWith(
-      expect.objectContaining({
-        messages: expect.arrayContaining(
-          expectedPairs.map((pairId) => expect.objectContaining({ pairId })),
-        ),
-      }),
-    )
+  it('主动记录只排除对应轮次，不重置独立的八小时计时', async () => {
+    const f = fixture()
+    f.setMessages(rounds(2))
+    await f.online(30)
+    f.coverage.add('pair-1')
+    await f.repo.resetTimer('agent-silence:pero')
+    await f.online(30)
+    await f.service.tick(['pero'])
+    expect(f.extractor.extract).toHaveBeenCalledOnce()
     expect(
-      extractor.extract.mock.calls[0]?.[0]?.messages.some((item: { pairId: string }) =>
-        ['pair-9', 'pair-10', 'pair-11', 'pair-12', 'pair-13'].includes(item.pairId),
-      ),
-    ).toBe(false)
+      f.extractor.extract.mock.calls[0]![0].messages.map((m: { pairId: string }) => m.pairId),
+    ).toEqual(['pair-2', 'pair-2'])
+    expect(f.timers.get('background-runtime:pero')).toBe(60)
   })
 
-  it('窗口满后连续七轮对话不应逐轮炼化，第八轮才审阅旧批次', async () => {
-    const { service, extractor, threads } = fixture([])
-    for (let evicted = 0; evicted <= 8; evicted++) {
-      threads.queryActiveMessagePairs.mockResolvedValue(rounds(5 + evicted))
-      await service.ensureContextWindowCoverage({
-        agentId: 'pero',
-        threadId: 'thread-1',
-        channel: 'desktop',
-        contextPairs: 5,
-      })
-      if (evicted < 8) expect(extractor.extract).not.toHaveBeenCalled()
-    }
-    expect(extractor.extract).toHaveBeenCalledTimes(1)
-    expect(
-      new Set(extractor.extract.mock.calls[0]![0].messages.map((item) => item.pairId)),
-    ).toEqual(new Set(Array.from({ length: 8 }, (_, index) => `pair-${index + 1}`)))
-  })
-
-  it('已覆盖的旧轮次不应重提炼，窗口内对话也不能被捞入凑数', async () => {
-    const { service, repo, extractor, threads } = fixture([])
-    const messages = rounds(14)
-    threads.queryActiveMessagePairs.mockResolvedValue(messages)
-    threads.findMessagesByPairIds.mockImplementation(async (_threadId: string, pairIds: string[]) =>
-      messages.filter((item) => pairIds.includes(item.pairId)),
+  it('返回空事件也持久标记已审阅，后续周期不会重复调用模型', async () => {
+    const f = fixture()
+    await f.online(60)
+    await f.service.tick(['pero'])
+    expect(f.repo.commitCoverageUnderClaim).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: 'reviewed_no_event' }),
+      expect.any(String),
     )
-    repo.coveredPairIds.mockResolvedValue(new Set(['pair-1']))
+    await f.online(60)
+    await f.restart().tick(['pero'])
+    expect(f.extractor.extract).toHaveBeenCalledOnce()
+  })
 
-    await service.ensureContextWindowCoverage({
-      agentId: 'pero',
-      threadId: 'thread-1',
-      channel: 'desktop',
-      contextPairs: 5,
+  it('补记只处理周期边界前的消息，执行期间的新消息留给下一周期', async () => {
+    const f = fixture()
+    f.extractor.extract.mockImplementationOnce(async () => {
+      f.setMessages(rounds(2))
+      return []
     })
-
-    expect(extractor.extract).toHaveBeenCalledTimes(1)
-    const extractedMessages = extractor.extract.mock.calls[0]?.[0]?.messages ?? []
-    expect(extractedMessages.some((item: { pairId: string }) => item.pairId === 'pair-1')).toBe(
-      false,
-    )
-    expect(extractedMessages.some((item: { pairId: string }) => item.pairId === 'pair-9')).toBe(
-      true,
-    )
-    expect(extractedMessages.some((item: { pairId: string }) => item.pairId === 'pair-10')).toBe(
-      false,
-    )
+    await f.online(60)
+    await f.service.tick(['pero'])
+    expect(f.coverage).toEqual(new Set(['pair-1']))
+    await f.service.tick(['pero'])
+    expect(f.extractor.extract).toHaveBeenCalledOnce()
+    await f.online(60)
+    await f.service.tick(['pero'])
+    expect(f.coverage).toEqual(new Set(['pair-1', 'pair-2']))
   })
 
-  it('有效运行静默达到阈值后应审阅连续未覆盖区间，并用reviewed_no_event推进Coverage', async () => {
-    const { service, extractor, saveCoverage, create, advanceTime } = fixture([])
-    await service.tick(['pero'])
-    advanceTime()
-    await service.tick(['pero'])
-
-    expect(extractor.extract).toHaveBeenCalledWith(
-      expect.objectContaining({
-        agentId: 'pero',
-        threadId: 'thread-1',
-        messages: expect.arrayContaining([expect.objectContaining({ content: '用户消息' })]),
-      }),
-    )
-    expect(saveCoverage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        outcome: 'reviewed_no_event',
-        pairIds: ['pair-1'],
-        eventNoteIds: [],
-        mode: 'background',
-      }),
-      expect.stringContaining('background:'),
-    )
-    expect(create).not.toHaveBeenCalled()
-  })
-
-  it('后台提取事件时应写入background来源且不重置主动静默语义', async () => {
-    const draft = {
-      narrative: '我和用户确认了重要事项。',
-      importance: 8,
-      affect: { tones: ['认真'], valence: 7, arousal: 6 },
-    }
-    const { service, create, saveCoverage, advanceTime } = fixture([draft])
-    await service.tick(['pero'])
-    advanceTime()
-    await service.tick(['pero'])
-
-    expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        narrative: draft.narrative,
-        origin: expect.objectContaining({ mode: 'background', pairIds: ['pair-1'] }),
-      }),
-      expect.stringContaining('background:'),
-      { deferCoverage: true, signal: expect.any(AbortSignal) },
-    )
-    expect(saveCoverage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        outcome: 'event_recorded',
-        eventNoteIds: expect.any(Array),
-      }),
-      expect.stringContaining('background:'),
-    )
-  })
-
-  it('Claim冲突时不得调用后台模型', async () => {
-    const { service, repo, extractor, advanceTime } = fixture([])
-    repo.claimCoverageRange.mockResolvedValue(false)
-    await service.tick(['pero'])
-    advanceTime()
-    await service.tick(['pero'])
-
-    expect(extractor.extract).not.toHaveBeenCalled()
-  })
-
-  it('被已覆盖Pair分隔的未覆盖区间不得拼接', async () => {
-    const { service, repo, extractor, threads, advanceTime } = fixture([])
-    const messages = rounds(3)
-    threads.queryActiveMessagePairs.mockResolvedValue(messages)
-    threads.findMessagesByPairIds.mockImplementation(async (_threadId: string, pairIds: string[]) =>
-      messages.filter((item) => pairIds.includes(item.pairId)),
-    )
-    repo.coveredPairIds.mockResolvedValue(new Set(['pair-2']))
-
-    await service.tick(['pero'])
-    advanceTime()
-    await service.tick(['pero'])
-
-    expect(extractor.extract).toHaveBeenCalledTimes(2)
-    expect(repo.claimCoverageRange).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({ pairIds: ['pair-1'] }),
-    )
-    expect(repo.claimCoverageRange).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({ pairIds: ['pair-3'] }),
-    )
-  })
-
-  it('按公开模型容量分批且保持每个 Pair 完整和所有正文不丢失', async () => {
-    // 此处验证容量分批，Tokenizer 本身由独立用例覆盖。
+  it('容量不足时自动拆成多批，所有正文按序保留且超长单轮最后才提交覆盖', async () => {
     vi.spyOn(tokenCounter, 'countTokens').mockImplementation((text) => text.length)
-    const { service, threads, extractor } = fixture([], {
-      safeInputTokens: 0,
-      getModelConfig: async () => ({
-        provider: 'openai',
-        modelId: 'test',
-        apiKey: '',
-        contextWindowTokens: 320,
-        maxTokens: 30,
-      }),
-      reservedPromptTokens: 40,
-      reservedOutputTokens: 20,
-      capacityRatio: 0.8,
-    })
-    const messages = Array.from({ length: 6 }, (_, index) =>
-      message(index + 1, 'pair-' + Math.floor(index / 2), `记录${index + 1}：${'记忆'.repeat(30)}`),
-    )
-    threads.queryActiveMessagePairs.mockResolvedValue(messages)
-    threads.findMessagesByPairIds.mockImplementation(async (_threadId: string, pairIds: string[]) =>
-      messages.filter((item) => pairIds.includes(item.pairId)),
-    )
-    await service.tick(['pero'])
-    const batches = extractor.extract.mock.calls.map(([input]) => input.messages)
-    expect(batches.length).toBeGreaterThan(1)
-    expect(batches.flat().map((item) => item.content)).toEqual(messages.map((item) => item.content))
-    for (let pair = 0; pair < 3; pair++) {
-      const containing = batches.filter((batch) =>
-        batch.some((item) => item.pairId === 'pair-' + pair),
-      )
-      expect(containing).toHaveLength(1)
-      expect(containing[0]!.filter((item) => item.pairId === 'pair-' + pair)).toHaveLength(2)
-    }
-    // (320 - 40 - max(20, 30)) × 0.8 = 200。
-    for (const batch of batches)
-      expect(
-        batch.reduce((sum, item) => sum + tokenCounter.countTokens(item.content), 0),
-      ).toBeLessThanOrEqual(200)
-  })
-
-  it('主动写记忆重置计时后，下一轮累加不能恢复旧的静默时间', async () => {
-    const { service, repo, extractor, advanceTime } = fixture([], {
-      agentSilenceSeconds: 120,
-      threadIdleSeconds: 10_000,
-    })
-    await service.tick(['pero'])
-    advanceTime()
-    await service.tick(['pero'])
-    await repo.resetTimer('agent-silence:pero')
-    advanceTime()
-    await service.tick(['pero'])
-    expect(await repo.readTimer('agent-silence:pero')).toBe(60)
-    expect(extractor.extract).not.toHaveBeenCalled()
-  })
-
-  it('无事件审阅也进入冷却，重启服务后新的一轮对话不会立即再炼化', async () => {
-    const { service, restart, extractor, threads, advanceTime } = fixture([])
-    await service.tick(['pero'])
-    advanceTime()
-    await service.tick(['pero'])
-    expect(extractor.extract).toHaveBeenCalledTimes(1)
-    threads.queryActiveMessagePairs.mockResolvedValue(rounds(2))
-    advanceTime()
-    const restarted = restart()
-    await restarted.tick(['pero'])
-    expect(extractor.extract).toHaveBeenCalledTimes(1)
-    advanceTime(60 * 60_000)
-    await restarted.tick(['pero'])
-    expect(extractor.extract).toHaveBeenCalledTimes(2)
-  })
-
-  it('失败退避跨服务重启保留，冷却期间新对话不能绕过它', async () => {
-    const { service, restart, extractor, threads, advanceTime, saveCoverage } = fixture([])
-    extractor.extract.mockRejectedValueOnce(new Error('模型暂不可用'))
-    await service.tick(['pero'])
-    advanceTime()
-    await service.tick(['pero'])
-    expect(saveCoverage).not.toHaveBeenCalled()
-    threads.queryActiveMessagePairs.mockResolvedValue(rounds(2))
-    advanceTime()
-    const restarted = restart()
-    await restarted.tick(['pero'])
-    expect(extractor.extract).toHaveBeenCalledTimes(1)
-    advanceTime(5 * 60_000)
-    await restarted.tick(['pero'])
-    expect(extractor.extract).toHaveBeenCalledTimes(2)
-    expect(saveCoverage).toHaveBeenCalled()
-  })
-
-  it('尚未收到助手回复的轮次不能提炼或标记覆盖', async () => {
-    const { service, extractor, saveCoverage, threads, advanceTime } = fixture([])
-    threads.queryActiveMessagePairs.mockResolvedValue([message(1, 'pair-1', '还在等待回复')])
-    await service.tick(['pero'])
-    advanceTime()
-    await service.tick(['pero'])
-    expect(extractor.extract).not.toHaveBeenCalled()
-    expect(saveCoverage).not.toHaveBeenCalled()
-  })
-
-  it('提炼期间消息被编辑时必须放弃旧结果并释放占用', async () => {
-    const { service, extractor, create, saveCoverage, repo, threads, advanceTime } = fixture([])
-    extractor.extract.mockImplementationOnce(async () => {
-      const edited = rounds(1)
-      edited[0]!.content = '用户刚刚修改的问题'
-      edited[0]!.revision++
-      threads.queryActiveMessagePairs.mockResolvedValue(edited)
-      return [{ narrative: '不应写入的旧事件' }]
-    })
-    await service.tick(['pero'])
-    advanceTime()
-    await service.tick(['pero'])
-    expect(create).not.toHaveBeenCalled()
-    expect(saveCoverage).not.toHaveBeenCalled()
-    expect(repo.releaseCoverageClaim).toHaveBeenCalled()
-  })
-
-  it('当天日界补记完成后，重启不能把下一轮对话再次当作日界任务', async () => {
-    const { service, restart, extractor, threads, advanceTime } = fixture([], {
-      agentSilenceSeconds: 100_000,
-      threadIdleSeconds: 100_000,
-    })
-    advanceTime(9 * 60 * 60_000)
-    await service.tick(['pero'])
-    expect(extractor.extract).toHaveBeenCalledTimes(1)
-    threads.queryActiveMessagePairs.mockResolvedValue(rounds(2))
-    advanceTime(2 * 60 * 60_000)
-    await restart().tick(['pero'])
-    expect(extractor.extract).toHaveBeenCalledTimes(1)
-  })
-
-  it('补记模型配置不完整不能阻止当前对话继续', async () => {
-    const { service, threads, extractor } = fixture([], {
-      safeInputTokens: 0,
-      getModelConfig: async () => null,
-    })
-    threads.queryActiveMessagePairs.mockResolvedValue(rounds(13))
-    await expect(
-      service.ensureContextWindowCoverage({
-        agentId: 'pero',
-        threadId: 'thread-1',
-        channel: 'desktop',
-        contextPairs: 5,
-      }),
-    ).resolves.toBeUndefined()
-    expect(extractor.extract).not.toHaveBeenCalled()
-  })
-
-  it('提炼成功但记忆写入失败后应沿用原结果，不能重复调用模型', async () => {
-    const { service, create, extractor, saveCoverage, advanceTime } = fixture([
-      {
-        narrative: '用户确认了一个需要长期保存的决定。',
-        importance: 8,
-        affect: { tones: [], valence: 5, arousal: 5 },
+    const f = fixture({ safeInputTokens: 320, capacityRatio: 1 })
+    const messages = rounds(3)
+    messages[0]!.content = '甲😀乙'.repeat(150)
+    f.setMessages(messages)
+    f.extractor.extract.mockImplementation(
+      async (input: { messages: Array<{ pairId: string }> }) => {
+        if (input.messages.some((m) => m.pairId === 'pair-1'))
+          expect(f.coverage.has('pair-1')).toBe(false)
+        return []
       },
-    ])
-    create.mockRejectedValueOnce(new Error('存储暂不可用'))
-    await service.tick(['pero'])
-    advanceTime()
-    await service.tick(['pero'])
-    expect(extractor.extract).toHaveBeenCalledTimes(1)
-    expect(saveCoverage).not.toHaveBeenCalled()
-    advanceTime(5 * 60_000)
-    await service.tick(['pero'])
-    expect(extractor.extract).toHaveBeenCalledTimes(1)
-    expect(saveCoverage).toHaveBeenCalled()
+    )
+    await f.online(60)
+    await f.service.tick(['pero'])
+    const batches = f.extractor.extract.mock.calls.map(
+      ([input]) => input.messages as typeof messages,
+    )
+    expect(batches.length).toBeGreaterThan(1)
+    for (const batch of batches) {
+      expect(batch.reduce((n, m) => n + m.content.length + 48, 0)).toBeLessThanOrEqual(320)
+      for (const m of batch) expect(m.content).not.toMatch(/^[\uDC00-\uDFFF]|[\uD800-\uDBFF]$/)
+    }
+    for (const source of messages) {
+      expect(
+        batches
+          .flat()
+          .filter((m) => m.role === source.role && m.pairId === source.pairId)
+          .map((m) => m.content)
+          .join(''),
+      ).toBe(source.content)
+    }
+    expect(f.coverage.size).toBe(3)
+  })
+
+  it('模型和人格预留参与输入预算，容量不合格时保留待处理周期', async () => {
+    const f = fixture({ safeInputTokens: 0, getModelConfig: async () => null })
+    await f.online(60)
+    await f.service.tick(['pero'])
+    expect(f.extractor.extract).not.toHaveBeenCalled()
+    expect(f.service.hasPendingWork).toBe(true)
+    expect(f.timers.get('background-reviewed-runtime:pero')).toBeUndefined()
+  })
+
+  it('相同正文的不同分片分别缓存，重启续接只复用已完成位置的结果', async () => {
+    vi.spyOn(tokenCounter, 'countTokens').mockImplementation((text) => text.length)
+    const f = fixture({ safeInputTokens: 320, capacityRatio: 1 })
+    const messages = rounds(1)
+    messages[0]!.content = '甲😀乙'.repeat(150)
+    f.setMessages(messages)
+    f.extractor.extract
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new Error('第二片段请求中断'))
+    await f.online(60)
+    await f.service.tick(['pero'])
+    expect(f.extractor.extract).toHaveBeenCalledTimes(2)
+    expect(f.extractor.extract.mock.calls[0]![0].messages).toEqual(
+      f.extractor.extract.mock.calls[1]![0].messages,
+    )
+    expect(f.coverage.size).toBe(0)
+    f.advance(5 * 60)
+    await f.restart().tick(['pero'])
+    expect(f.extractor.extract).toHaveBeenCalledTimes(4)
+    expect(f.coverage).toEqual(new Set(['pair-1']))
+  })
+
+  it('未收到完整回复的轮次不会标记已审阅，回复到达后下周期再补记', async () => {
+    const f = fixture()
+    f.setMessages(rounds(1).slice(0, 1))
+    await f.online(60)
+    await f.service.tick(['pero'])
+    expect(f.extractor.extract).not.toHaveBeenCalled()
+    f.setMessages(rounds(1))
+    await f.online(60)
+    await f.service.tick(['pero'])
+    expect(f.extractor.extract).toHaveBeenCalledOnce()
+  })
+
+  it('写入失败后的重启重用模型结果，并保留失败退避', async () => {
+    const f = fixture({}, [draft])
+    f.create.mockRejectedValueOnce(new Error('磁盘暂不可写'))
+    await f.online(60)
+    await f.service.tick(['pero'])
+    expect(f.extractor.extract).toHaveBeenCalledOnce()
+    const restarted = f.restart()
+    await restarted.tick(['pero'])
+    expect(f.create).toHaveBeenCalledOnce()
+    f.advance(5 * 60)
+    await restarted.tick(['pero'])
+    expect(f.extractor.extract).toHaveBeenCalledOnce()
+    expect(f.coverage).toEqual(new Set(['pair-1']))
+  })
+
+  it('覆盖占用冲突不调用模型，也不能把本周期错误结算为完成', async () => {
+    const f = fixture()
+    f.repo.claimCoverageRange.mockResolvedValue(false)
+    await f.online(60)
+    await f.service.tick(['pero'])
+    expect(f.extractor.extract).not.toHaveBeenCalled()
+    expect(f.service.hasPendingWork).toBe(true)
+    expect(f.timers.has('background-reviewed-runtime:pero')).toBe(false)
+  })
+
+  it('后台开关关闭和角色停用期间暂停计时，恢复后不会清零', async () => {
+    const background = new MemoryBackgroundControl()
+    const f = fixture({ background })
+    await f.online(30)
+    background.setEnabled(false)
+    await f.online(120)
+    expect(f.timers.get('background-runtime:pero')).toBe(30)
+    background.setEnabled(true)
+    await f.service.checkpointRuntime(['pero'])
+    await f.online(30)
+    await f.service.tick(['pero'])
+    expect(f.extractor.extract).toHaveBeenCalledOnce()
+  })
+
+  it('关闭后台时迟到模型结果不能写入或提交覆盖', async () => {
+    const background = new MemoryBackgroundControl()
+    const f = fixture({ background })
+    f.extractor.extract.mockImplementationOnce(async () => {
+      background.setEnabled(false)
+      return [draft]
+    })
+    await f.online(60)
+    await f.service.tick(['pero'])
+    expect(f.create).not.toHaveBeenCalled()
+    expect(f.coverage.size).toBe(0)
+    expect(f.repo.releaseCoverageClaim).toHaveBeenCalledOnce()
+  })
+
+  it('提炼期间编辑来源会放弃旧结果，不把改动后的消息误标为已补记', async () => {
+    const f = fixture()
+    f.extractor.extract.mockImplementationOnce(async () => {
+      const changed = rounds(1)
+      changed[0]!.content = '刚修改的问题'
+      changed[0]!.revision++
+      f.setMessages(changed)
+      return [draft]
+    })
+    await f.online(60)
+    await f.service.tick(['pero'])
+    expect(f.create).not.toHaveBeenCalled()
+    expect(f.coverage.size).toBe(0)
+    expect(f.service.hasPendingWork).toBe(true)
   })
 })

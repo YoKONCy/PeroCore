@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * terminalManager — 领域服务
  *
@@ -147,7 +148,9 @@ export class TerminalManager {
       controller.abort(input.signal?.reason)
       const cleanup = waitForCancellationCleanup(controller.signal)
       if (input.signal) trackCancellationCleanup(input.signal, cleanup)
-      void cleanup.catch((error) => logger.error('取消终端时进程回收失败', { terminalId, error }))
+      void cleanup.catch((error) =>
+        logger.error(__t('logs.execution', '取消终端时进程回收失败'), { terminalId, error }),
+      )
     }
     const detachSignal = () => input.signal?.removeEventListener('abort', abort)
     input.signal?.addEventListener('abort', abort, { once: true })

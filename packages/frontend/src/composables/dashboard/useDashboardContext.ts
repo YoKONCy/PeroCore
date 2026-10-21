@@ -1,3 +1,4 @@
+import { t as __t } from '../../i18n/index'
 /**
  * useDashboardContext — Dashboard 全局共享状态
  *
@@ -109,12 +110,10 @@ export function createDashboardContext(currentTab: Ref<string>): DashboardContex
 
   // ── 健康检查 ──
   async function checkHealth() {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), HEALTH_CHECK_TIMEOUT)
     try {
-      const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), HEALTH_CHECK_TIMEOUT)
-
-      const res = await systemApi.health()
-      clearTimeout(timeout)
+      const res = await systemApi.health(controller.signal)
 
       const wasOffline = !isBackendOnline.value
       isBackendOnline.value = res.data?.status === 'ok'
@@ -125,6 +124,8 @@ export function createDashboardContext(currentTab: Ref<string>): DashboardContex
       }
     } catch {
       isBackendOnline.value = false
+    } finally {
+      clearTimeout(timeout)
     }
   }
 
@@ -210,7 +211,7 @@ export function createDashboardContext(currentTab: Ref<string>): DashboardContex
       await invoke('quit-app')
     } catch (e) {
       if ((e as Error).message !== 'User cancelled') {
-        logger.error('Dashboard', '退出失败', e)
+        logger.error('Dashboard', __t('logs.frontend.settings', '退出失败'), e)
       }
     }
   }

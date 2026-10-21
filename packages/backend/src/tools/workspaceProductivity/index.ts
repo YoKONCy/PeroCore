@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 import type { BuiltinTool } from '../index'
 import { getProductivityRuntime, resolveExecutionSession } from '../productivityRuntimeHolder'
 import { toolFailure, toolSuccess } from '../../services/execution/toolResult'
@@ -261,7 +262,14 @@ export const editFileTool: BuiltinTool = {
     } catch (err) {
       // 失败原因：既打印到后端日志，也结构化返回给 Agent 供其自我修正
       const message = err instanceof Error ? err.message : String(err)
-      logger.error(`编辑文件失败 [${ctx.agentId}/${ctx.threadId}] ${String(args.path)}: ${message}`)
+      logger.error(
+        __t('logs.tools', '编辑文件失败 [{0}/{1}] {2}: {3}', [
+          ctx.agentId,
+          ctx.threadId,
+          String(args.path),
+          message,
+        ]),
+      )
       if (err instanceof WorkspaceError) {
         return toolFailure(err.code, message)
       }

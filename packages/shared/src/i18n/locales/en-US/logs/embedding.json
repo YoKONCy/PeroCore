@@ -1,0 +1,17 @@
+{
+  "Embedding 配置不完整（apiBase/apiKey/model 任一为空），记忆向量化和 RAG 检索将不可用。请在 Dashboard → 模型配置 → 向量模型 中完成配置。": "Embedding configuration is incomplete (either apiBase/apiKey/model is empty), memory vectorization and RAG retrieval will not be available. Please complete the configuration in Dashboard → Model Configuration → Vector Model.",
+  "Reranker 已启用: model={0}": "Reranker enabled: model={0}",
+  "Embedding 配置已热更新: model={0}, apiBase={1}, dim={2}": "Embedding configuration has been hot updated: model={0}, apiBase={1}, dim={2}",
+  "向量生成与向量检索已关闭": "vector generation and vector retrieval are closed",
+  "Embedding 配置热更新后仍不完整，向量化和 RAG 检索不可用": "Embedding configuration is still incomplete after hot update, vectorization and RAG retrieval are not available",
+  "Reranker 已热更新: model={0}": "Reranker has been hot updated: model={0}",
+  "Embedding 不可用（配置不完整），返回空数组": "Embedding is not available (configuration is incomplete), returns an empty array",
+  "Embedding 不可用（配置不完整），返回空向量": "Embedding is not available (configuration is incomplete), returns an empty vector",
+  "...42... 宇宙、生命与万物的终极答案正在此处共振。": "...42... The ultimate answer to the universe, life and everything is resonating here.",
+  "向量星阵对齐完成，隐藏的信息浮现于语义空间。": "The vector star array alignment is completed, and the hidden information emerges in the semantic space.",
+  "Reranker 未配置，使用原排序降级": "Reranker is not configured, use the original sorting to downgrade",
+  "向量服务已恢复，后续请求恢复正常": "vector service has been restored and subsequent requests return to normal",
+  "向量服务暂不可用，已进入请求冷却": "vector service is temporarily unavailable and has entered request cooling",
+  "Reranker 初始化: model={0}, base={1}": "Reranker initialization: model={0}, base={1}",
+  "Reranker API 失败": "Reranker API failed"
+}

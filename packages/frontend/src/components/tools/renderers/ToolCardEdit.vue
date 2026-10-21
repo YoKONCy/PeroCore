@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../../i18n/index'
+
 /** ToolCardEdit — infOS 文件变更检查器：统一 Diff 轨道、行号和修改统计。 */
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import type { FileWritePreviewBaseline } from '@infos/shared'
@@ -60,22 +62,22 @@ const editRange = computed(
   () => resultObj.value.editRange as { startLine?: number; endLine?: number } | undefined,
 )
 const errorText = computed(() => {
-  if (props.interrupted) return '生成已中断，预览不代表已写入。'
+  if (props.interrupted) return __t('ui.tools', '生成已中断，预览不代表已写入。')
   if (typeof resultObj.value.error === 'string') return resultObj.value.error
-  return props.isError ? props.result || '文件修改失败' : ''
+  return props.isError ? props.result || __t('ui.tools', '文件修改失败') : ''
 })
 const diffTruncated = computed(() =>
   Boolean(resultObj.value.diffTruncated || (props.result === undefined && props.previewTruncated)),
 )
 const pending = computed(() => props.result === undefined && !props.interrupted)
 const phaseLabel = computed(() => {
-  if (props.interrupted) return '已中断'
-  if (props.isError || resultObj.value.error) return '执行失败'
-  if (resultObj.value.needsSelection) return '等待选择 · 未写入'
-  if (resultObj.value.success === false) return '未写入'
-  if (preview.value.committed) return '已写入'
-  if (props.result !== undefined) return '变更结果'
-  return props.assembling ? '实时预览 · 未写入' : '正在写入'
+  if (props.interrupted) return __t('ui.tools', '已中断')
+  if (props.isError || resultObj.value.error) return __t('ui.tools', '执行失败')
+  if (resultObj.value.needsSelection) return __t('ui.tools', '等待选择 · 未写入')
+  if (resultObj.value.success === false) return __t('ui.tools', '未写入')
+  if (preview.value.committed) return __t('ui.tools', '已写入')
+  if (props.result !== undefined) return __t('ui.tools', '变更结果')
+  return props.assembling ? __t('ui.tools', '实时预览 · 未写入') : __t('ui.tools', '正在写入')
 })
 const baselineUnknown = computed(() => preview.value.baselineUnknown)
 
@@ -139,10 +141,10 @@ function resumeFollowing(): void {
     <header class="diff-inspector__head">
       <span class="diff-inspector__mode">{{ opLabel[operation] ?? operation.toUpperCase() }}</span>
       <div class="diff-inspector__path">
-        <strong :title="filePath">{{ fileName || '未知文件' }}</strong>
+        <strong :title="filePath">{{ fileName || __t('ui.tools', '未知文件') }}</strong>
         <small v-if="fileDir">{{ fileDir }}</small>
       </div>
-      <div class="diff-inspector__stats" aria-label="变更统计">
+      <div class="diff-inspector__stats" :aria-label="__t('ui.tools', '变更统计')">
         <span class="is-add">+{{ insertions }}</span>
         <span class="is-remove">−{{ baselineUnknown ? '?' : deletions }}</span>
         <span v-if="editRange?.startLine" class="is-range">
@@ -154,18 +156,21 @@ function resumeFollowing(): void {
     <div class="diff-inspector__status" role="status">
       <span class="diff-inspector__signal" />
       <span>{{ phaseLabel }}</span>
-      <small v-if="resultObj.needsSelection">存在多个匹配位置，等待 Agent 选择候选</small>
+      <small v-if="resultObj.needsSelection">
+        {{ __t('ui.tools', '存在多个匹配位置，等待 Agent 选择候选') }}
+      </small>
       <small v-if="Array.isArray(argsObj.steps)">
-        同文件批量编辑 · {{ argsObj.steps.length }} 处
+        {{ __t('ui.tools', '同文件批量编辑 ·') }} {{ argsObj.steps.length }}
+        {{ __t('ui.tools', '处') }}
       </small>
       <small v-if="resultObj.checkpointWarning">{{ resultObj.checkpointWarning }}</small>
-      <small v-if="baselineUnknown">旧文不可用 · 仅预览新内容</small>
+      <small v-if="baselineUnknown">{{ __t('ui.tools', '旧文不可用 · 仅预览新内容') }}</small>
       <button
         v-if="pending && !following && diffRows.length"
         type="button"
         @click="resumeFollowing"
       >
-        跟随生成 ↓
+        {{ __t('ui.tools', '跟随生成 ↓') }}
       </button>
     </div>
 
@@ -174,7 +179,7 @@ function resumeFollowing(): void {
       ref="grid"
       class="diff-grid"
       role="table"
-      aria-label="文件差异"
+      :aria-label="__t('ui.tools', '文件差异')"
       :aria-rowcount="diffRows.length"
       tabindex="0"
       @scroll.passive="onScroll"
@@ -212,12 +217,26 @@ function resumeFollowing(): void {
     </div>
 
     <div v-if="diffTruncated" class="diff-inspector__truncated">
-      <span>预览已限长</span>
-      <span>{{ pending ? '完整内容仍会交给工具执行' : '变更统计以执行结果为准' }}</span>
+      <span>{{ __t('ui.tools', '预览已限长') }}</span>
+      <span>
+        {{
+          pending
+            ? __t('ui.tools', '完整内容仍会交给工具执行')
+            : __t('ui.tools', '变更统计以执行结果为准')
+        }}
+      </span>
     </div>
 
     <div v-else-if="!errorText && !diffRows.length" class="diff-inspector__summary">
-      <span>{{ pending ? (assembling ? '等待修改内容…' : '等待写入结果…') : '变更已写入' }}</span>
+      <span>
+        {{
+          pending
+            ? assembling
+              ? __t('ui.tools', '等待修改内容…')
+              : __t('ui.tools', '等待写入结果…')
+            : __t('ui.tools', '变更已写入')
+        }}
+      </span>
       <code>
         {{
           resultObj.bytes ? `${resultObj.bytes} bytes` : `${insertions + deletions} lines touched`

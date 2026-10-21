@@ -1,3 +1,4 @@
+import { t as __t } from './i18n.mjs'
 /**
  * 版本号同步脚本 (TypeScript)
  *
@@ -5,7 +6,7 @@
  * 本脚本将该版本号同步到所有子包 package.json，
  * 以及前后端源码中的硬编码版本号。
  *
- * 用法: pnpm version:sync [--version 0.9.4 | --check]
+ * 用法: pnpm version:sync [--version 0.9.5 | --check]
  * 执行: tsx scripts/sync-version.ts
  *
  * @module scripts/sync-version
@@ -23,7 +24,10 @@ const ROOT = path.resolve(__dirname, '..')
 // ─── 唯一的版本事实来源: 根 package.json ──────────────────
 const rootPkgPath = path.join(ROOT, 'package.json')
 if (!fs.existsSync(rootPkgPath)) {
-  console.error('[版本同步] ❌ 根 package.json 不存在！预期路径:', rootPkgPath)
+  console.error(
+    __t('scripts.sync-version', '[版本同步] ❌ 根 package.json 不存在！预期路径:'),
+    rootPkgPath,
+  )
   process.exit(1)
 }
 
@@ -57,7 +61,9 @@ const BROWSER_VERSION = toBrowserVersion(VERSION)
 const pending = new Map<string, string>()
 if (versionIndex >= 0) pending.set(rootPkgPath, JSON.stringify(rootPkg, null, 2) + '\n')
 
-console.log(`\n[版本同步] 🎯 唯一事实来源 → package.json: ${VERSION}`)
+console.log(
+  __t('scripts.sync-version', '\n[版本同步] 🎯 唯一事实来源 → package.json: {0}', [VERSION]),
+)
 console.log('═'.repeat(55))
 
 let updatedCount = 0
@@ -78,7 +84,7 @@ function syncBrowserManifest(relPath: string, required = true): void {
   const fullPath = path.join(ROOT, relPath)
   if (!fs.existsSync(fullPath)) {
     if (required) throw new Error(`[版本同步] 必需文件不存在: ${relPath}`)
-    console.log(`[版本同步] ⏭️  ${relPath} 不存在，跳过可选同步`)
+    console.log(__t('scripts.sync-version', '[版本同步] ⏭️  {0} 不存在，跳过可选同步', [relPath]))
     return
   }
   checkedCount++
@@ -90,7 +96,13 @@ function syncBrowserManifest(relPath: string, required = true): void {
     manifest.version = BROWSER_VERSION
     manifest.version_name = VERSION
     pending.set(fullPath, JSON.stringify(manifest, null, 2) + '\n')
-    console.log(`[版本同步] ✅ ${relPath}: ${BROWSER_VERSION} / ${VERSION}`)
+    console.log(
+      __t('scripts.sync-version', '[版本同步] ✅ {0}: {1} / {2}', [
+        relPath,
+        BROWSER_VERSION,
+        VERSION,
+      ]),
+    )
     updatedCount++
   }
 }
@@ -100,7 +112,9 @@ function syncJsonVersion(relPath: string, required = true): void {
   const fullPath = path.join(ROOT, relPath)
   if (!fs.existsSync(fullPath)) {
     if (required) throw new Error(`[版本同步] 必需文件不存在: ${relPath}`)
-    console.log(`[版本同步] ⏭️  ${relPath} 本地私有嵌套仓库未检出，跳过`)
+    console.log(
+      __t('scripts.sync-version', '[版本同步] ⏭️  {0} 本地私有嵌套仓库未检出，跳过', [relPath]),
+    )
     return
   }
   checkedCount++
@@ -112,7 +126,9 @@ function syncJsonVersion(relPath: string, required = true): void {
     const oldVersion = pkg.version
     pkg.version = VERSION
     pending.set(fullPath, JSON.stringify(pkg, null, 2) + '\n')
-    console.log(`[版本同步] ✅ ${relPath}: ${oldVersion} → ${VERSION}`)
+    console.log(
+      __t('scripts.sync-version', '[版本同步] ✅ {0}: {1} → {2}', [relPath, oldVersion, VERSION]),
+    )
     updatedCount++
   }
 }
@@ -134,21 +150,25 @@ function syncSourceVersion(
   const fullPath = path.join(ROOT, relPath)
   if (!fs.existsSync(fullPath)) {
     if (required) throw new Error(`[版本同步] 必需文件不存在: ${relPath}`)
-    console.log(`[版本同步] ⏭️  ${relPath} 不存在，跳过可选同步`)
+    console.log(__t('scripts.sync-version', '[版本同步] ⏭️  {0} 不存在，跳过可选同步', [relPath]))
     return
   }
   checkedCount++
   const content = pending.get(fullPath) ?? fs.readFileSync(fullPath, 'utf8')
   if (!pattern.test(content)) {
     if (required) throw new Error(`[版本同步] ${relPath} 未匹配到 ${label}`)
-    console.log(`[版本同步] ⏭️  ${relPath} 当前无 ${label}，跳过可选同步`)
+    console.log(
+      __t('scripts.sync-version', '[版本同步] ⏭️  {0} 当前无 {1}，跳过可选同步', [relPath, label]),
+    )
     return
   }
   pattern.lastIndex = 0
   const replaced = content.replace(pattern, replacement)
   if (content !== replaced) {
     pending.set(fullPath, replaced)
-    console.log(`[版本同步] ✅ ${relPath} ${label} → ${VERSION}`)
+    console.log(
+      __t('scripts.sync-version', '[版本同步] ✅ {0} {1} → {2}', [relPath, label, VERSION]),
+    )
     updatedCount++
   }
 }
@@ -156,7 +176,7 @@ function syncSourceVersion(
 // ═══════════════════════════════════════════════════════
 // 1. 同步所有子包 package.json
 // ═══════════════════════════════════════════════════════
-console.log('\n── 📦 子包 package.json ──')
+console.log(__t('scripts.sync-version', '\n── 📦 子包 package.json ──'))
 
 const subPackagePaths = [
   'packages/shared/package.json',
@@ -186,14 +206,14 @@ for (const relPath of [...new Set([...subPackagePaths, ...discoveredPackages])].
   syncJsonVersion(relPath)
 }
 
-console.log('\n── 🧩 应用与扩展清单 ──')
+console.log(__t('scripts.sync-version', '\n── 🧩 应用与扩展清单 ──'))
 syncJsonVersion('packages/apps/social/app.manifest.json')
 syncBrowserManifest('packages/browser-extension/manifest.json', false)
 
 // ═══════════════════════════════════════════════════════
 // 3. 同步后端源码中的硬编码版本号
 // ═══════════════════════════════════════════════════════
-console.log('\n── 🖥️  后端源码 ──')
+console.log(__t('scripts.sync-version', '\n── 🖥️  后端源码 ──'))
 
 // 3a. system.router.ts — APP_VERSION 常量
 syncSourceVersion(
@@ -268,7 +288,7 @@ syncSourceVersion(
   '天气请求 User-Agent 版本',
 )
 
-console.log('\n── 📖 当前文档与 Wiki 展示 ──')
+console.log(__t('scripts.sync-version', '\n── 📖 当前文档与 Wiki 展示 ──'))
 syncSourceVersion(
   'packages/wiki/.vitepress/components/MoePixelHome.vue',
   /v\d+\.\d+\.\d+(?:-[\w.-]+)?/g,
@@ -307,14 +327,31 @@ syncSourceVersion(
 // ═══════════════════════════════════════════════════════
 console.log('\n' + '═'.repeat(55))
 if (checkOnly && pending.size) {
-  console.error(`[版本同步] ❌ 发现 ${pending.size} 个文件版本不一致，请运行 pnpm version:sync`)
+  console.error(
+    __t(
+      'scripts.sync-version',
+      '[版本同步] ❌ 发现 {0} 个文件版本不一致，请运行 pnpm version:sync',
+      [pending.size],
+    ),
+  )
   process.exit(1)
 } else if (!checkOnly) {
   for (const [file, content] of pending) fs.writeFileSync(file, content)
 }
 if (updatedCount === 0) {
-  console.log(`[版本同步] ✨ 全部 ${checkedCount} 个检查点已是最新 (${VERSION})，无需更新`)
+  console.log(
+    __t('scripts.sync-version', '[版本同步] ✨ 全部 {0} 个检查点已是最新 ({1})，无需更新', [
+      checkedCount,
+      VERSION,
+    ]),
+  )
 } else {
-  console.log(`[版本同步] 🎉 检查 ${checkedCount} 个点，已同步 ${updatedCount} 个文件到 ${VERSION}`)
+  console.log(
+    __t('scripts.sync-version', '[版本同步] 🎉 检查 {0} 个点，已同步 {1} 个文件到 {2}', [
+      checkedCount,
+      updatedCount,
+      VERSION,
+    ]),
+  )
 }
 console.log()

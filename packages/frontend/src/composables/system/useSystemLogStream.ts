@@ -4,7 +4,7 @@
  * 集中管理该领域的数据转换、状态边界与外部交互。
  * 调用方依赖这里的稳定契约，不直接耦合底层传输或运行时实现。
  */
-import { getApiBaseUrl } from '../../api/transport'
+import { getApiResourceUrl } from '../../api/transport'
 
 export type SystemLogStreamLevel =
   | 'stdout'
@@ -37,8 +37,8 @@ export function useSystemLogStream(options: UseSystemLogStreamOptions) {
   function connect(): void {
     disconnect()
 
-    const url = `${getApiBaseUrl()}/system/logs/stream`
-    const eventSource = new EventSource(url)
+    const url = getApiResourceUrl('/system/logs/stream', new URLSearchParams())
+    const eventSource = new EventSource(url, { withCredentials: true })
     source = eventSource
 
     eventSource.addEventListener('open', () => {

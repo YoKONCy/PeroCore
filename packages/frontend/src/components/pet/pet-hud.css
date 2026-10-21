@@ -1,4 +1,26 @@
 /* 带色透光面保持文字清晰；厚度由一格亮边与短侧面表达。 */
+.bubble-deliveries-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 8px 0 0;
+  padding: 4px 0 0;
+  width: 100%;
+  border: 0;
+  border-top: 1px solid var(--pet-divider);
+  background: transparent;
+  color: var(--pet-bubble-name);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+.bubble-deliveries-toggle > :last-child {
+  margin-left: auto;
+}
+.bubble-deliveries-toggle:focus-visible {
+  outline: 1px solid var(--pet-accent);
+  outline-offset: 3px;
+}
 .pet-hud {
   --pet-panel: rgba(216, 235, 246, 0.72);
   --pet-soft: rgba(225, 242, 251, 0.79);

@@ -1,0 +1,21 @@
+{
+  "ContextRNN 状态保存": "ContextRNN state saving",
+  "仅在 ContextRNN 已启用且存在变更时保存状态与在线学习权重": "Save state and online learning weights only when ContextRNN is enabled and there are changes",
+  "八小时记忆补记": "Eight hours of memory supplement\nEvery time",
+  "每累计在线八小时，按模型容量分批补记未主动记录或审阅的对话": "is online for eight hours in total, conversations that are not actively recorded or reviewed will be recorded in batches according to the model capacity.",
+  "事件关系维护": "event relationship maintenance",
+  "增量补全事件关系、模型归档并验证TDB图完整性": "incrementally completes event relationships, model archiving and verifies TDB diagram integrity",
+  "每日人格日记": "Daily Personality Diary",
+  "21:00把已记下的当天事件写入Agent Workspace Markdown日记，不提前触发补记周期": "21:00 Write the recorded events of the day into the Agent Workspace Markdown diary without triggering the re-recording cycle in advance",
+  "定时提醒检查": "Regular reminder check",
+  "检查并触发已到期的提醒与计划": "Check and trigger expired reminders and plans",
+  "临时文件清理": "temporary file cleaning",
+  "清理过期缓存、上传文件与临时资源": "Clean up expired cache, uploaded files and temporary resources",
+  "{0} 已回复": "{0} replied",
+  "本轮对话已完成": "This round of dialogue has been completed",
+  "任务续行与投递": "task continuation and delivery",
+  "检查任务等待条件并投递待发送的结果": "checks task waiting conditions and delivers the results to be sent.",
+  "[常驻] 记忆运行维护": "[Resident] Memory operation and maintenance",
+  "记忆运行维护": "memory operation and maintenance",
+  "{0} 有新消息": "{0} has new news"
+}

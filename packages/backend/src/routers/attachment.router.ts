@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * attachment.router — HTTP 路由适配层
  *
@@ -11,6 +12,8 @@ import { z } from 'zod'
 import { validate as zValidator } from '../lib/validation'
 import { resourceContent, previewResourceText } from '../services/attachment/resourceContent'
 import { HtmlPreviewService } from '../services/attachment/htmlPreviewService'
+import { DOCUMENT_MAX_INPUT_BYTES, isOfficeDocumentName } from '@infos/shared'
+import { readBoundedResourceFile } from '../services/attachment/resourceSource'
 
 const referenceSchema = z.object({
   agentId: z.string().min(1),
@@ -33,7 +36,10 @@ export function createAttachmentRouter(
 
   router.post('/resolve-reference', zValidator('json', referenceSchema), async (c) => {
     const input = c.req.valid('json')
-    const data = await ctx.resourceService.resolveReference(input, input.source)
+    const data = await ctx.resourceService.resolveReference(
+      { ...input, signal: c.req.raw.signal },
+      input.source,
+    )
     return c.json({ code: 'OK', data })
   })
   router.post(
@@ -67,20 +73,51 @@ export function createAttachmentRouter(
     },
   )
 
+  router.post(
+    '/preview-document',
+    zValidator('json', z.union([z.object({ id: z.string().min(1) }), referenceSchema])),
+    async (c) => {
+      const input = c.req.valid('json')
+      const resolve = () =>
+        'id' in input
+          ? ctx.attachmentService.contentFile(input.id)
+          : ctx.resourceService.referenceFile(input, input.source)
+      const resolved = await resolve()
+      const name = 'row' in resolved ? resolved.row.originalName : resolved.resource.name
+      const size = 'row' in resolved ? resolved.row.sizeBytes : resolved.resource.sizeBytes
+      if (!isOfficeDocumentName(name) || size > DOCUMENT_MAX_INPUT_BYTES)
+        throw new AppError('BAD_REQUEST', { message: '此文档无法预览，请打开源文件' })
+      const signal = AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(20000)])
+      const bytes = await readBoundedResourceFile(
+        resolved.filePath,
+        signal,
+        DOCUMENT_MAX_INPUT_BYTES,
+      )
+      const data = await ctx.documentService.preview(bytes, name, signal)
+      // 转换完成后重新核验来源，已删除或撤回的文件不再返回内容。
+      await resolve()
+      return c.json({ code: 'OK', data })
+    },
+  )
+
   router.get('/capabilities', (c) =>
-    c.json({ code: 'OK', message: '获取成功', data: ctx.attachmentService.capabilities() }),
+    c.json({
+      code: 'OK',
+      message: __t('server.routers', '获取成功'),
+      data: ctx.attachmentService.capabilities(),
+    }),
   )
   router.get('/:id', async (c) =>
     c.json({
       code: 'OK',
-      message: '获取成功',
+      message: __t('server.routers', '获取成功'),
       data: ctx.attachmentService.toDto(await ctx.attachmentService.getActive(c.req.param('id'))),
     }),
   )
   router.post('/:id/retry', async (c) =>
     c.json({
       code: 'OK',
-      message: '已重新开始解析',
+      message: __t('server.routers', '已重新开始解析'),
       data: await ctx.attachmentService.retryPdf(c.req.param('id')),
     }),
   )
@@ -93,7 +130,7 @@ export function createAttachmentRouter(
       throw new AppError('BAD_REQUEST', { message: 'multipart 请求必须包含 file 和 threadId' })
     }
     const data = await ctx.attachmentService.upload(fileValue, threadValue)
-    return c.json({ code: 'CREATED', message: '附件上传成功', data }, 201)
+    return c.json({ code: 'CREATED', message: __t('server.routers', '附件上传成功'), data }, 201)
   })
 
   router.on(['GET', 'HEAD'], '/:id/content', async (c) => {
@@ -102,8 +139,10 @@ export function createAttachmentRouter(
   })
 
   router.delete('/:id', async (c) => {
+    if (ctx.conversationQueue.referencesAttachment(c.req.param('id')))
+      throw new AppError('CONFLICT', { message: '附件已随消息排队，请先移除对应的队列消息' })
     await ctx.attachmentService.deleteUnbound(c.req.param('id'))
-    return c.json({ code: 'OK', message: '附件已删除' })
+    return c.json({ code: 'OK', message: __t('server.routers', '附件已删除') })
   })
 
   return router

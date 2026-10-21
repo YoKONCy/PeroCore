@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * 记忆 Store 注册表
  *
@@ -170,7 +171,7 @@ export class MemoryStoreRegistry {
     const dataRoot = this.pathResolver.resolve('@data')
     if (existsSync(dataRoot)) this.removeStoresRecursively(dataRoot, false)
     this.dim = dimension
-    logger.info(`向量Store维度已切换: ${dimension}`)
+    logger.info(__t('logs.repositories', '向量Store维度已切换: {0}', [dimension]))
   }
 
   /** 安全关闭所有 Store，先落盘再释放文件锁。 */
@@ -178,9 +179,9 @@ export class MemoryStoreRegistry {
     for (const [tdbPath, store] of this.stores) {
       try {
         store.close()
-        logger.debug(`Store 已关闭: ${tdbPath}`)
+        logger.debug(__t('logs.repositories', 'Store 已关闭: {0}', [tdbPath]))
       } catch (err) {
-        logger.warn(`Store 关闭失败: ${tdbPath}`, { error: err })
+        logger.warn(__t('logs.repositories', 'Store 关闭失败: {0}', [tdbPath]), { error: err })
       }
     }
     this.stores.clear()
@@ -233,7 +234,11 @@ export class MemoryStoreRegistry {
       if (lockedFormat === null) throw new Error('持有共享读锁后旧库主文件缺失')
       if (lockedFormat >= TRIVIUM_FORMAT) return
       const backup = backupLegacyStore(this.pathResolver.resolve('@data'), tdbPath, lockedFormat)
-      logger.info('已保留数据库升级前的完整备份', { path: tdbPath, format: lockedFormat, backup })
+      logger.info(__t('logs.repositories', '已保留数据库升级前的完整备份'), {
+        path: tdbPath,
+        format: lockedFormat,
+        backup,
+      })
     } catch (error) {
       throw new Error(
         '升级前备份未完成，尚未打开可写旧库。请关闭其他 Writer；如有待恢复 WAL，请先用旧版正常启动并退出。',
@@ -348,14 +353,14 @@ export class MemoryStoreRegistry {
         try {
           reader.close()
         } catch (error) {
-          logger.warn('快照完成后关闭只读 Store 失败', { error })
+          logger.warn(__t('logs.repositories', '快照完成后关闭只读 Store 失败'), { error })
         }
       }
       for (const store of paused) {
         try {
           store.enableAutoCompaction(300)
         } catch (error) {
-          logger.warn('快照完成后恢复自动压实失败', { error })
+          logger.warn(__t('logs.repositories', '快照完成后恢复自动压实失败'), { error })
         }
       }
     }
@@ -540,9 +545,9 @@ export class MemoryStoreRegistry {
     for (const [tdbPath, store] of this.stores) {
       try {
         store.flush()
-        logger.debug(`Store 已落盘: ${tdbPath}`)
+        logger.debug(__t('logs.repositories', 'Store 已落盘: {0}', [tdbPath]))
       } catch (err) {
-        logger.warn(`Store 落盘失败: ${tdbPath}`, { error: err })
+        logger.warn(__t('logs.repositories', 'Store 落盘失败: {0}', [tdbPath]), { error: err })
       }
     }
   }
@@ -558,9 +563,9 @@ export class MemoryStoreRegistry {
       try {
         store.buildTextIndex()
         this.textIndexDirty.set(tdbPath, false)
-        logger.debug(`文本索引已重编译: ${tdbPath}`)
+        logger.debug(__t('logs.repositories', '文本索引已重编译: {0}', [tdbPath]))
       } catch (err) {
-        logger.warn(`文本索引重编译失败: ${tdbPath}`, { error: err })
+        logger.warn(__t('logs.repositories', '文本索引重编译失败: {0}', [tdbPath]), { error: err })
       }
     }
   }
@@ -592,9 +597,9 @@ export class MemoryStoreRegistry {
       try {
         store.buildTextIndex()
         this.textIndexDirty.set(tdbPath, false)
-        logger.debug(`文本索引懒编译完成: ${tdbPath}`)
+        logger.debug(__t('logs.repositories', '文本索引懒编译完成: {0}', [tdbPath]))
       } catch (err) {
-        logger.warn(`文本索引懒编译失败: ${tdbPath}`, { error: err })
+        logger.warn(__t('logs.repositories', '文本索引懒编译失败: {0}', [tdbPath]), { error: err })
       }
     }
     return store
@@ -648,7 +653,7 @@ export class MemoryStoreRegistry {
       try {
         total += (openedStore ?? this.getOrCreate(tdbPath)).nodeCount()
       } catch (error) {
-        logger.warn(`Store 节点统计失败: ${tdbPath}`, { error })
+        logger.warn(__t('logs.repositories', 'Store 节点统计失败: {0}', [tdbPath]), { error })
       }
     }
     return total
@@ -666,7 +671,9 @@ export class MemoryStoreRegistry {
     }
     this.textIndexDirty.delete(tdbPath)
     this.removeStoreFiles(tdbPath)
-    logger.info(`Agent Store 已清空: agent=${agentId}, mode=${mode}`)
+    logger.info(
+      __t('logs.repositories', 'Agent Store 已清空: agent={0}, mode={1}', [agentId, mode]),
+    )
   }
 
   /** 清空共享 Store；下次访问时创建空库。 */
@@ -681,7 +688,7 @@ export class MemoryStoreRegistry {
     }
     this.textIndexDirty.delete(tdbPath)
     this.removeStoreFiles(tdbPath)
-    logger.info(`共享 Store 已清空: kind=${kind}`)
+    logger.info(__t('logs.repositories', '共享 Store 已清空: kind={0}', [kind]))
   }
 
   /** 获取或创建 TriviumDB 实例 */
@@ -703,7 +710,7 @@ export class MemoryStoreRegistry {
         throw new Error(`向量Store维度不匹配: store=${storedDimension}, config=${this.dim}`)
       }
     }
-    logger.info(`打开 TriviumDB Store: ${tdbPath}`)
+    logger.info(__t('logs.repositories', '打开 TriviumDB Store: {0}', [tdbPath]))
     this.prepareLegacyStore(tdbPath)
     store = new TriviumDB(tdbPath, {
       dim: this.dim,

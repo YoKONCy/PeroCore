@@ -1,3 +1,4 @@
+import { t as __t } from './utils/i18n'
 /**
  * @file IPC 通道集中注册
  * @description 遵循 07_DUAL_DEPLOYMENT.md — IPC 仅用于 Electron 专属的系统能力
@@ -20,8 +21,11 @@ import {
   nativeTheme,
   app,
   dialog,
+  webContents,
 } from 'electron'
 import AdmZip from 'adm-zip'
+import { getLocale, setLocale } from './utils/i18n'
+import { normalizeLocale } from '../../packages/shared/src/i18n'
 import os from 'node:os'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -37,6 +41,7 @@ import type {
   PetConversationTarget,
   DesktopToastSnapshot,
   DesktopToastAction,
+  MessageResource,
 } from '@infos/shared'
 import { petControls } from './services/petControls'
 import { desktopControl } from './services/desktopControl'
@@ -46,6 +51,7 @@ import { startDesktopArca } from './services/arcaLifetime'
 import { registerArcaSurface } from './services/arcaSurface'
 import { paths, isDev, isPackaged, isPortable } from './utils/env'
 import { logger } from './utils/logger'
+import { getClientCredential } from './utils/clientCredential'
 
 // ─── 延迟导入的服务 (避免循环引用) ─────────────────────
 // 使用函数包装，在调用时才 import
@@ -166,11 +172,135 @@ function registerPetControlHandlers(): void {
     windowManager.createDashboardWindow()
     desktopTabs.openHome(String(section))
   })
+  ipcMain.handle('pet-controls:open-resource', (event, input: unknown) => {
+    assertTrusted(event.sender, true)
+    // 只转发资源引用；实际读取与权限校验仍由服务端资源接口负责。
+    if (!input || typeof input !== 'object') return false
+    const value = input as { resource?: MessageResource; target?: PetConversationTarget }
+    const item = value.resource
+    const target = value.target
+    if (
+      !item ||
+      !target ||
+      typeof target.agentId !== 'string' ||
+      !target.agentId ||
+      typeof item.name !== 'string' ||
+      item.name.length > 1024 ||
+      typeof item.kind !== 'string' ||
+      typeof item.mimeType !== 'string' ||
+      !Number.isFinite(item.sizeBytes) ||
+      item.sizeBytes < 0
+    )
+      return false
+    const id = typeof item.id === 'string' && /^[\w-]{1,128}$/.test(item.id) ? item.id : undefined
+    const origin = item.origin
+    const validOrigin =
+      origin &&
+      ['workspace', 'url', 'arca'].includes(origin.type) &&
+      typeof origin.value === 'string' &&
+      origin.value.length <= 8192 &&
+      (origin.type !== 'url' || /^https?:\/\//i.test(origin.value))
+    if (!id && !validOrigin) return false
+    const resource: MessageResource = {
+      id,
+      name: item.name,
+      kind: item.kind,
+      mimeType: item.mimeType,
+      sizeBytes: item.sizeBytes,
+      origin:
+        validOrigin && origin
+          ? {
+              type: origin.type,
+              value: origin.value,
+              agentId: target.agentId,
+              threadId: typeof target.threadId === 'string' ? target.threadId : undefined,
+              taskId: typeof origin.taskId === 'string' ? origin.taskId : undefined,
+            }
+          : undefined,
+    }
+    windowManager.createDashboardWindow()
+    desktopTabs.openHome(
+      'chat',
+      {
+        agentId: target.agentId,
+        threadId: typeof target.threadId === 'string' ? target.threadId : undefined,
+        messageId: typeof target.messageId === 'string' ? target.messageId : undefined,
+      },
+      resource,
+    )
+    return true
+  })
 }
 
 /** 注册所有 IPC 通道。 */
 export function registerIpcHandlers(): void {
-  logger.info('IPC', '正在注册 IPC 通道...')
+  const languageFile = path.join(paths.data, 'client-language.txt')
+  try {
+    setLocale(fs.readFileSync(languageFile, 'utf8').trim())
+  } catch {
+    /* 首次启动使用默认语言 */
+  }
+  ipcMain.handle('i18n:get-language', () => getLocale())
+  ipcMain.handle('i18n:set-language', (event, value: unknown) => {
+    if (!trustedWindow(event.sender) || !trustedClient(event.sender.getURL()))
+      throw new Error('仅主应用可以修改界面语言')
+    const language = normalizeLocale(value)
+    fs.mkdirSync(path.dirname(languageFile), { recursive: true })
+    fs.writeFileSync(languageFile, language, 'utf8')
+    setLocale(language)
+    for (const contents of webContents.getAllWebContents())
+      if (!contents.isDestroyed()) contents.send('i18n:changed', language)
+    return language
+  })
+  const backendOrigin = `http://localhost:${Number(process.env.PERO_PORT ?? 9120)}`
+  const trustedClient = (url: string) => {
+    const development =
+      process.env.ELECTRON_RENDERER_URL ||
+      process.env.VITE_DEV_SERVER_URL ||
+      'http://localhost:7359'
+    return url.startsWith('file://') || url.startsWith(`${new URL(development).origin}/`)
+  }
+  const trustedWindow = (sender: Electron.WebContents) =>
+    desktopTabs.isHost(sender) ||
+    [
+      windowManager.launcherWin,
+      windowManager.petWin,
+      windowManager.dashboardWin,
+      windowManager.chatWin,
+      windowManager.strongholdWin,
+      windowManager.ideWin,
+    ].some((win) => win?.webContents === sender)
+  let credentialHooksInstalled = false
+  ipcMain.on('client-access:credential', (event, kind?: string) => {
+    const url = event.sender.getURL()
+    const trusted = trustedWindow(event.sender) && trustedClient(url)
+    if (trusted && !credentialHooksInstalled) {
+      // 原生 img/audio/video 等不能自设 Header，只给可信主应用帧的本机请求附加凭据。
+      event.sender.session.webRequest.onBeforeSendHeaders(
+        { urls: [`${backendOrigin}/*`] },
+        (details, callback) => {
+          const source =
+            typeof details.webContentsId === 'number'
+              ? webContents.fromId(details.webContentsId)
+              : undefined
+          const frame = (details as { frame?: { url: string } | null }).frame
+          const allowed =
+            source &&
+            trustedWindow(source) &&
+            trustedClient(source.getURL()) &&
+            (!frame || frame.url.split('#')[0] === source.getURL().split('#')[0])
+          callback({
+            requestHeaders: allowed
+              ? { ...details.requestHeaders, Authorization: `Bearer ${getClientCredential()}` }
+              : details.requestHeaders,
+          })
+        },
+      )
+      credentialHooksInstalled = true
+    }
+    event.returnValue = trusted ? (kind === 'origin' ? backendOrigin : getClientCredential()) : ''
+  })
+  logger.info('IPC', __t('electron.logs.ipcBridge.ts', '正在注册 IPC 通道...'))
   const assertCompletionSettingsSender = (sender: Electron.WebContents) => {
     if (sender !== windowManager.petWin?.webContents && !desktopTabs.isHost(sender)) {
       throw new Error('仅主应用与桌宠可以管理完成提醒')
@@ -209,7 +339,7 @@ export function registerIpcHandlers(): void {
   registerSystemMonitorHandlers()
   registerAudioOutputHandlers()
 
-  logger.info('IPC', 'IPC 通道注册完成')
+  logger.info('IPC', __t('electron.logs.ipcBridge.ts', 'IPC 通道注册完成'))
 }
 
 function registerAudioOutputHandlers(): void {
@@ -285,7 +415,7 @@ function registerWindowHandlers(): void {
       win.setResizable(false)
       return true
     } catch (e: unknown) {
-      logger.error('IPC', `resize-pet-window 失败: ${e}`)
+      logger.error('IPC', __t('electron.logs.ipcBridge.ts', 'resize-pet-window 失败: {0}', [e]))
       return false
     }
   })
@@ -331,7 +461,7 @@ function registerDesktopTabHandlers(): void {
     }
     if (action === 'start') return startDesktopArca()
     const origin = `http://127.0.0.1:${Number(process.env.PERO_PORT ?? 9120)}`
-    const token = process.env.INFOS_API_TOKEN
+    const token = getClientCredential()
     const response = await fetch(`${origin}/api/applications/arca/${action}`, {
       method: action === 'status' ? 'GET' : 'POST',
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
@@ -532,12 +662,21 @@ function registerNavigationHandlers(): void {
 // 调用时返回提示信息，前端应迁移为通过 HTTP API 与 Daemon 交互。
 function registerBackendHandlers(): void {
   ipcMain.handle('start-backend', async () => {
-    logger.info('IPC', 'start-backend 已废弃：Daemon 独立运行，无需 Electron 启动')
+    logger.info(
+      'IPC',
+      __t(
+        'electron.logs.ipcBridge.ts',
+        'start-backend 已废弃：Daemon 独立运行，无需 Electron 启动',
+      ),
+    )
     return null
   })
 
   ipcMain.handle('stop-backend', async () => {
-    logger.info('IPC', 'stop-backend 已废弃：Daemon 生命周期由自身管理')
+    logger.info(
+      'IPC',
+      __t('electron.logs.ipcBridge.ts', 'stop-backend 已废弃：Daemon 生命周期由自身管理'),
+    )
     return null
   })
 
@@ -551,8 +690,8 @@ function registerSkillHandlers(): void {
   ipcMain.handle('select-skill-directory', async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     const options = {
-      title: '选择 Skill 文件夹',
-      buttonLabel: '选择此文件夹',
+      title: __t('electron.ui.ipcBridge.ts', '选择 Skill 文件夹'),
+      buttonLabel: __t('electron.ui.ipcBridge.ts', '选择此文件夹'),
       properties: ['openDirectory'] as Array<'openDirectory'>,
     }
     const result = win
@@ -591,7 +730,7 @@ function registerExportHandlers(): void {
     }
     const win = BrowserWindow.fromWebContents(event.sender)
     const dialogOptions = {
-      title: '选择角色包导出目录',
+      title: __t('electron.ui.ipcBridge.ts', '选择角色包导出目录'),
       properties: ['openDirectory', 'createDirectory'] as Array<
         'openDirectory' | 'createDirectory'
       >,
@@ -803,7 +942,7 @@ function registerAssetHandlers(): void {
 function registerNapCatHandlers(): void {
   void getNapCatDashboard()
     .then(({ initializeNapCatDashboard }) => initializeNapCatDashboard())
-    .catch(() => logger.warn('NapCat', '管理页入口初始化失败'))
+    .catch(() => logger.warn('NapCat', __t('electron.logs.ipcBridge.ts', '管理页入口初始化失败')))
   ipcMain.handle('start-napcat', async (event) => {
     desktopTabs.assertHost(event.sender)
     const { startNapCatWithDashboard } = await getNapCatDashboard()

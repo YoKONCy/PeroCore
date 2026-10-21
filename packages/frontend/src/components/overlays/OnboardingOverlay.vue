@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+import '@infos/shared/i18n/catalogs/onboarding'
+
 /**
  * OnboardingOverlay — 新手引导遮罩
  *
@@ -23,7 +26,7 @@ export interface OnboardingStep {
   eyebrow?: string
   /** 步骤标题 */
   title?: string
-  /** 进入该步骤前需要展示的 Launcher Tab */
+  /** 进入该步骤前需要展示的页面。 */
   tab?: string
   /** 表情标识 (用于立绘切换): 'normal' | 'proud' | 'none' */
   expression?: string
@@ -31,16 +34,21 @@ export interface OnboardingStep {
   focusSelector?: string | null
   /** 选择按钮 */
   choices?: { label: string; value: string }[]
+  /** 此步由真实页面按钮接续，点击对话框不能直接结束。 */
+  action?: 'launch-desktop'
+  placement?: 'top' | 'bottom'
 }
 
 interface Props {
   visible: boolean
   steps: OnboardingStep[]
+  prepareStep?: (step: OnboardingStep, index: number, signal: AbortSignal) => Promise<void>
 }
 
 const props = defineProps<Props>()
 const emit = defineEmits<{
   finish: []
+  skip: []
   'update:visible': [val: boolean]
   choice: [value: string]
   step: [step: OnboardingStep, index: number]
@@ -50,13 +58,43 @@ const currentIndex = ref(0)
 const displayedText = ref('')
 const isTypingDone = ref(false)
 const isAppearing = ref(false)
+const preparing = ref(false)
+const spotlight = ref<InstanceType<typeof SpotlightMask> | null>(null)
+const dialog = ref<HTMLElement | null>(null)
+const viewport = ref({ width: window.innerWidth, height: window.innerHeight })
+const tr = (source: string) => __t('ui.onboarding', source)
+let preparation: AbortController | undefined
+let enterTimer: ReturnType<typeof setTimeout> | undefined
+let exitTimer: ReturnType<typeof setTimeout> | undefined
+let closing = false
 
 let typeTimer: ReturnType<typeof setInterval> | null = null
 
 const currentStep = computed(() => props.steps[currentIndex.value])
 
 /** 当前步骤是否有聚光灯 */
-const hasSpotlight = computed(() => !!currentStep.value?.focusSelector)
+const hasSpotlight = computed(() => !!spotlight.value?.rect)
+const dialogOnTop = computed(
+  () =>
+    currentStep.value?.placement === 'top' ||
+    (currentStep.value?.placement !== 'bottom' &&
+      (spotlight.value?.rect?.y ?? 0) > viewport.value.height * 0.5),
+)
+const blockers = computed(() => {
+  const rect = currentStep.value?.action && !preparing.value ? spotlight.value?.rect : null
+  if (!rect) return [{ inset: '0' }]
+  const { width, height } = viewport.value
+  const left = Math.max(0, Math.min(width, rect.x - 8)),
+    top = Math.max(0, Math.min(height, rect.y - 8))
+  const right = Math.max(left, Math.min(width, rect.x + rect.width + 8))
+  const bottom = Math.max(top, Math.min(height, rect.y + rect.height + 8))
+  return [
+    { left: '0', top: '0', width: '100%', height: `${top}px` },
+    { left: '0', top: `${bottom}px`, width: '100%', bottom: '0' },
+    { left: '0', top: `${top}px`, width: `${left}px`, height: `${bottom - top}px` },
+    { left: `${right}px`, top: `${top}px`, right: '0', height: `${bottom - top}px` },
+  ]
+})
 
 // ── 表情-立绘映射 (还原 v1) ──
 
@@ -69,12 +107,16 @@ interface ExpressionInfo {
 const expressions: Record<string, ExpressionInfo> = {
   normal: {
     icon: 'cat',
-    label: '乖巧的 Pero',
+    get label() {
+      return __t('ui.overlays', '乖巧的 Pero')
+    },
     image: '/assets/onboarding/pero_normal.png',
   },
   proud: {
     icon: 'sparkle',
-    label: '得意的 Pero',
+    get label() {
+      return __t('ui.overlays', '得意的 Pero')
+    },
     image: '/assets/onboarding/pero_proud.png',
   },
 }
@@ -110,10 +152,10 @@ function preloadOnboardingImages() {
     img.src = url
     img.onload = () => {
       preloadedImages.value.add(url)
-      logger.info('Onboarding', `立绘预加载成功: ${url}`)
+      logger.info('Onboarding', __t('logs.frontend.overlays', '立绘预加载成功: {0}', [url]))
     }
     img.onerror = () => {
-      logger.error('Onboarding', `立绘预加载失败: ${url}`)
+      logger.error('Onboarding', __t('logs.frontend.overlays', '立绘预加载失败: {0}', [url]))
     }
   })
 }
@@ -129,6 +171,11 @@ const isImageReady = computed(() => {
 function startTyping() {
   if (typeTimer) clearInterval(typeTimer)
   const text = currentStep.value?.text ?? ''
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    displayedText.value = text
+    isTypingDone.value = true
+    return
+  }
   displayedText.value = ''
   isTypingDone.value = false
   let i = 0
@@ -143,36 +190,106 @@ function startTyping() {
   }, 35)
 }
 
-function startStep() {
+async function startStep() {
   const step = currentStep.value
   if (!step) return
+  preparation?.abort()
+  const controller = new AbortController()
+  preparation = controller
+  if (typeTimer) clearInterval(typeTimer)
+  displayedText.value = ''
+  isTypingDone.value = false
+  preparing.value = true
   emit('step', step, currentIndex.value)
-  void nextTick(() => {
-    window.dispatchEvent(new Event('onboarding-layout-change'))
-    startTyping()
-  })
+  try {
+    await props.prepareStep?.(step, currentIndex.value, controller.signal)
+  } catch {
+    // 页面加载失败时仍可退出或继续导览，不能把用户锁在遮罩里。
+  }
+  if (!props.visible || controller.signal.aborted) return
+  preparing.value = false
+  await nextTick()
+  if (!props.visible || controller.signal.aborted) return
+  window.dispatchEvent(new Event('onboarding-layout-change'))
+  startTyping()
 }
+function previous() {
+  if (preparing.value || closing || currentIndex.value === 0) return
+  currentIndex.value--
+  void startStep()
+}
+function skip() {
+  if (closing) return
+  closing = true
+  preparation?.abort()
+  if (typeTimer) clearInterval(typeTimer)
+  emit('skip')
+  emit('update:visible', false)
+}
+function keyboard(event: KeyboardEvent) {
+  if (!props.visible || closing) return
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    skip()
+  } else if (event.key === 'Tab') {
+    const buttons = [
+      ...(dialog.value?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []),
+    ]
+    const action =
+      currentStep.value?.action && currentStep.value.focusSelector
+        ? document.querySelector<HTMLButtonElement>(currentStep.value.focusSelector)
+        : null
+    if (action && !action.disabled) buttons.push(action)
+    if (!buttons.length) {
+      event.preventDefault()
+      dialog.value?.focus()
+      return
+    }
+    const index = buttons.indexOf(document.activeElement as HTMLButtonElement)
+    const next = (index + (event.shiftKey ? -1 : 1) + buttons.length) % buttons.length
+    event.preventDefault()
+    buttons[next]?.focus({ preventScroll: true })
+  } else if (event.target === dialog.value && (event.key === 'Enter' || event.key === ' ')) {
+    event.preventDefault()
+    handleNext()
+  }
+}
+function resize() {
+  viewport.value = { width: window.innerWidth, height: window.innerHeight }
+}
+window.addEventListener('keydown', keyboard, true)
+window.addEventListener('resize', resize)
+watch(
+  () => currentStep.value?.text,
+  () => {
+    if (props.visible && isAppearing.value && !preparing.value && !closing) startTyping()
+  },
+)
 
 /** 跳到完整文本 / 下一步 */
 function handleNext() {
+  if (preparing.value || closing) return
   if (!isTypingDone.value) {
     if (typeTimer) clearInterval(typeTimer)
     displayedText.value = currentStep.value?.text ?? ''
     isTypingDone.value = true
     return
   }
-  if (currentStep.value?.choices) return
+  if (currentStep.value?.choices || currentStep.value?.action) return
   advance()
 }
 
 /** 前进一步 */
 function advance() {
+  if (preparing.value || closing) return
   if (currentIndex.value < props.steps.length - 1) {
     currentIndex.value++
-    startStep()
+    void startStep()
   } else {
+    closing = true
     isAppearing.value = false
-    setTimeout(() => {
+    exitTimer = setTimeout(() => {
       emit('finish')
       emit('update:visible', false)
     }, 400)
@@ -181,6 +298,7 @@ function advance() {
 
 /** 选择 */
 function handleChoice(value: string) {
+  if (preparing.value || closing) return
   emit('choice', value)
   advance()
 }
@@ -190,14 +308,22 @@ watch(
   () => props.visible,
   (v) => {
     if (v) {
+      clearTimeout(enterTimer)
+      clearTimeout(exitTimer)
+      closing = false
       preloadOnboardingImages()
       currentIndex.value = 0
-      setTimeout(() => {
+      enterTimer = setTimeout(() => {
+        if (!props.visible) return
         isAppearing.value = true
-        startStep()
+        void startStep()
+        void nextTick(() => dialog.value?.focus({ preventScroll: true }))
       }, 200)
     } else {
       isAppearing.value = false
+      preparation?.abort()
+      clearTimeout(enterTimer)
+      clearTimeout(exitTimer)
       if (typeTimer) clearInterval(typeTimer)
     }
   },
@@ -205,6 +331,11 @@ watch(
 )
 
 onUnmounted(() => {
+  preparation?.abort()
+  clearTimeout(enterTimer)
+  clearTimeout(exitTimer)
+  window.removeEventListener('keydown', keyboard, true)
+  window.removeEventListener('resize', resize)
   if (typeTimer) clearInterval(typeTimer)
 })
 </script>
@@ -217,7 +348,11 @@ onUnmounted(() => {
         class="onb-overlay"
         :class="{ 'is-visible': isAppearing, 'has-spotlight': hasSpotlight }"
       >
-        <SpotlightMask :selector="currentStep?.focusSelector ?? null" />
+        <SpotlightMask
+          ref="spotlight"
+          :selector="preparing ? null : (currentStep?.focusSelector ?? null)"
+        />
+        <div v-for="(style, index) in blockers" :key="index" class="onb-blocker" :style="style" />
 
         <div
           v-if="currentStep?.expression !== 'none'"
@@ -237,7 +372,16 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <article class="onb-dialog" :class="{ ready: isAppearing }" @click="handleNext">
+        <article
+          ref="dialog"
+          class="onb-dialog"
+          :class="{ ready: isAppearing, 'onb-dialog--top': dialogOnTop }"
+          role="dialog"
+          aria-modal="true"
+          :aria-label="currentStep?.title || tr('Pero的小导览')"
+          tabindex="-1"
+          @click="handleNext"
+        >
           <header>
             <div class="onb-speaker">
               <PixelIcon name="cat" size="xs" />
@@ -249,17 +393,27 @@ onUnmounted(() => {
             </span>
           </header>
           <section>
-            <small>{{ currentStep?.eyebrow ?? 'INFOS GUIDE' }}</small>
-            <h2>{{ currentStep?.title ?? '新手引导' }}</h2>
+            <small>{{ currentStep?.eyebrow ?? tr('Pero的小导览') }}</small>
+            <h2>{{ currentStep?.title ?? __t('ui.overlays', '新手引导') }}</h2>
             <p>
-              {{ displayedText }}
-              <i v-if="!isTypingDone" />
+              {{ preparing ? tr('等页面准备好喵…') : displayedText }}
+              <i v-if="!isTypingDone && !preparing" />
             </p>
           </section>
           <footer>
             <div class="onb-progress">
               <i :style="{ width: `${((currentIndex + 1) / steps.length) * 100}%` }" />
             </div>
+            <button type="button" class="onb-skip" @click.stop="skip">{{ tr('稍后再看') }}</button>
+            <button
+              v-if="currentIndex"
+              type="button"
+              class="onb-back"
+              :disabled="preparing"
+              @click.stop="previous"
+            >
+              {{ tr('上一步') }}
+            </button>
             <div v-if="currentStep?.choices && isTypingDone" class="onb-choices">
               <PButton
                 v-for="choice in currentStep.choices"
@@ -270,16 +424,26 @@ onUnmounted(() => {
                 {{ choice.label }}
               </PButton>
             </div>
-            <span v-else>
+            <span v-else-if="currentStep?.action">
+              {{ tr('点击高亮的启动按钮') }}
+              <PixelIcon name="arrow-right" size="xs" />
+            </span>
+            <button
+              v-else
+              type="button"
+              class="onb-next"
+              :disabled="preparing"
+              @click.stop="handleNext"
+            >
               {{
                 isTypingDone
                   ? currentIndex === steps.length - 1
-                    ? '完成引导'
-                    : '点击继续'
-                  : '正在介绍…'
+                    ? __t('ui.overlays', '完成引导')
+                    : __t('ui.overlays', '点击继续')
+                  : __t('ui.overlays', '正在介绍…')
               }}
               <PixelIcon name="arrow-right" size="xs" />
-            </span>
+            </button>
           </footer>
         </article>
       </div>
@@ -304,6 +468,15 @@ onUnmounted(() => {
 .onb-overlay.has-spotlight {
   background: transparent;
   backdrop-filter: none;
+}
+.onb-blocker {
+  position: absolute;
+  z-index: 1;
+  pointer-events: auto;
+}
+.onb-dialog.onb-dialog--top {
+  top: 68px;
+  bottom: auto;
 }
 .onb-character {
   position: absolute;
@@ -442,12 +615,44 @@ onUnmounted(() => {
   border-top: 1px solid var(--ui-border-subtle);
   background: var(--ui-bg-surface-soft);
 }
-.onb-dialog footer > span {
+.onb-dialog footer > span,
+.onb-next,
+.onb-back,
+.onb-skip {
   display: flex;
   align-items: center;
   gap: 5px;
   color: var(--ui-text-tertiary);
   font: 800 9px var(--ui-font-mono);
+}
+.onb-next,
+.onb-back,
+.onb-skip {
+  min-height: 38px;
+  padding: 6px 8px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.onb-next {
+  color: var(--ui-accent-primary);
+}
+.onb-skip {
+  margin-right: auto;
+}
+.onb-back {
+  margin-right: 8px;
+}
+.onb-dialog footer button:hover:not(:disabled) {
+  color: var(--ui-accent-primary);
+}
+.onb-dialog footer button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.onb-dialog button:focus-visible {
+  outline: 2px solid var(--ui-accent-primary);
+  outline-offset: -3px;
 }
 .onb-progress {
   position: absolute;
@@ -490,6 +695,21 @@ onUnmounted(() => {
   .onb-dialog {
     bottom: 20px;
     width: calc(100vw - 32px);
+  }
+  .onb-dialog.onb-dialog--top {
+    top: 58px;
+    bottom: auto;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .onb-overlay,
+  .onb-dialog,
+  .onb-character,
+  .onb-progress i {
+    transition: none;
+  }
+  .onb-dialog p i {
+    animation: none;
   }
 }
 </style>

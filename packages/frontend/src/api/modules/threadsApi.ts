@@ -8,7 +8,13 @@
  * 早期版本误用 /threads 前缀导致 404，已修正。
  */
 
-import type { ConversationProjectionSnapshot, InteractionMode, ExecutionMode } from '@infos/shared'
+import type {
+  ConversationProjectionSnapshot,
+  InteractionMode,
+  ExecutionMode,
+  ThreadModelSettings,
+  ReasoningEffort,
+} from '@infos/shared'
 import { apiClient } from '../client'
 
 /** Thread 频道类型 */
@@ -155,11 +161,30 @@ export interface GetLatestThreadRequest {
 }
 
 export const threadsApi = {
+  getModelSettings: (threadId: string) =>
+    apiClient.get<ThreadModelSettings>(
+      `/chat/threads/${encodeURIComponent(threadId)}/model-settings`,
+    ),
+  updateModelSettings: (
+    threadId: string,
+    settings: { modelConfigId: number | null; reasoningEffort: ReasoningEffort | null },
+  ) =>
+    apiClient.put<ThreadModelSettings>(
+      `/chat/threads/${encodeURIComponent(threadId)}/model-settings`,
+      settings,
+    ),
   /** 分页获取 Thread 列表 */
-  list: (params?: { agentId?: string; channel?: string; page?: number; pageSize?: number }) => {
+  list: (params?: {
+    agentId?: string
+    channel?: string
+    purpose?: 'conversation' | 'background_task' | 'app_internal'
+    page?: number
+    pageSize?: number
+  }) => {
     const query = new URLSearchParams()
     if (params?.agentId) query.set('agentId', params.agentId)
     if (params?.channel) query.set('channel', params.channel)
+    if (params?.purpose) query.set('purpose', params.purpose)
     if (params?.page) query.set('page', String(params.page))
     if (params?.pageSize) query.set('pageSize', String(params.pageSize))
     const qs = query.toString()

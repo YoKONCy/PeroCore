@@ -1,0 +1,12 @@
+{
+  "[infOS] 日志文件已启用: {0}": "[infOS] 日志文件已启用: {0}",
+  "未捕获异常 (uncaughtException)，进程即将退出": "未捕获异常 (uncaughtException)，进程即将退出",
+  "未处理的 Promise 拒绝 (unhandledRejection)": "未处理的 Promise 拒绝 (unhandledRejection)",
+  "收到 {0} 信号，开始优雅退出...": "收到 {0} 信号，开始优雅退出...",
+  "清理回调执行失败": "清理回调执行失败",
+  "优雅退出完成，再见喵~ 🐾": "优雅退出完成，再见喵~ 🐾",
+  "[infOS] 进程退出 (code: {0})": "[infOS] 进程退出 (code: {0})",
+  "进程守护已注册 (uncaughtException / unhandledRejection / SIGINT / SIGTERM)": "进程守护已注册 (uncaughtException / unhandledRejection / SIGINT / SIGTERM)",
+  "OpenTelemetry 已启用，导出到 {0}": "OpenTelemetry 已启用，导出到 {0}",
+  "OpenTelemetry 已启用（仅上下文传播，未配置导出器）": "OpenTelemetry 已启用（仅上下文传播，未配置导出器）"
+}

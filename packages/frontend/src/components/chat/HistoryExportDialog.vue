@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /** 三大聊天页共用的历史导出选项弹窗。 */
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { PButton, PCheckbox, PDialog, PixelIcon } from '../pixel'
 import type { HistoryExportOptions } from '../../utils/historyExport'
 
@@ -12,7 +14,7 @@ const props = withDefaults(
     disabled?: boolean
   }>(),
   {
-    title: '导出历史记录',
+    title: undefined,
     allowStructuredContent: true,
     disabled: false,
   },
@@ -24,6 +26,7 @@ const emit = defineEmits<{
 }>()
 
 const includeThinking = ref(false)
+const displayTitle = computed(() => props.title ?? __t('ui.chat', '导出历史记录'))
 const includeTools = ref(true)
 
 watch(
@@ -46,7 +49,7 @@ function confirm(): void {
 <template>
   <PDialog
     :model-value="modelValue"
-    :title="title"
+    :title="displayTitle"
     width="420px"
     @update:model-value="emit('update:modelValue', $event)"
   >
@@ -54,26 +57,26 @@ function confirm(): void {
       <div class="history-export-dialog__intro">
         <PixelIcon name="download" size="md" />
         <div>
-          <strong>导出当前会话为 Markdown</strong>
-          <p>文件直接保存到客户端，不会在服务端创建副本。</p>
+          <strong>{{ __t('ui.chat', '导出当前会话为 Markdown') }}</strong>
+          <p>{{ __t('ui.chat', '文件直接保存到客户端，不会在服务端创建副本。') }}</p>
         </div>
       </div>
       <template v-if="allowStructuredContent">
-        <PCheckbox v-model="includeThinking" label="导出思考内容" />
-        <PCheckbox v-model="includeTools" label="导出工具调用参数与结果" />
+        <PCheckbox v-model="includeThinking" :label="__t('ui.chat', '导出思考内容')" />
+        <PCheckbox v-model="includeTools" :label="__t('ui.chat', '导出工具调用参数与结果')" />
       </template>
       <p v-else class="history-export-dialog__hint">
-        据点房间历史当前只持久化发言正文，没有思考块与工具调用记录。
+        {{ __t('ui.chat', '据点房间历史当前只持久化发言正文，没有思考块与工具调用记录。') }}
       </p>
     </div>
 
     <template #footer>
       <PButton variant="secondary" size="sm" @click="emit('update:modelValue', false)">
-        取消
+        {{ __t('ui.chat', '取消') }}
       </PButton>
       <PButton size="sm" :disabled="disabled" @click="confirm">
         <PixelIcon name="download" size="xs" />
-        导出 Markdown
+        {{ __t('ui.chat', '导出 Markdown') }}
       </PButton>
     </template>
   </PDialog>

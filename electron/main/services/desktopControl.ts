@@ -1,3 +1,4 @@
+import { t as __t } from '../utils/i18n'
 import { app, BrowserWindow, globalShortcut, powerMonitor, screen } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -280,7 +281,10 @@ class DesktopControl {
           },
         },
       ],
-      message: '已观察桌面。操作时引用 observationId；坐标以本次截图为准。',
+      message: __t(
+        'electron.ui.desktopControl',
+        '已观察桌面。操作时引用 observationId；坐标以本次截图为准。',
+      ),
     }
   }
 
@@ -400,7 +404,10 @@ class DesktopControl {
         return {
           ...next,
           actionReceipt: receipt,
-          message: '动作已发送，以下是操作后画面。请检查结果后再继续。',
+          message: __t(
+            'electron.ui.desktopControl',
+            '动作已发送，以下是操作后画面。请检查结果后再继续。',
+          ),
         }
       } catch (error) {
         await windowsDesktop.release()
@@ -501,7 +508,10 @@ class DesktopControl {
     else this.state.epoch++
   }
   private readonly onUnavailable = (reason: string) => {
-    logger.warn('DesktopControl', `Windows 桌面组件已断开：${reason}`)
+    logger.warn(
+      'DesktopControl',
+      __t('electron.logs.desktopControl', 'Windows 桌面组件已断开：{0}', [reason]),
+    )
     this.pause('桌面组件已断开，请检查后继续')
     this.state = { ...this.state, phase: 'unavailable', reason: '桌面组件已断开，请检查后继续' }
     this.publish()

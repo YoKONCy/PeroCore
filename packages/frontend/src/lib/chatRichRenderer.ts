@@ -1,3 +1,4 @@
+import { t as __t } from '../i18n/index'
 /**
  * chatRichRenderer — 前端领域模块
  *
@@ -5,7 +6,7 @@
  * 调用方依赖这里的稳定契约，不直接耦合底层传输或运行时实现。
  */
 import DOMPurify from 'dompurify'
-import { isResourceLink, isHtmlFileReference } from './resourceLinks'
+import { isResourceLink, isFileReference } from './resourceLinks'
 import { Marked, Renderer } from 'marked'
 import katex from 'katex'
 import hljs from 'highlight.js/lib/core'
@@ -56,14 +57,29 @@ renderer.code = ({ text, lang }) => {
     text.length <= 32_000 && hljs.getLanguage(language)
       ? hljs.highlight(text, { language, ignoreIllegals: true }).value
       : escapeHtml(text)
-  return `<div class="chat-code-block"><div class="chat-code-head"><span>${escapeHtml(language.toUpperCase())}</span><button type="button" data-copy-code>复制</button></div><pre><code class="hljs language-${escapeHtml(language)}">${highlighted}</code></pre></div>`
+  return __t(
+    'ui.chatRichRenderer',
+    '<div class="chat-code-block"><div class="chat-code-head"><span>{0}</span><button type="button" data-copy-code>复制</button></div><pre><code class="hljs language-{1}">{2}</code></pre></div>',
+    [escapeHtml(language.toUpperCase()), escapeHtml(language), highlighted],
+  )
 }
 
 let parsingLinkLabel = false
 renderer.codespan = ({ text }) =>
-  !parsingLinkLabel && isHtmlFileReference(text)
+  !parsingLinkLabel && isFileReference(text)
     ? `<a href="#" class="chat-resource-chip" data-resource-source="${escapeHtml(text)}"><code>${escapeHtml(text)}</code><span aria-hidden="true">↗</span></a>`
     : `<code>${escapeHtml(text)}</code>`
+
+// 嵌套在强调或表格中的本地图片不直接加载设备路径，仍提供统一的可点击资源入口。
+renderer.image = ({ href, text }) => {
+  const image = /^https?:\/\//i.test(href)
+    ? `<img src="${escapeHtml(href)}" alt="${escapeHtml(text)}" loading="lazy" referrerpolicy="no-referrer">`
+    : escapeHtml(text || href)
+  if (parsingLinkLabel) return image
+  if (isResourceLink(href) || /^https?:\/\//i.test(href))
+    return `<a href="#" class="chat-resource-chip" data-resource-source="${escapeHtml(href)}">${image}<span aria-hidden="true">↗</span></a>`
+  return escapeHtml(text)
+}
 
 const SAFE_INLINE_HTML =
   /^<\/?(?:span|mark|small|kbd|sub|sup|u|s|b|i|strong|em)(?:\s[^>]*)?>$|^<br\s*\/?>$/i
@@ -91,7 +107,15 @@ renderer.link = function ({ href, title, tokens }) {
   return `<a href="${escapeHtml(safeHref)}"${title ? ` title="${escapeHtml(title)}"` : ''} target="_blank" rel="noopener noreferrer">${label}${external ? '<span class="chat-link-mark">↗</span>' : ''}</a>`
 }
 
-const marked = new Marked({ renderer, breaks: true, gfm: true })
+const marked = new Marked({
+  renderer,
+  breaks: true,
+  gfm: true,
+  tokenizer: {
+    // 聊天中的波浪号原样显示；返回 undefined 禁用删除线，false 会回退到默认解析。
+    del: () => undefined,
+  },
+})
 const RICH_TEXT_CACHE_LIMIT = 500
 const RICH_TEXT_CACHE_MAX_SOURCE_LENGTH = 64_000
 const richTextCache = new Map<string, string>()
@@ -245,11 +269,11 @@ function decorateTextNodes(html: string): string {
   return template.innerHTML
 }
 
-/** 普通正文中的 HTML 文件名也可打开；代码块、已有链接与公式不参与识别。 */
+/** 普通正文中的已知文件名可打开；代码块、已有链接与公式不参与识别。 */
 function htmlReferenceFragment(text: string): DocumentFragment | null {
   const pattern =
-    /(?:^|(?<=[\s（("“「]))(?:workspace:|[a-z]:[\\/]|\.\.?\/)?[\p{L}\p{N}_][\p{L}\p{N}_./\\:-]*\.html?(?=$|[\s，。！？、）)"”」])/giu
-  const matches = [...text.matchAll(pattern)].filter((match) => isHtmlFileReference(match[0]))
+    /(?:^|(?<=[\s（("“「]))(?:workspace:|[a-z]:[\\/]|\.\.?\/)?[\p{L}\p{N}_][\p{L}\p{N}_./\\:-]*\.[a-z\d]{1,12}(?=$|[\s，。！？、）)"”」])/giu
+  const matches = [...text.matchAll(pattern)].filter((match) => isFileReference(match[0]))
   if (!matches.length) return null
   const fragment = document.createDocumentFragment()
   let cursor = 0

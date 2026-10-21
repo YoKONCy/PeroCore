@@ -1,3 +1,4 @@
+import { t as __t } from '../i18n'
 /**
  * workbench — 响应式状态仓储
  *
@@ -393,7 +394,7 @@ export const useWorkbenchStore = defineStore('arca-workbench', {
         parentId: parent.nodeId,
         parentGeneration: parent.generation,
         orderKey,
-        text: type === 'heading' ? '新标题' : '',
+        text: type === 'heading' ? __t('apps.arca.ui', '新标题') : '',
         attributes: type === 'heading' ? { level: 2 } : {},
       })
     },
@@ -638,7 +639,9 @@ export const useWorkbenchStore = defineStore('arca-workbench', {
         {
           documentId,
           baseRevisionId: source.revisionId,
-          title: `${source.document.title}（副本）`,
+          get title() {
+            return __t('apps.arca.ui', '{0}（副本）', [source.document.title])
+          },
           surfaceSessionToken: this.session.token,
         },
         { idempotencyKey: crypto.randomUUID() },

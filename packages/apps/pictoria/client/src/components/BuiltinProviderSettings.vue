@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { pictoria } from '../services/transport'
 import Icon from './PictoriaIcon.vue'
@@ -110,9 +112,15 @@ onBeforeUnmount(() => {
       </span>
       <div>
         <strong>{{ name }}</strong>
-        <small>图片与视频</small>
+        <small>{{ __t('apps.pictoria.ui', '图片与视频') }}</small>
       </div>
-      <span class="provider-state">{{ profile?.hasCredential ? '已配置' : '待配置' }}</span>
+      <span class="provider-state">
+        {{
+          profile?.hasCredential
+            ? __t('apps.pictoria.ui', '已配置')
+            : __t('apps.pictoria.ui', '待配置')
+        }}
+      </span>
     </div>
     <label class="panel-field">
       API Key
@@ -121,11 +129,15 @@ onBeforeUnmount(() => {
         type="password"
         autocomplete="new-password"
         :disabled="busy || !online"
-        :placeholder="profile?.hasCredential ? '已保存 · 留空不改' : '输入 API Key'"
+        :placeholder="
+          profile?.hasCredential
+            ? __t('apps.pictoria.ui', '已保存 · 留空不改')
+            : __t('apps.pictoria.ui', '输入 API Key')
+        "
       />
     </label>
     <div class="panel-field">
-      <span>生成模型</span>
+      <span>{{ __t('apps.pictoria.ui', '生成模型') }}</span>
       <PictoriaSelect
         v-model="generateModel"
         :disabled="busy || !profile"
@@ -134,11 +146,11 @@ onBeforeUnmount(() => {
             .filter((model) => model.mode === 'generate')
             .map((model) => ({ value: model.id, label: `${name} · ${model.name}` }))
         "
-        label="生成模型"
+        :label="__t('apps.pictoria.ui', '生成模型')"
       />
     </div>
     <div class="panel-field">
-      <span>编辑模型</span>
+      <span>{{ __t('apps.pictoria.ui', '编辑模型') }}</span>
       <PictoriaSelect
         v-model="editModel"
         :disabled="busy || !profile"
@@ -147,11 +159,11 @@ onBeforeUnmount(() => {
             .filter((model) => model.mode === 'edit')
             .map((model) => ({ value: model.id, label: `${name} · ${model.name}` }))
         "
-        label="编辑模型"
+        :label="__t('apps.pictoria.ui', '编辑模型')"
       />
     </div>
     <div class="panel-field">
-      <span>视频模型</span>
+      <span>{{ __t('apps.pictoria.ui', '视频模型') }}</span>
       <PictoriaSelect
         v-model="videoModel"
         :disabled="busy || !profile"
@@ -160,7 +172,7 @@ onBeforeUnmount(() => {
             .filter((model) => model.mode === 'video')
             .map((model) => ({ value: model.id, label: `${name} · ${model.name}` }))
         "
-        label="视频模型"
+        :label="__t('apps.pictoria.ui', '视频模型')"
       />
     </div>
     <div class="provider-actions">
@@ -170,7 +182,7 @@ onBeforeUnmount(() => {
         @click="save()"
       >
         <Icon name="check" :size="14" />
-        {{ busy ? '保存中' : '保存' }}
+        {{ busy ? __t('apps.pictoria.ui', '保存中') : __t('apps.pictoria.ui', '保存') }}
       </button>
       <button
         v-if="profile?.hasCredential"
@@ -178,7 +190,7 @@ onBeforeUnmount(() => {
         :disabled="busy"
         @click="save(true)"
       >
-        移除凭据
+        {{ __t('apps.pictoria.ui', '移除凭据') }}
       </button>
     </div>
     <Transition name="fade">

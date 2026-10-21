@@ -1,3 +1,4 @@
+import { t as __t } from './i18n'
 /**
  * 进程生命周期守护
  *
@@ -28,7 +29,7 @@ const shutdownCallbacks: Array<() => Promise<void> | void> = []
 export function registerProcessGuards(): void {
   // ── 未捕获的同步异常 ──
   process.on('uncaughtException', (err) => {
-    logger.error('未捕获异常 (uncaughtException)，进程即将退出', {
+    logger.error(__t('logs.lib', '未捕获异常 (uncaughtException)，进程即将退出'), {
       name: err.name,
       message: err.message,
       stack: err.stack,
@@ -43,7 +44,7 @@ export function registerProcessGuards(): void {
     const message = reason instanceof Error ? reason.message : String(reason)
     const stack = reason instanceof Error ? reason.stack : undefined
 
-    logger.warn('未处理的 Promise 拒绝 (unhandledRejection)', {
+    logger.warn(__t('logs.lib', '未处理的 Promise 拒绝 (unhandledRejection)'), {
       message,
       stack,
     })
@@ -53,18 +54,18 @@ export function registerProcessGuards(): void {
   const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM']
   for (const signal of signals) {
     process.on(signal, async () => {
-      logger.info(`收到 ${signal} 信号，开始优雅退出...`)
+      logger.info(__t('logs.lib', '收到 {0} 信号，开始优雅退出...', [signal]))
 
       // 执行所有注册的清理回调
       for (const callback of shutdownCallbacks) {
         try {
           await callback()
         } catch (err) {
-          logger.error('清理回调执行失败', { error: String(err) })
+          logger.error(__t('logs.lib', '清理回调执行失败'), { error: String(err) })
         }
       }
 
-      logger.info('优雅退出完成，再见喵~ 🐾')
+      logger.info(__t('logs.lib', '优雅退出完成，再见喵~ 🐾'))
 
       // 给日志 flush 时间
       setTimeout(() => process.exit(0), 500)
@@ -74,10 +75,12 @@ export function registerProcessGuards(): void {
   // ── 进程退出前最后的日志 ──
   process.on('exit', (code) => {
     // 这里只能用同步操作
-    console.log(`[infOS] 进程退出 (code: ${code})`)
+    console.log(__t('logs.lib', '[infOS] 进程退出 (code: {0})', [code]))
   })
 
-  logger.debug('进程守护已注册 (uncaughtException / unhandledRejection / SIGINT / SIGTERM)')
+  logger.debug(
+    __t('logs.lib', '进程守护已注册 (uncaughtException / unhandledRejection / SIGINT / SIGTERM)'),
+  )
 }
 
 /**

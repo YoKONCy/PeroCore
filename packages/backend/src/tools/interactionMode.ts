@@ -3,6 +3,27 @@ import type { ToolRegistry } from '../services/agent/toolRegistry'
 import { isAdvancedTool } from './advancedTools'
 import { WORK_CONTROL_TOOLS } from './systemProtocolTools'
 
+/** 极简模式沿用原陪伴工具集合；主动行为开关不参与工具权限判断。 */
+export const MINIMAL_TOOLS = new Set([
+  'finish_task',
+  'take_screenshot',
+  'set_reminder',
+  'list_reminders',
+  'cancel_reminder',
+  'schedule_follow_up',
+  'suggest_next_step',
+  'write_event_note',
+  'revise_event_note',
+  'query_event_notes',
+  'query_facts',
+  'search_knowledge',
+  'write_fact',
+  'supersede_fact',
+  'delete_fact',
+  'add_fact_object_alias',
+  'remove_fact_object_alias',
+])
+
 /** 聊天保留日常助理和文本处理能力；扩展通过注册元数据声明准入。 */
 const CHAT_TOOLS = new Set([
   'ask_user',
@@ -42,6 +63,8 @@ export function isToolAllowedInInteractionMode(
   mode: InteractionMode,
   registry: ToolRegistry,
 ): boolean {
+  if (name === 'document') return mode === 'work'
+  if (mode === 'minimal') return MINIMAL_TOOLS.has(name)
   if (mode === 'chat' && (WORK_CONTROL_TOOLS.has(name) || isAdvancedTool(name))) return false
   return mode === 'work' || CHAT_TOOLS.has(name) || registry.isChatEnabled(name)
 }

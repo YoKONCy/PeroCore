@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 import { Hono } from 'hono'
 import { z } from 'zod'
 import type { AppContext } from '../container'
@@ -14,13 +15,17 @@ export function createDistributedRouter(ctx: AppContext) {
   const router = new Hono()
 
   router.get('/identity', (c) =>
-    c.json({ code: 'OK', message: '获取成功', data: ctx.distributedSyncService.identity() }),
+    c.json({
+      code: 'OK',
+      message: __t('server.routers', '获取成功'),
+      data: ctx.distributedSyncService.identity(),
+    }),
   )
 
   router.get('/servers', async (c) =>
     c.json({
       code: 'OK',
-      message: '获取成功',
+      message: __t('server.routers', '获取成功'),
       data: await ctx.distributedSyncService.listServers(),
     }),
   )
@@ -28,7 +33,7 @@ export function createDistributedRouter(ctx: AppContext) {
   router.post('/servers/probe', zValidator('json', serverInput), async (c) =>
     c.json({
       code: 'OK',
-      message: '连接成功',
+      message: __t('server.routers', '连接成功'),
       data: await ctx.distributedSyncService.probe(
         c.req.valid('json').endpoint,
         c.req.valid('json').token,
@@ -40,7 +45,7 @@ export function createDistributedRouter(ctx: AppContext) {
     c.json(
       {
         code: 'CREATED',
-        message: '服务器已保存',
+        message: __t('server.routers', '服务器已保存'),
         data: await ctx.distributedSyncService.saveServer(c.req.valid('json')),
       },
       201,
@@ -50,7 +55,7 @@ export function createDistributedRouter(ctx: AppContext) {
   router.delete('/servers/:serverId', async (c) =>
     c.json({
       code: 'OK',
-      message: '服务器已删除',
+      message: __t('server.routers', '服务器已删除'),
       data: { removed: await ctx.distributedSyncService.removeServer(c.req.param('serverId')) },
     }),
   )
@@ -61,7 +66,7 @@ export function createDistributedRouter(ctx: AppContext) {
     return c.json(
       {
         code: 'ACCEPTED',
-        message: '完整快照已校验并暂存，将在 Daemon 重启时安全应用',
+        message: __t('server.routers', '完整快照已校验并暂存，将在 Daemon 重启时安全应用'),
         data: {
           manifest: await ctx.distributedSyncService.stageEncryptedSnapshot(bytes, transferKey),
           restartRequired: true,
@@ -87,7 +92,7 @@ export function createDistributedRouter(ctx: AppContext) {
     c.json(
       {
         code: 'ACCEPTED',
-        message: '完整快照已校验并暂存，将在 Daemon 重启时安全应用',
+        message: __t('server.routers', '完整快照已校验并暂存，将在 Daemon 重启时安全应用'),
         data: {
           manifest: await ctx.distributedSyncService.stageFromServer(c.req.param('serverId')),
           restartRequired: true,
@@ -100,7 +105,7 @@ export function createDistributedRouter(ctx: AppContext) {
   router.get('/pending', async (c) =>
     c.json({
       code: 'OK',
-      message: '获取成功',
+      message: __t('server.routers', '获取成功'),
       data: {
         pending: await ctx.distributedSyncService.pending(),
         lastSync: await ctx.distributedSyncService.lastSync(),
@@ -114,8 +119,8 @@ export function createDistributedRouter(ctx: AppContext) {
       {
         code: staged ? 'ACCEPTED' : 'NOT_FOUND',
         message: staged
-          ? '已暂存撤销操作，将在 Daemon 重启时恢复同步前备份'
-          : '没有可撤销的同步备份',
+          ? __t('server.routers', '已暂存撤销操作，将在 Daemon 重启时恢复同步前备份')
+          : __t('server.routers', '没有可撤销的同步备份'),
         data: { staged, restartRequired: staged },
       },
       staged ? 202 : 404,
@@ -130,7 +135,7 @@ export function createDistributedRouter(ctx: AppContext) {
     return c.json(
       {
         code: 'CREATED',
-        message: '一次性能力节点配对邀请已生成',
+        message: __t('server.routers', '一次性能力节点配对邀请已生成'),
         data: ctx.capabilityBridge.createPairingInvite(`${protocol}://${host}:${port}`),
       },
       201,
@@ -140,7 +145,7 @@ export function createDistributedRouter(ctx: AppContext) {
   router.get('/capability-nodes', (c) =>
     c.json({
       code: 'OK',
-      message: '获取成功',
+      message: __t('server.routers', '获取成功'),
       data: {
         nodes: ctx.nodeRegistry.listNodes().filter((node) => node.facets.includes('capability')),
         sessions: ctx.nodeRegistry.listSessions(),

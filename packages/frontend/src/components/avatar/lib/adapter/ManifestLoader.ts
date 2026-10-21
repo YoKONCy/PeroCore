@@ -1,3 +1,4 @@
+import { t as __t } from '../../../../i18n/index'
 /**
  * Manifest 加载器
  *
@@ -61,11 +62,17 @@ export class ManifestLoader {
       throw new Error('Manifest resources 缺少 texture 字段')
     }
     if (!manifest.retargetingMap) {
-      logger.warn('ManifestLoader', 'Manifest 缺少 retargetingMap，使用空映射')
+      logger.warn(
+        'ManifestLoader',
+        __t('logs.frontend.avatar', 'Manifest 缺少 retargetingMap，使用空映射'),
+      )
       manifest.retargetingMap = { mapping: {} }
     }
     if (!manifest.featureButtons) {
-      logger.warn('ManifestLoader', 'Manifest 缺少 featureButtons，使用空数组')
+      logger.warn(
+        'ManifestLoader',
+        __t('logs.frontend.avatar', 'Manifest 缺少 featureButtons，使用空数组'),
+      )
       manifest.featureButtons = []
     }
 

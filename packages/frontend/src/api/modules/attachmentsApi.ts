@@ -5,7 +5,7 @@
  * 调用方依赖这里的稳定契约，不直接耦合底层传输或运行时实现。
  */
 import { apiClient } from '../client'
-import { getApiBaseUrl } from '../transport'
+import { getApiResourceUrl } from '../transport'
 
 export interface AttachmentInfo {
   id: string
@@ -35,7 +35,11 @@ export const attachmentsApi = {
     return apiClient.request<AttachmentInfo>('/attachments', { method: 'POST', body: form })
   },
 
-  contentUrl: (id: string) => `${getApiBaseUrl()}/attachments/${encodeURIComponent(id)}/content`,
+  contentUrl: (id: string, download = false) =>
+    getApiResourceUrl(
+      `/attachments/${encodeURIComponent(id)}/content`,
+      new URLSearchParams(download ? { download: '1' } : {}),
+    ),
 
   removeUnbound: (id: string) => apiClient.delete<void>(`/attachments/${encodeURIComponent(id)}`),
 }

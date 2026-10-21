@@ -1,0 +1,16 @@
+{
+  "陪伴调度已在运行中": "companion scheduling is already running",
+  "陪伴调度 tick 失败: {0}": "companion scheduling tick failed: {0}",
+  "陪伴调度已启动: agent={0}, interval={1}ms": "companion scheduling has been started: agent={0}, interval={1}ms",
+  "陪伴模式总结失败: {0}": "companion mode summary failed: {0}",
+  "陪伴调度已停止: agent={0}": "companion scheduling has stopped: agent={0}",
+  "连续主动对话达上限，冷却中": "The continuous active dialogue has reached the upper limit and is cooling down.",
+  "触发主动对话: agent={0}, timeSlot={1}, trigger={2}": "triggers active dialogue: agent={0}, timeSlot={1}, trigger={2}",
+  "主动对话已推送: {0}...": "active conversation has been pushed: {0}...",
+  "主动对话生成失败: {0}": "Active dialogue generation failed: {0}",
+  "全局主动模式恢复失败，已保持关闭": "Global active mode recovery failed and remains closed",
+  "保存主动行为活动时间失败": "Failed to save active behavior activity time",
+  "主动行为调度失败": "Active behavior scheduling failed",
+  "全局主动行为本轮结束": "Global active behavior ends this round",
+  "主动状态推送失败": "Active status push failed"
+}

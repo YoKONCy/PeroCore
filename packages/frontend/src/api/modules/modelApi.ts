@@ -4,8 +4,8 @@
  */
 
 import { apiClient } from '../client'
-
-export type ReasoningEffort = 'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+import type { ReasoningEffort } from '@infos/shared'
+export type { ReasoningEffort } from '@infos/shared'
 
 /** 模型配置项 */
 export interface ModelConfigItem {
@@ -15,6 +15,10 @@ export interface ModelConfigItem {
   modelId: string
   apiKey: string
   apiBase?: string
+  providerConnectionId?: string | null
+  connectionOverride?: boolean
+  connectionProtocol?: 'openai' | 'anthropic' | 'gemini' | null
+  connectionAuthMode?: 'api_key' | 'none'
   temperature: number | null
   topP: number | null
   maxTokens: number | null
@@ -33,6 +37,9 @@ export interface ModelConfigItem {
 }
 
 export const modelApi = {
+  getFallbacks: (id: string) => apiClient.get<{ modelIds: number[] }>(`/models/${id}/fallbacks`),
+  setFallbacks: (id: string, modelIds: number[]) =>
+    apiClient.put<{ modelIds: number[] }>(`/models/${id}/fallbacks`, { modelIds }),
   /** 获取所有模型配置 */
   list: () => apiClient.get<ModelConfigItem[]>('/models'),
 
@@ -50,9 +57,18 @@ export const modelApi = {
   remove: (id: string) => apiClient.delete(`/models/${id}`),
 
   /** 测试模型连通性 */
-  test: (id: string) => apiClient.post<{ latencyMs: number }>(`/models/${id}/test`),
+  test: (id: string) =>
+    apiClient.post<{ success: boolean; durationMs: number; response?: string }>(
+      `/models/${id}/test`,
+    ),
 
   /** 获取远程模型列表 */
-  listRemote: (params: { provider: string; apiKey: string; apiBase?: string }) =>
-    apiClient.post<string[]>('/models/list-remote', params),
+  listRemote: (params: {
+    provider: string
+    apiKey: string
+    apiBase?: string
+    protocol?: 'openai' | 'anthropic' | 'gemini'
+    providerConnectionId?: string
+    connectionOverride?: boolean
+  }) => apiClient.post<string[]>('/models/list-remote', params),
 }

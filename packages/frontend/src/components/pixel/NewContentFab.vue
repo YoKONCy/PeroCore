@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /**
  * NewContentFab — 「新动态 ↓」浮动按钮
  *
@@ -28,11 +30,11 @@ function onClick() {
     <button
       v-if="visible"
       class="new-content-fab pixel-border-moe"
-      aria-label="查看新动态"
+      :aria-label="__t('ui.pixel', '查看新动态')"
       @click="onClick"
     >
       <!-- 提示文案 -->
-      <span class="new-content-fab__label">新动态</span>
+      <span class="new-content-fab__label">{{ __t('ui.pixel', '新动态') }}</span>
       <!-- 向下箭头图标 -->
       <PixelIcon name="chevron-down" size="sm" />
     </button>

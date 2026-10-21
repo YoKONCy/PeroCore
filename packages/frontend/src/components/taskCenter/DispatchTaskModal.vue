@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import './task-pixel.css'
 /**
  * DispatchTaskModal — 派发新任务弹窗（M05 §7.3）
@@ -46,9 +48,36 @@ const submitError = ref('')
 
 /** 完成后行为选项（图标 + 文案 + 说明，渲染为可选项卡） */
 const COMPLETION_OPTIONS = [
-  { value: 'notify', icon: 'bell', label: '任务中心通知', hint: '完成后在任务中心提醒' },
-  { value: 'open_result', icon: 'eye', label: '自动打开结果', hint: '完成后直接弹出结果' },
-  { value: 'send_to_chat', icon: 'chat', label: '发送到当前对话', hint: '完成后投递到聊天里' },
+  {
+    value: 'notify',
+    icon: 'bell',
+    get label() {
+      return __t('ui.taskCenter', '任务中心通知')
+    },
+    get hint() {
+      return __t('ui.taskCenter', '完成后在任务中心提醒')
+    },
+  },
+  {
+    value: 'open_result',
+    icon: 'eye',
+    get label() {
+      return __t('ui.taskCenter', '自动打开结果')
+    },
+    get hint() {
+      return __t('ui.taskCenter', '完成后直接弹出结果')
+    },
+  },
+  {
+    value: 'send_to_chat',
+    icon: 'chat',
+    get label() {
+      return __t('ui.taskCenter', '发送到当前对话')
+    },
+    get hint() {
+      return __t('ui.taskCenter', '完成后投递到聊天里')
+    },
+  },
 ] as const
 
 /** 初始化默认选中第一个 Agent */
@@ -104,7 +133,7 @@ async function handleSubmit() {
     }
   } catch (err) {
     submitError.value = err instanceof Error ? err.message : '派发失败'
-    logger.error('DispatchTaskModal', '派发任务失败', err)
+    logger.error('DispatchTaskModal', __t('logs.frontend.taskCenter', '派发任务失败'), err)
   } finally {
     isSubmitting.value = false
   }
@@ -119,7 +148,7 @@ function handleClose() {
 <template>
   <PDialog
     :model-value="show"
-    title="派发新任务"
+    :title="__t('ui.taskCenter', '派发新任务')"
     mode="confirm"
     width="480px"
     @update:model-value="handleClose"
@@ -131,7 +160,7 @@ function handleClose() {
       <label class="dispatch-field">
         <span class="dispatch-field__label">
           <PixelIcon name="users" size="xs" />
-          执行角色
+          {{ __t('ui.taskCenter', '执行角色') }}
         </span>
         <div class="dispatch-field__control dispatch-field__control--select">
           <select v-model="agentId" class="dispatch-select" :disabled="isSubmitting">
@@ -147,15 +176,15 @@ function handleClose() {
       <label class="dispatch-field">
         <span class="dispatch-field__label">
           <PixelIcon name="edit" size="xs" />
-          任务标题
-          <span class="dispatch-field__optional">选填</span>
+          {{ __t('ui.taskCenter', '任务标题') }}
+          <span class="dispatch-field__optional">{{ __t('ui.taskCenter', '选填') }}</span>
         </span>
         <input
           v-model="title"
           class="dispatch-input"
           type="text"
           maxlength="64"
-          placeholder="例：整理本周会议记录"
+          :placeholder="__t('ui.taskCenter', '例：整理本周会议记录')"
           :disabled="isSubmitting"
         />
       </label>
@@ -164,7 +193,7 @@ function handleClose() {
       <label class="dispatch-field">
         <span class="dispatch-field__label">
           <PixelIcon name="book" size="xs" />
-          任务指令
+          {{ __t('ui.taskCenter', '任务指令') }}
           <span class="dispatch-field__counter">{{ instructionLength }}/4000</span>
         </span>
         <textarea
@@ -172,13 +201,13 @@ function handleClose() {
           class="dispatch-input dispatch-textarea"
           rows="4"
           maxlength="4000"
-          placeholder="清晰描述任务目标和预期结果，避免一次派发过多目标…"
+          :placeholder="__t('ui.taskCenter', '清晰描述任务目标和预期结果，避免一次派发过多目标…')"
           :disabled="isSubmitting"
         />
       </label>
 
       <label class="dispatch-field">
-        <span class="dispatch-field__label">完成条件（选填）</span>
+        <span class="dispatch-field__label">{{ __t('ui.taskCenter', '完成条件（选填）') }}</span>
         <textarea
           v-model="successCriteria"
           class="dispatch-input dispatch-textarea"
@@ -190,14 +219,14 @@ function handleClose() {
       <label class="dispatch-field">
         <span>
           <input v-model="readOnly" type="checkbox" :disabled="isSubmitting" />
-          仅查询与读取，服务重启后可自动继续
+          {{ __t('ui.taskCenter', '仅查询与读取，服务重启后可自动继续') }}
         </span>
       </label>
       <!-- 完成后行为（可选项卡，替代裸 select） -->
       <fieldset class="dispatch-field">
         <span class="dispatch-field__label">
           <PixelIcon name="activity" size="xs" />
-          完成后行为
+          {{ __t('ui.taskCenter', '完成后行为') }}
         </span>
         <div class="dispatch-actions-group">
           <button
@@ -208,7 +237,9 @@ function handleClose() {
             :class="{ 'dispatch-action--active': completionAction === opt.value }"
             :disabled="isSubmitting || (opt.value === 'send_to_chat' && !targetThreadId)"
             :title="
-              opt.value === 'send_to_chat' && !targetThreadId ? '当前没有可投递的对话' : undefined
+              opt.value === 'send_to_chat' && !targetThreadId
+                ? __t('ui.taskCenter', '当前没有可投递的对话')
+                : undefined
             "
             @click="completionAction = opt.value"
           >
@@ -231,7 +262,7 @@ function handleClose() {
     <!-- 底部操作（自定义 footer，使用 PButton） -->
     <template #footer>
       <PButton variant="secondary" size="sm" :disabled="isSubmitting" @click="handleClose">
-        取消
+        {{ __t('ui.taskCenter', '取消') }}
       </PButton>
       <PButton
         variant="primary"
@@ -240,7 +271,7 @@ function handleClose() {
         :loading="isSubmitting"
         @click="handleSubmit"
       >
-        {{ isSubmitting ? '派发中…' : '交给 TA' }}
+        {{ isSubmitting ? __t('ui.taskCenter', '派发中…') : __t('ui.taskCenter', '交给 TA') }}
       </PButton>
     </template>
   </PDialog>

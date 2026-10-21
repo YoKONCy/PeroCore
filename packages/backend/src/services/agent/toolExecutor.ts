@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * Tool Executor — 工具执行器
  *
@@ -22,6 +23,7 @@
 import type { ToolExecutor, ToolExecutionResult } from './reactLoop'
 import { SOCIAL_ACTIONS, SCREENSHOT_TOOLS } from '@infos/shared'
 import type { ToolRegistry, ToolContext } from './toolRegistry'
+import { ToolLoopError } from './toolLoopGuard'
 import type { ApplicationRealmManager } from '../../applications/applicationRealm'
 import type { CapabilityGate } from '../../capabilities/capabilityGate'
 import type { CapabilityScope } from '../../capabilities/types'
@@ -78,6 +80,7 @@ const SKIP_TRUNCATE_TOOLS = new Set<string>([
   'edit_file',
   'read_file',
   'read_file_range',
+  'document',
   'search_knowledge',
   // 搜索已限制条数；保留 JSON 完整性，数量和预览由下游单独处理。
   'search_files',
@@ -318,7 +321,7 @@ export class RegistryToolExecutor implements ToolExecutor {
 
   setDesktopCapabilities(port: DesktopCapabilityPort): void {
     this.desktopCapabilities = port
-    logger.info('Desktop Capability Port 已注入 ToolExecutor')
+    logger.info(__t('logs.agent', 'Desktop Capability Port 已注入 ToolExecutor'))
   }
 
   /** 只为已开放的工作区写入提供有限旧文；越界路径仍须留到正式调用审批。 */
@@ -450,7 +453,50 @@ export class RegistryToolExecutor implements ToolExecutor {
     source: string,
     runtimeContext?: NonNullable<Parameters<ToolExecutor['execute']>[3]>,
   ): Promise<ToolExecutionResult> {
-    const result = await this.executeInternal(name, args, source, runtimeContext)
+    runtimeContext?.signal?.throwIfAborted()
+    const guard = runtimeContext?.loopGuard
+    const observationVersion = guard?.observationVersion
+    let warning: string | undefined
+    let stopped: ToolLoopError | undefined
+    try {
+      warning = guard?.before(name, args)
+    } catch (error) {
+      if (!(error instanceof ToolLoopError)) throw error
+      stopped = error
+    }
+    const result: ToolExecutionResult = stopped
+      ? {
+          output: JSON.stringify({
+            success: false,
+            code: 'TOOL_LOOP_STOPPED',
+            message: stopped.message,
+          }),
+          isError: true,
+          shouldTerminate: false,
+          durationMs: 0,
+        }
+      : warning
+        ? {
+            output: JSON.stringify({ success: false, code: 'TOOL_LOOP_WARNING', message: warning }),
+            isError: true,
+            shouldTerminate: false,
+            durationMs: 0,
+          }
+        : await this.executeInternal(
+            name,
+            args,
+            source,
+            guard
+              ? {
+                  ...runtimeContext,
+                  signal: runtimeContext?.signal
+                    ? AbortSignal.any([runtimeContext.signal, guard.signal])
+                    : guard.signal,
+                }
+              : runtimeContext,
+          )
+    if (!warning && !stopped)
+      guard?.observe(name, args, result.output, result.isError, observationVersion)
     if (
       !result.isError &&
       this.screenshotResources &&
@@ -474,7 +520,10 @@ export class RegistryToolExecutor implements ToolExecutor {
         if (result.modelOutput === original) result.modelOutput = result.output
       } catch (error) {
         runtimeContext.signal?.throwIfAborted()
-        logger.warn('截图预览保存失败，仍保留模型实际取得的画面', { name, error })
+        logger.warn(__t('logs.agent', '截图预览保存失败，仍保留模型实际取得的画面'), {
+          name,
+          error,
+        })
       }
     }
     try {
@@ -482,13 +531,17 @@ export class RegistryToolExecutor implements ToolExecutor {
         name,
         args,
         output: result.output,
+        displayOutput: result.displayOutput,
         isError: result.isError,
         callId: runtimeContext?.toolCallId ?? '',
         metadata: result.metadata,
         durationMs: result.durationMs,
       })
     } catch (error) {
-      logger.warn('工具观察记录失败，执行结果仍按真实副作用返回', { name, error })
+      logger.warn(__t('logs.agent', '工具观察记录失败，执行结果仍按真实副作用返回'), {
+        name,
+        error,
+      })
     }
     return result
   }
@@ -503,6 +556,7 @@ export class RegistryToolExecutor implements ToolExecutor {
       agentId?: string
       sessionId?: string
       signal?: AbortSignal
+      loopGuard?: import('./toolLoopGuard').ToolLoopGuard
       taskId?: string
       realmId?: string
       executionId?: import('@infos/shared').KernelExecutionId
@@ -517,6 +571,7 @@ export class RegistryToolExecutor implements ToolExecutor {
       executionMode?: ExecutionMode
       reviewMessages?: ChatMessage[]
       onExecutionStatus?: (message: string) => void
+      onNestedToolCall?: (call: import('./reactLoop').NestedToolCall) => void
       onToolObserved?: (
         result: import('../context/toolContextService').ObservedToolResult,
       ) => void | Promise<void>
@@ -533,7 +588,11 @@ export class RegistryToolExecutor implements ToolExecutor {
     let agentId = runtimeContext?.agentId ?? this.defaultContext.agentId
     if (!agentId) {
       logger.warn(
-        `工具 ${name} 调用未提供 agentId，权限校验将退回 'pero' 配置（调用方应透传 agentId）`,
+        __t(
+          'logs.agent',
+          "工具 {0} 调用未提供 agentId，权限校验将退回 'pero' 配置（调用方应透传 agentId）",
+          [name],
+        ),
       )
       agentId = 'pero'
     }
@@ -546,7 +605,7 @@ export class RegistryToolExecutor implements ToolExecutor {
 
     // ToolRegistry通道约束既用于工具定义注入，也必须在执行时再次校验，防止手工FC绕过。
     if (!this.registry.isAllowedInSource(name, channel)) {
-      logger.warn(`工具 ${name} 不允许在通道 ${channel} 执行`)
+      logger.warn(__t('logs.agent', '工具 {0} 不允许在通道 {1} 执行', [name, channel]))
       return {
         output: `工具“${name}”不允许在当前通道 (${channel}) 使用。`,
         durationMs: Date.now() - startTime,
@@ -563,7 +622,12 @@ export class RegistryToolExecutor implements ToolExecutor {
         (realmId && !this.applicationRealms.allowsTool(realmId, name)) ||
         (!realmId && realmTool && !hostProjection)
       ) {
-        logger.warn(`工具 ${name} 被Application Realm拒绝 (realm=${realmId ?? 'none'})`)
+        logger.warn(
+          __t('logs.agent', '工具 {0} 被Application Realm拒绝 (realm={1})', [
+            name,
+            realmId ?? 'none',
+          ]),
+        )
         return {
           output: `工具“${name}”不属于当前Application Realm。`,
           durationMs: Date.now() - startTime,
@@ -592,7 +656,7 @@ export class RegistryToolExecutor implements ToolExecutor {
       !isToolAllowedInInteractionMode(name, interactionMode, this.registry)
     ) {
       return {
-        output: '当前聊天模式未开放此操作，需要用户手动切换到工作模式。',
+        output: `当前${interactionMode === 'minimal' ? '极简' : '聊天'}模式未开放此操作，请在该 Thread 中调整执行模式。`,
         durationMs: Date.now() - startTime,
         isError: true,
         shouldTerminate: false,
@@ -623,7 +687,13 @@ export class RegistryToolExecutor implements ToolExecutor {
         threadPolicy?.disabledTools.includes(name)) &&
       !isSystemProtocolTool(name)
     ) {
-      logger.warn(`工具 ${name} 被 Thread 策略禁用 (thread=${threadId}, channel=${channel})`)
+      logger.warn(
+        __t('logs.agent', '工具 {0} 被 Thread 策略禁用 (thread={1}, channel={2})', [
+          name,
+          threadId,
+          channel,
+        ]),
+      )
       return {
         output: `工具“${name}”已在本会话中禁用。请由用户在 CHAR OPS 工具管理中重新启用。`,
         durationMs: Date.now() - startTime,
@@ -640,7 +710,9 @@ export class RegistryToolExecutor implements ToolExecutor {
       const handler = this.registry.getHandler('finish_task')
       if (!handler) {
         // 兜底：注册表缺失时退回最简终止行为，至少保证循环能正常结束
-        logger.warn('finish_task 未在注册表中找到，退回最简终止行为 (状态更新被跳过)')
+        logger.warn(
+          __t('logs.agent', 'finish_task 未在注册表中找到，退回最简终止行为 (状态更新被跳过)'),
+        )
         return {
           output: (args.summary as string) ?? '任务完成',
           durationMs: Date.now() - startTime,
@@ -676,7 +748,9 @@ export class RegistryToolExecutor implements ToolExecutor {
           (isStructuredToolResult(result) ? !result.ok : result.isError)
         if (failed) {
           logger.error(
-            `finish_task 执行失败: ${typeof result === 'string' ? result : result.output}`,
+            __t('logs.agent', 'finish_task 执行失败: {0}', [
+              typeof result === 'string' ? result : result.output,
+            ]),
           )
           return {
             output: typeof result === 'string' ? result : result.output,
@@ -686,11 +760,13 @@ export class RegistryToolExecutor implements ToolExecutor {
           }
         }
         const output = typeof result === 'string' ? result : result.output
-        logger.info(`工具 finish_task 执行完成 (${Date.now() - startTime}ms)`)
+        logger.info(
+          __t('logs.agent', '工具 finish_task 执行完成 ({0}ms)', [Date.now() - startTime]),
+        )
         return { output, durationMs: Date.now() - startTime, isError: false, shouldTerminate: true }
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err)
-        logger.error(`finish_task 执行失败: ${errMsg}`)
+        logger.error(__t('logs.agent', 'finish_task 执行失败: {0}', [errMsg]))
         return {
           output: `执行失败: ${errMsg}`,
           durationMs: Date.now() - startTime,
@@ -735,7 +811,13 @@ export class RegistryToolExecutor implements ToolExecutor {
             runtimeContext?.capabilityScope,
           ))
       if (!allowed) {
-        logger.warn(`工具 ${name} 被 CapabilityGate 拒绝 (agent=${agentId}, channel=${channel})`)
+        logger.warn(
+          __t('logs.agent', '工具 {0} 被 CapabilityGate 拒绝 (agent={1}, channel={2})', [
+            name,
+            agentId,
+            channel,
+          ]),
+        )
         return {
           output: `你没有权限使用工具 "${name}"。当前通道 (${channel}) 不允许此操作。`,
           durationMs: Date.now() - startTime,
@@ -769,7 +851,7 @@ export class RegistryToolExecutor implements ToolExecutor {
 
     const handler = this.registry.getHandler(name)
     if (!handler) {
-      logger.warn(`未知工具: ${name}`)
+      logger.warn(__t('logs.agent', '未知工具: {0}', [name]))
       return {
         output: `未找到工具: ${name}`,
         durationMs: Date.now() - startTime,
@@ -794,7 +876,7 @@ export class RegistryToolExecutor implements ToolExecutor {
           args = (hookData as { args: Record<string, unknown> }).args
         }
       } catch (err) {
-        logger.warn(`before_tool_call Hook 执行失败: ${err}`)
+        logger.warn(__t('logs.agent', 'before_tool_call Hook 执行失败: {0}', [err]))
       }
     }
 
@@ -861,7 +943,11 @@ export class RegistryToolExecutor implements ToolExecutor {
     }
     if (pathViolation) {
       logger.warn(
-        `工具 ${name} 请求 ResourceScope 外路径，按当前执行模式处理: ${pathViolation} (agent=${agentId}, channel=${channel})`,
+        __t(
+          'logs.agent',
+          '工具 {0} 请求 ResourceScope 外路径，按当前执行模式处理: {1} (agent={2}, channel={3})',
+          [name, pathViolation, agentId, channel],
+        ),
       )
     }
 
@@ -902,7 +988,7 @@ export class RegistryToolExecutor implements ToolExecutor {
           output: JSON.stringify({
             code: 'APPROVAL_DENIED',
             source: 'user',
-            message: '用户拒绝了本次工具调用',
+            message: __t('server.agent', '用户拒绝了本次工具调用'),
             userMessage: denied,
           }),
           durationMs: Date.now() - startTime,
@@ -971,8 +1057,16 @@ export class RegistryToolExecutor implements ToolExecutor {
             code: failed ? 'AUTOMATIC_APPROVAL_ERROR' : 'AUTOMATIC_APPROVAL_DENIED',
             source: 'automatic_reviewer',
             message: failed
-              ? `自动审批发生异常，本次调用未执行。这不是用户拒绝，也不代表审批员认定该操作不允许。异常原因：${automaticReview.reason}`
-              : `自动审批员拒绝了本次调用。这是自动审批员的判断，不是用户拒绝或用户的新指令。理由：${automaticReview.reason}`,
+              ? __t(
+                  'server.agent',
+                  '自动审批发生异常，本次调用未执行。这不是用户拒绝，也不代表审批员认定该操作不允许。异常原因：{0}',
+                  [automaticReview.reason],
+                )
+              : __t(
+                  'server.agent',
+                  '自动审批员拒绝了本次调用。这是自动审批员的判断，不是用户拒绝或用户的新指令。理由：{0}',
+                  [automaticReview.reason],
+                ),
             reason: automaticReview.reason,
             ...(failed ? { errorCode: automaticReview.errorCode } : {}),
             suggestedAction: failed
@@ -1009,7 +1103,7 @@ export class RegistryToolExecutor implements ToolExecutor {
       return {
         output: JSON.stringify({
           code: 'APPROVAL_UNAVAILABLE',
-          message: '该敏感工具调用必须经过用户审批，但策略引擎当前不可用',
+          message: __t('server.agent', '该敏感工具调用必须经过用户审批，但策略引擎当前不可用'),
         }),
         durationMs: Date.now() - startTime,
         isError: true,
@@ -1090,7 +1184,11 @@ export class RegistryToolExecutor implements ToolExecutor {
             output: JSON.stringify({
               code: 'EXECUTION_POLICY_DENIED',
               source: 'execution_policy',
-              message: `执行策略未放行本次操作，工具未执行：${decision.reason}。此结果不是用户拒绝，自动审批模式不会挂起等待人工审批。`,
+              message: __t(
+                'server.agent',
+                '执行策略未放行本次操作，工具未执行：{0}。此结果不是用户拒绝，自动审批模式不会挂起等待人工审批。',
+                [decision.reason],
+              ),
             }),
             durationMs: Date.now() - startTime,
             isError: true,
@@ -1100,7 +1198,7 @@ export class RegistryToolExecutor implements ToolExecutor {
           return {
             output: JSON.stringify({
               code: 'APPROVAL_UNAVAILABLE',
-              message: '该工具调用需要用户审批，但审批服务当前不可用',
+              message: __t('server.agent', '该工具调用需要用户审批，但审批服务当前不可用'),
             }),
             durationMs: Date.now() - startTime,
             isError: true,
@@ -1117,7 +1215,7 @@ export class RegistryToolExecutor implements ToolExecutor {
           return {
             output: JSON.stringify({
               code: 'APPROVAL_DENIED',
-              message: '用户拒绝了本次工具调用',
+              message: __t('server.agent', '用户拒绝了本次工具调用'),
               userMessage: deniedOnceMessage,
               suggestedAction: '根据用户附言调整方案，不要原样重试。',
             }),
@@ -1147,7 +1245,7 @@ export class RegistryToolExecutor implements ToolExecutor {
           return {
             output: JSON.stringify({
               code: 'APPROVAL_DENIED',
-              message: '该工具调用已被用户拒绝',
+              message: __t('server.agent', '该工具调用已被用户拒绝'),
               ...(userMessage
                 ? { userMessage, suggestedAction: '根据用户附言调整方案，不要原样重试。' }
                 : {}),
@@ -1174,7 +1272,7 @@ export class RegistryToolExecutor implements ToolExecutor {
               output: JSON.stringify({
                 code: 'APPROVAL_PENDING',
                 approvalId: approval.id,
-                message: '等待用户决定后，按原参数重新调用此工具。',
+                message: __t('server.agent', '等待用户决定后，按原参数重新调用此工具。'),
               }),
               metadata: automaticReview
                 ? { automaticApproval: parseAutomaticApproval(automaticReview) }
@@ -1194,7 +1292,7 @@ export class RegistryToolExecutor implements ToolExecutor {
             return {
               output: JSON.stringify({
                 code: 'APPROVAL_DENIED',
-                message: '用户拒绝了本次工具调用',
+                message: __t('server.agent', '用户拒绝了本次工具调用'),
                 ...(resolved.resolutionMessage
                   ? {
                       userMessage: resolved.resolutionMessage,
@@ -1274,6 +1372,7 @@ export class RegistryToolExecutor implements ToolExecutor {
         threadId,
         channel,
         signal: runtimeContext?.signal,
+        loopGuard: runtimeContext?.loopGuard,
         executionMode,
         interactionMode,
         disabledTools: threadPolicy?.disabledTools ?? runtimeContext?.disabledTools,
@@ -1282,6 +1381,7 @@ export class RegistryToolExecutor implements ToolExecutor {
         capabilityScope: runtimeContext?.capabilityScope,
         reviewMessages: runtimeContext?.reviewMessages,
         onExecutionStatus: runtimeContext?.onExecutionStatus,
+        onNestedToolCall: runtimeContext?.onNestedToolCall,
         onToolObserved: runtimeContext?.onToolObserved,
         taskId: runtimeContext?.taskId,
         executionId: runtimeContext?.executionId,
@@ -1314,7 +1414,9 @@ export class RegistryToolExecutor implements ToolExecutor {
       const isError = isStructuredToolResult(structuredResult)
         ? !structuredResult.ok
         : (structuredResult?.isError ?? isLegacyToolErrorOutput(rawOutput))
-      logger.info(`工具 ${name} 执行完成 (${durationMs}ms, error=${isError})`)
+      logger.info(
+        __t('logs.agent', '工具 {0} 执行完成 ({1}ms, error={2})', [name, durationMs, isError]),
+      )
 
       // 截图等需要下游解析的工具输出不能截断：
       // take_screenshot 返回的完整 base64 必须交给 reactLoop 解析后转成 image_url 内容块，
@@ -1369,7 +1471,7 @@ export class RegistryToolExecutor implements ToolExecutor {
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err)
       const durationMs = Date.now() - startTime
-      logger.error(`工具 ${name} 执行失败 (${durationMs}ms): ${errMsg}`)
+      logger.error(__t('logs.agent', '工具 {0} 执行失败 ({1}ms): {2}', [name, durationMs, errMsg]))
 
       // ── Hook: after_tool_call (错误) ──
       if (this.hookEmitter) {
@@ -1438,7 +1540,9 @@ export class RegistryToolExecutor implements ToolExecutor {
         shouldTerminate: false,
       }
     }
-    logger.info(`平台能力工具调用: ${toolName} → desktop.environment/${operation}`)
+    logger.info(
+      __t('logs.agent', '平台能力工具调用: {0} → desktop.environment/{1}', [toolName, operation]),
+    )
     try {
       const output = await this.desktopCapabilities.invoke(operation, args, context, signal)
       return {
@@ -1449,7 +1553,7 @@ export class RegistryToolExecutor implements ToolExecutor {
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err)
-      logger.error(`平台能力工具 ${toolName} 调用异常: ${errMsg}`)
+      logger.error(__t('logs.agent', '平台能力工具 {0} 调用异常: {1}', [toolName, errMsg]))
       return {
         output: `工具 "${toolName}" 调用失败: ${errMsg}`,
         durationMs: Date.now() - startTime,
@@ -1533,7 +1637,9 @@ export class RegistryToolExecutor implements ToolExecutor {
 
       const paramKeys = params ? Object.keys(params) : []
       const paramInfo = paramKeys.length > 0 ? ` (已注入参数: ${paramKeys.join(', ')})` : ''
-      logger.info(`Skill ${skillId} 已加载${paramInfo} (session=${sessionId})`)
+      logger.info(
+        __t('logs.agent', 'Skill {0} 已加载{1} (session={2})', [skillId, paramInfo, sessionId]),
+      )
 
       return {
         output: fullContent,
@@ -1543,7 +1649,7 @@ export class RegistryToolExecutor implements ToolExecutor {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      logger.warn(`Skill ${skillId} 加载异常: ${message}`)
+      logger.warn(__t('logs.agent', 'Skill {0} 加载异常: {1}', [skillId, message]))
       return {
         output: `Skill "${skillId}" 加载失败: ${message}`,
         durationMs: Date.now() - startTime,
@@ -1577,7 +1683,11 @@ export class RegistryToolExecutor implements ToolExecutor {
     for (const childSkillId of manifest.dependsOnSkills) {
       this.unlockSkillToolsRecursive(sessionId, childSkillId, visited)
       logger.debug(
-        `子 Skill ${childSkillId} 工具已递归解锁 (parent=${skillId}, session=${sessionId})`,
+        __t('logs.agent', '子 Skill {0} 工具已递归解锁 (parent={1}, session={2})', [
+          childSkillId,
+          skillId,
+          sessionId,
+        ]),
       )
     }
   }

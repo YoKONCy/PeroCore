@@ -1,0 +1,9 @@
+{
+  "加载历史会话失败": "Failed to load historical sessions",
+  "通知层同步失败": "notification layer synchronization failed",
+  "通知回执暂未确认": "Notification receipt not yet confirmed",
+  "应用背景图片加载失败，保留默认页面材质": "The application background image failed to load and the default page material was retained.",
+  "同步后端角色切换失败": "Synchronization backend role switching failed",
+  "主动消息已保存，刷新会话失败": "Active message has been saved, session refresh failed",
+  "应用背景配置加载失败": "Application background configuration failed to load"
+}

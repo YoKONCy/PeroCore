@@ -1,0 +1,12 @@
+{
+  "系统图标读取失败，继续查找其他路径：{0}；{1}": "system icon reading failed, continue to search for other paths: {0}; {1}",
+  "未找到可用的原版系统图标": "No available original system icon found",
+  "Windows 任务栏身份设置失败：{0}": "Windows taskbar identity setting failed: {0}",
+  "[Env] 便携模式，用户根目录: {0}": "[Env] Portable mode, user root directory: {0}",
+  "[Env] 开发模式，数据目录: {0}": "[Env] development mode, data directory: {0}",
+  "Windows 原生窗口图标组件加载失败：{0}": "Windows native window icon component failed to load: {0}",
+  "Windows 窗口大、小图标已设置并回读确认：窗口 {0}，{1}": "Windows window large and small icons have been set and read back to confirm: windows {0}, {1}",
+  "Windows 窗口图标设置失败：{0}": "Windows window icon setting failed: {0}",
+  "Windows 任务栏按钮重建消息注册失败": "Windows taskbar button rebuild message registration failed",
+  "Windows 任务栏按钮重建监听失败：{0}": "Windows taskbar button rebuild listening failed: {0}"
+}

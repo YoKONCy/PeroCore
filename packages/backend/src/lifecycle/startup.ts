@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * 应用启动生命周期
  *
@@ -17,6 +18,7 @@ import { createEnvelope } from '../services/gateway/types'
 import { cleanTextForTts } from '../services/voice'
 import { createLogger } from '../lib/logger'
 import { ConversationSurfaceSession } from '../projections/conversationSurfaceSession'
+import { runChatStream } from '../services/conversation/chatStreamRunner'
 
 const logger = createLogger('Startup')
 
@@ -26,37 +28,54 @@ const logger = createLogger('Startup')
  * @param ctx - 已初始化的应用上下文
  */
 export async function runStartupTasks(ctx: AppContext): Promise<void> {
-  logger.info('正在执行启动后任务...')
+  logger.info(__t('logs.lifecycle', '正在执行启动后任务...'))
+
+  ctx.conversationQueue.setRunner((input) =>
+    runChatStream(ctx, input, async (event) => {
+      if (event.event !== 'surface') return
+      try {
+        await ctx.gatewayHub.pushSurface(JSON.parse(event.data))
+      } catch (error) {
+        logger.warn(__t('logs.lifecycle', '队列消息观察推送失败，后台继续执行'), {
+          error: String(error),
+        })
+      }
+    }),
+  )
+  ctx.conversationQueue.start()
 
   // 退役 companion 持久通道：旧会话按产品决策统一软删除。
   try {
     await ctx.threadService.deleteThreadsByChannel('companion')
   } catch (err) {
-    logger.warn(`旧陪伴会话清理失败: ${err}`)
+    logger.warn(__t('logs.lifecycle', '旧陪伴会话清理失败: {0}', [err]))
   }
 
   // ── 1. 启动后台调度器 ──
   ctx.scheduler.startPeriodic()
-  logger.success('后台调度器已启动')
+  logger.success(__t('logs.lifecycle', '后台调度器已启动'))
 
   // ── 2. 执行 Outbox 保留清理；死信始终保留供审计和人工重放 ──
   try {
     const result = await ctx.outboxLifecycle.maintain()
     const diagnostics = await ctx.outboxLifecycle.diagnostics()
     logger.info(
-      `Outbox生命周期维护完成: kernelDeleted=${result.outboxDeleted}, kernelDead=${diagnostics.kernel.dead_letter ?? 0}`,
+      __t('logs.lifecycle', 'Outbox生命周期维护完成: kernelDeleted={0}, kernelDead={1}', [
+        result.outboxDeleted,
+        diagnostics.kernel.dead_letter ?? 0,
+      ]),
     )
   } catch (err) {
-    logger.warn(`Outbox生命周期维护失败: ${err}`)
+    logger.warn(__t('logs.lifecycle', 'Outbox生命周期维护失败: {0}', [err]))
   }
 
   // ── 5. 注册 Gateway 语音管道事件处理 ──
   registerVoicePipelineHandler(ctx)
-  logger.success('语音管道 Gateway 触发已注册')
+  logger.success(__t('logs.lifecycle', '语音管道 Gateway 触发已注册'))
 
   // ── 5. 注册 Gateway 对话事件处理 (action:chat) ──
   registerChatHandler(ctx)
-  logger.success('对话 Gateway RPC 已注册')
+  logger.success(__t('logs.lifecycle', '对话 Gateway RPC 已注册'))
 
   // ── 6. 注册 abort 事件处理 (前端中断对话) ──
   // AIOS: 改用 RuntimeStateService 按 threadId 取消任务
@@ -64,11 +83,11 @@ export async function runStartupTasks(ctx: AppContext): Promise<void> {
     const threadId =
       (envelope.payload?.threadId as string) || (envelope.payload?.sessionId as string) || 'default'
     ctx.runtimeStateService.cancelTask(threadId)
-    logger.info(`对话已中断: thread=${threadId}`)
+    logger.info(__t('logs.lifecycle', '对话已中断: thread={0}', [threadId]))
   })
-  logger.success('对话中断 Gateway 触发已注册')
+  logger.success(__t('logs.lifecycle', '对话中断 Gateway 触发已注册'))
 
-  logger.success('启动后任务执行完毕')
+  logger.success(__t('logs.lifecycle', '启动后任务执行完毕'))
 }
 
 /**
@@ -90,7 +109,7 @@ function registerVoicePipelineHandler(ctx: AppContext): void {
     const sessionId = (payload.sessionId as string) || `voice_${Date.now()}`
 
     if (!audioBase64) {
-      logger.warn('voice_pipeline: 缺少 audio 数据')
+      logger.warn(__t('logs.lifecycle', 'voice_pipeline: 缺少 audio 数据'))
       // 发送错误响应
       await ctx.gatewayHub.broadcast(
         createEnvelope('push', {
@@ -111,7 +130,11 @@ function registerVoicePipelineHandler(ctx: AppContext): void {
       )
 
       logger.info(
-        `语音管道启动: session=${sessionId}, agent=${agentId}, audio=${(audioData.byteLength / 1024).toFixed(1)}KB`,
+        __t('logs.lifecycle', '语音管道启动: session={0}, agent={1}, audio={2}KB', [
+          sessionId,
+          agentId,
+          (audioData.byteLength / 1024).toFixed(1),
+        ]),
       )
 
       // 执行全链路管道: ASR → Agent → TTS
@@ -179,10 +202,15 @@ function registerVoicePipelineHandler(ctx: AppContext): void {
       }
 
       logger.info(
-        `语音管道完成: ASR=${result.timing.asrMs}ms, Agent=${result.timing.agentMs}ms, TTS=${result.timing.ttsMs}ms, 总计=${result.timing.totalMs}ms`,
+        __t('logs.lifecycle', '语音管道完成: ASR={0}ms, Agent={1}ms, TTS={2}ms, 总计={3}ms', [
+          result.timing.asrMs,
+          result.timing.agentMs,
+          result.timing.ttsMs,
+          result.timing.totalMs,
+        ]),
       )
     } catch (err) {
-      logger.error(`语音管道错误: ${err}`)
+      logger.error(__t('logs.lifecycle', '语音管道错误: {0}', [err]))
       await ctx.gatewayHub.broadcast(
         createEnvelope('push', {
           action: 'voice_error',
@@ -227,23 +255,29 @@ async function synthesizeAndDeliverTts(
 ): Promise<void> {
   try {
     if (!ctx.ttsService.isAvailable) {
-      logger.debug('TTS 不可用，跳过桌面对话语音合成')
+      logger.debug(__t('logs.lifecycle', 'TTS 不可用，跳过桌面对话语音合成'))
       return
     }
 
     const seat = ctx.nodeRegistry.getInputSeat(principalId, 'audio-output')
     if (!seat) {
-      logger.debug(`当前没有可用音频输出 Seat，跳过 TTS 播放: principal=${principalId}`)
+      logger.debug(
+        __t('logs.lifecycle', '当前没有可用音频输出 Seat，跳过 TTS 播放: principal={0}', [
+          principalId,
+        ]),
+      )
       return
     }
     if (!ctx.audioDeliveryService.canDeliverTo(seat.nodeId)) {
-      logger.debug(`音频输出节点尚未就绪，跳过 TTS 播放: node=${seat.nodeId}`)
+      logger.debug(
+        __t('logs.lifecycle', '音频输出节点尚未就绪，跳过 TTS 播放: node={0}', [seat.nodeId]),
+      )
       return
     }
 
     const ttsText = cleanTextForTts(spokenReply)
     if (!ttsText.trim()) {
-      logger.debug('TTS 文本清洗后为空，跳过合成')
+      logger.debug(__t('logs.lifecycle', 'TTS 文本清洗后为空，跳过合成'))
       return
     }
 
@@ -258,13 +292,22 @@ async function synthesizeAndDeliverTts(
         idempotencyKey: `chat:${sessionId}:${generation}`,
       },
       seat.nodeId,
-      { caption: spokenReply, isCurrent: () => speechGenerations.get(principalId) === generation },
+      {
+        caption: spokenReply,
+        threadId: sessionId,
+        isCurrent: () => speechGenerations.get(principalId) === generation,
+      },
     )
     logger.info(
-      `桌面对话 TTS 已定向播放: ${(audio.audio.byteLength / 1024).toFixed(1)}KB, session=${sessionId}, node=${receipt.targetNodeId}, state=${receipt.state}`,
+      __t('logs.lifecycle', '桌面对话 TTS 已定向播放: {0}KB, session={1}, node={2}, state={3}', [
+        (audio.audio.byteLength / 1024).toFixed(1),
+        sessionId,
+        receipt.targetNodeId,
+        receipt.state,
+      ]),
     )
   } catch (err) {
-    logger.warn(`桌面对话 TTS 失败: ${err}`)
+    logger.warn(__t('logs.lifecycle', '桌面对话 TTS 失败: {0}', [err]))
   }
 }
 
@@ -315,6 +358,8 @@ function registerChatHandler(ctx: AppContext): void {
     }
 
     let threadIdResolved = threadId
+    let ownsTask = false
+    let completedTask = false
     const surfaceRef: { current: ConversationSurfaceSession | null } = { current: null }
     try {
       // ── 1. 获取或创建 Thread ──
@@ -335,24 +380,27 @@ function registerChatHandler(ctx: AppContext): void {
         }
       }
 
-      // ── 2. 陪伴活动通知（AIOS: 改用 CompanionSchedulerService） ──
-      ctx.companionSchedulerService.notifyActivity(agentId)
+      // 活动时间统一由 ConversationTurnService 在用户回合入口更新。
 
       // ── 3. RuntimeStateService 注册任务（替代旧 TaskManager） ──
       ctx.runtimeStateService.registerTask(threadIdResolved, agentId)
+      ownsTask = true
 
       // ── 4. 统一流式对话与 Surface 输出 ──
       const gen = ctx.conversationTurnService.streamTurn({
         threadId: threadIdResolved,
         agentId,
         content,
+        signal: ctx.runtimeStateService.getAbortSignal(threadIdResolved),
         capabilityScope,
         onExecutionStarted: async (execution) => {
           surfaceRef.current = new ConversationSurfaceSession(
             threadIdResolved,
             agentId,
             execution.executionId,
+            true,
           )
+          ctx.conversationQueue.setLive(threadIdResolved, surfaceRef.current)
           await ctx.gatewayHub.pushSurface(surfaceRef.current.open())
         },
       })
@@ -473,7 +521,9 @@ function registerChatHandler(ctx: AppContext): void {
         } else if (chunk.event === 'tool_call_ready' && surfaceRef.current) {
           await ctx.gatewayHub.pushSurface(surfaceRef.current.finalizeToolDraft(chunk.data))
         } else if (chunk.event === 'tool_call') {
-          // 兼容事件：正式节点已由tool_call_ready在原草稿节点上完成。
+          const data = chunk.data as Parameters<ConversationSurfaceSession['toolCall']>[0]
+          if (data.parentCallId && surfaceRef.current)
+            await ctx.gatewayHub.pushSurface(surfaceRef.current.toolCall(data))
           await updateRunState('calling')
         } else if (chunk.event === 'tool_result' && surfaceRef.current) {
           const data = chunk.data as {
@@ -481,11 +531,12 @@ function registerChatHandler(ctx: AppContext): void {
             result: string
             isError: boolean
             durationMs?: number
+            parentCallId?: string
           }
           for (const frame of surfaceRef.current.toolResult(data)) {
             await ctx.gatewayHub.pushSurface(frame)
           }
-          await updateRunState('thinking')
+          await updateRunState(data.parentCallId ? 'calling' : 'thinking')
         } else if (chunk.event === 'status' && surfaceRef.current) {
           const data = chunk.data as {
             state: Parameters<ConversationSurfaceSession['status']>[0]
@@ -519,8 +570,9 @@ function registerChatHandler(ctx: AppContext): void {
         })
       }
 
+      completedTask = !turnResult.executionPause
       // ── 9. desktop 对话 TTS: 异步合成并定向到 active Input Seat ──
-      if (payload.speak !== false) {
+      if (payload.speak !== false && !turnResult.handoff) {
         void synthesizeAndDeliverTts(
           ctx,
           turnResult.spokenReply ?? '',
@@ -531,7 +583,7 @@ function registerChatHandler(ctx: AppContext): void {
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err)
-      logger.error(`Gateway chat 失败: ${errMsg}`)
+      logger.error(__t('logs.lifecycle', 'Gateway chat 失败: {0}', [errMsg]))
 
       // 推送结构化错误到前端
       if (surfaceRef.current) {
@@ -544,7 +596,14 @@ function registerChatHandler(ctx: AppContext): void {
       }
     } finally {
       // AIOS: 注销任务（按 threadId）
-      ctx.runtimeStateService.unregisterTask(threadIdResolved || 'default')
+      if (ownsTask) {
+        try {
+          ctx.conversationQueue.afterTurn(threadIdResolved, { success: completedTask })
+        } finally {
+          ctx.conversationQueue.setLive(threadIdResolved)
+          ctx.runtimeStateService.unregisterTask(threadIdResolved)
+        }
+      }
     }
   })
 }

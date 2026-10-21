@@ -1,3 +1,4 @@
+import { t as __t } from '../i18n/index'
 /**
  * useAgentStore — Agent 全局状态
  *
@@ -120,7 +121,10 @@ export const useAgentStore = defineStore('agent', () => {
     activeAgentId.value = agentId
     if (isElectron()) await invoke('set-client-default-agent', { agentId })
     await fetchAgents()
-    useNotificationStore().toast(`当前角色已切换为 ${target?.name ?? agentId}`, { type: 'success' })
+    useNotificationStore().toast(
+      __t('ui.useAgentStore', '当前角色已切换为 {0}', [target?.name ?? agentId]),
+      { type: 'success' },
+    )
   }
 
   return {

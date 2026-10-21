@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * Chat Router — 新版对话 HTTP/SSE 端点
  *
@@ -23,11 +24,11 @@
  * @module packages/backend/src/routers/chat.router
  */
 
-import { Hono } from 'hono'
+import { Hono, type MiddlewareHandler } from 'hono'
 import { validate as zValidator } from '../lib/validation'
 import { z } from 'zod'
 import { streamSSE } from 'hono/streaming'
-import { ConversationSurfaceSession } from '../projections/conversationSurfaceSession'
+import { runChatStream } from '../services/conversation/chatStreamRunner'
 import type { AppContext } from '../container'
 import { AppError } from '../lib/appError'
 import { disposeExecutionOwner } from '../tools/productivityRuntimeHolder'
@@ -36,6 +37,7 @@ import { isAdvancedTool } from '../tools/advancedTools'
 import { isSystemProtocolTool } from '../tools/systemProtocolTools'
 import { isToolAllowedInInteractionMode } from '../tools/interactionMode'
 import type { ThreadChannel } from '@infos/shared'
+import { REASONING_EFFORT_VALUES } from '@infos/shared'
 
 // ─────────────────────────────────────────────
 // Zod Schema
@@ -105,11 +107,11 @@ const threadExecutionModeSchema = z
     autoExecuteTools: z.boolean().optional(),
   })
   .refine((value) => value.executionMode !== undefined || value.autoExecuteTools !== undefined, {
-    message: '必须指定执行模式',
+    message: __t('server.routers', '必须指定执行模式'),
   })
 
 const threadInteractionModeSchema = z.object({
-  interactionMode: z.enum(['chat', 'work']),
+  interactionMode: z.enum(['minimal', 'chat', 'work']),
 })
 
 const rewindSchema = z
@@ -119,7 +121,7 @@ const rewindSchema = z
     preserveInputAttachments: z.boolean().optional(),
   })
   .refine((value) => value.wholeThread === true || value.messageId !== undefined, {
-    message: '必须指定 messageId 或 wholeThread=true',
+    message: __t('server.routers', '必须指定 messageId 或 wholeThread=true'),
   })
 
 const editMessageSchema = z.object({
@@ -133,6 +135,103 @@ const editMessageSchema = z.object({
 
 export function createChatRouter(ctx: AppContext) {
   const router = new Hono()
+  const historyMutation: MiddlewareHandler = async (c, next) => {
+    const threadId = c.req.param('id')
+    if (!threadId) throw new AppError('INVALID_PARAMETER', { message: '缺少会话标识' })
+    const release = ctx.conversationQueue.beginHistoryChange(threadId)
+    try {
+      await next()
+    } finally {
+      release()
+    }
+  }
+
+  const queueIdentity = async (threadId: string) => {
+    const thread = await ctx.threadService.getThread(threadId)
+    if (!thread || thread.channel !== 'desktop' || thread.status !== 'active')
+      throw new AppError('NOT_FOUND', { message: '目标对话不存在' })
+    return thread
+  }
+  router.get('/queue/:threadId', async (c) => {
+    await queueIdentity(c.req.param('threadId'))
+    return c.json({ code: 'OK', data: ctx.conversationQueue.snapshot(c.req.param('threadId')) })
+  })
+  router.get('/queue/:threadId/live', async (c) => {
+    await queueIdentity(c.req.param('threadId'))
+    return c.json({ code: 'OK', data: ctx.conversationQueue.getLive(c.req.param('threadId')) })
+  })
+  router.post(
+    '/queue/:threadId',
+    zValidator('json', chatRequestSchema.extend({ clientMessageId: z.string().uuid() })),
+    async (c) => {
+      const { clientMessageId, ...input } = c.req.valid('json')
+      if (input.threadId !== c.req.param('threadId'))
+        throw new AppError('CONFLICT', { message: '队列目标会话不一致' })
+      return c.json({
+        code: 'OK',
+        data: await ctx.conversationQueue.enqueue(clientMessageId, input),
+      })
+    },
+  )
+  router.patch(
+    '/queue/:threadId/items/:id',
+    zValidator(
+      'json',
+      z.object({
+        revision: z.number().int().positive(),
+        content: z.string().trim().min(1).max(1_000_000).optional(),
+        action: z.enum(['edit', 'cancel', 'immediate', 'draft']),
+      }),
+    ),
+    async (c) => {
+      const threadId = c.req.param('threadId')
+      await queueIdentity(threadId)
+      const input = c.req.valid('json')
+      if (input.action === 'edit' && input.content === undefined)
+        throw new AppError('MISSING_FIELD', { message: '缺少编辑后的消息内容' })
+      const snapshot = await ctx.conversationQueue.change(
+        threadId,
+        c.req.param('id'),
+        input.revision,
+        {
+          content: input.content,
+          cancel: input.action === 'cancel',
+          immediate: input.action === 'immediate' || undefined,
+          draft: input.action === 'draft' || undefined,
+        },
+      )
+      return c.json({ code: 'OK', data: snapshot })
+    },
+  )
+  router.post(
+    '/queue/:threadId/control',
+    zValidator('json', z.object({ paused: z.boolean() })),
+    async (c) => {
+      await queueIdentity(c.req.param('threadId'))
+      return c.json({
+        code: 'OK',
+        data: ctx.conversationQueue.pause(c.req.param('threadId'), c.req.valid('json').paused),
+      })
+    },
+  )
+  router.post(
+    '/queue/:threadId/order',
+    zValidator(
+      'json',
+      z.object({
+        order: z
+          .array(z.object({ id: z.string().min(1), revision: z.number().int().positive() }))
+          .max(100),
+      }),
+    ),
+    async (c) => {
+      await queueIdentity(c.req.param('threadId'))
+      return c.json({
+        code: 'OK',
+        data: ctx.conversationQueue.reorder(c.req.param('threadId'), c.req.valid('json').order),
+      })
+    },
+  )
 
   // ─────────────────────────────────────────────
   // 对话接口
@@ -152,34 +251,51 @@ export function createChatRouter(ctx: AppContext) {
     const body = c.req.valid('json')
     const { threadId, content } = body
 
-    const result = await ctx.conversationTurnService.executeTurn({
-      threadId,
-      agentId: body.agentId,
-      content,
-      attachmentIds: body.attachmentIds,
-      imageMode: body.imageMode,
-      generationType: body.generationType,
-      workspaceContext: body.workspaceContext,
-    })
+    const thread = await queueIdentity(threadId)
+    if (body.agentId && body.agentId !== thread.agentId)
+      throw new AppError('CONFLICT', { message: '角色与目标会话不匹配' })
+    ctx.runtimeStateService.registerTask(threadId, thread.agentId)
+    let succeeded = false
+    try {
+      const result = await ctx.conversationTurnService.executeTurn({
+        threadId,
+        agentId: thread.agentId,
+        signal: ctx.runtimeStateService.getAbortSignal(threadId),
+        content,
+        attachmentIds: body.attachmentIds,
+        imageMode: body.imageMode,
+        generationType: body.generationType,
+        workspaceContext: body.workspaceContext,
+      })
 
-    const messageId = result.assistantMessage?.id
-    if (!messageId) throw new Error('非流式对话完成后缺少持久消息身份')
-    ctx.conversationProjection.invalidate(threadId)
-    const projection = await ctx.conversationProjection.getSnapshot(threadId)
-    const surface = projection.surfaces.find((item) => item.messageId === String(messageId))
-    if (!surface) throw new Error(`Conversation Surface 不存在: message=${messageId}`)
+      const messageId = result.assistantMessage?.id
+      if (!messageId) throw new Error('非流式对话完成后缺少持久消息身份')
+      ctx.conversationProjection.invalidate(threadId)
+      const projection = await ctx.conversationProjection.getSnapshot(threadId)
+      const surface = projection.surfaces.find((item) => item.messageId === String(messageId))
+      if (!surface) throw new Error(`Conversation Surface 不存在: message=${messageId}`)
 
-    return c.json({
-      code: 'OK',
-      message: result.executionPause ? '对话已暂停' : '对话完成',
-      data: {
-        executionId: result.execution?.executionId,
-        executionPause: result.executionPause,
-        threadId: result.threadId,
-        messageId: String(messageId),
-        surface,
-      },
-    })
+      succeeded = !result.executionPause
+      return c.json({
+        code: 'OK',
+        message: result.executionPause
+          ? __t('server.routers', '对话已暂停')
+          : __t('server.routers', '对话完成'),
+        data: {
+          executionId: result.execution?.executionId,
+          executionPause: result.executionPause,
+          threadId: result.threadId,
+          messageId: String(messageId),
+          surface,
+        },
+      })
+    } finally {
+      try {
+        ctx.conversationQueue.afterTurn(threadId, { success: succeeded })
+      } finally {
+        ctx.runtimeStateService.unregisterTask(threadId)
+      }
+    }
   })
 
   /**
@@ -189,33 +305,22 @@ export function createChatRouter(ctx: AppContext) {
    */
   router.post('/stream', zValidator('json', chatRequestSchema), async (c) => {
     const body = c.req.valid('json')
-    const { threadId, content } = body
-
-    // 预先确认 Thread 存在，流式执行本身会在 streamTurn 内统一完成消息持久化。
-    const thread = await ctx.threadService.getThread(threadId)
-    if (!thread) {
-      throw new AppError('NOT_FOUND', { message: `Thread 不存在: ${threadId}` })
-    }
-    const agentId = body.agentId ?? thread.agentId
-
-    // 注册任务，并把同一取消信号传入完整对话链路。
-    const running = ctx.runtimeStateService.getTaskInfo(threadId)
-    if (running) {
+    const thread = await ctx.threadService.getThread(body.threadId)
+    if (!thread) throw new AppError('NOT_FOUND', { message: '目标会话不存在' })
+    if (body.agentId && body.agentId !== thread.agentId)
+      throw new AppError('CONFLICT', { message: '角色与目标会话不匹配' })
+    if (ctx.runtimeStateService.getTaskInfo(body.threadId))
       throw new AppError('RESOURCE_BUSY', {
-        message: '当前会话仍在后台执行，请等待完成或先停止任务',
+        message: '当前会话仍在执行，请加入消息队列或先停止任务',
       })
-    }
-    ctx.runtimeStateService.registerTask(threadId, agentId)
-    const signal = ctx.runtimeStateService.getAbortSignal(threadId)
-
+    ctx.runtimeStateService.registerTask(body.threadId, thread.agentId)
     return streamSSE(c, async (stream) => {
-      // 连接只负责观察；断连、隐藏窗口或写入背压不能取消后端执行。
       let detached = false
+      let writing = false
       stream.onAbort(() => {
         detached = true
       })
-      let writing = false
-      const writeEvent = async (event: { event: string; data: string }): Promise<void> => {
+      const writeEvent = async (event: { event: string; data: string }) => {
         if (detached || stream.aborted) return
         let timer: ReturnType<typeof setTimeout> | undefined
         writing = true
@@ -240,254 +345,10 @@ export function createChatRouter(ctx: AppContext) {
         if (!writing) void writeEvent({ event: 'heartbeat', data: '{}' })
       }, 15_000)
       heartbeat.unref?.()
-      const startTime = Date.now()
-      let toolCallCount = 0
-      let fullContent = ''
-      let mode: 'stream' | 'non_stream' = 'stream'
-      let firstTokenMs: number | undefined
-      let firstTokenAt: number | undefined
-      const surfaceRef: { current: ConversationSurfaceSession | null } = { current: null }
-      const writeSurface = async (frame: import('@infos/shared').SurfaceFrame) => {
-        await writeEvent({ event: 'surface', data: JSON.stringify(frame) })
-      }
-      let runState = 'thinking'
-      let runLabel = '正在思考……'
-      const updateRunState = async (
-        state: Parameters<ConversationSurfaceSession['status']>[0],
-        message?: string,
-        telemetry?: Parameters<ConversationSurfaceSession['status']>[2],
-      ) => {
-        if (!surfaceRef.current) return
-        const labels: Record<string, string> = {
-          thinking: '正在思考……',
-          assembling: '正在生成工具调用……',
-          calling: '正在等待工具回传……',
-          generating: '正在打字……',
-        }
-        const label = message ?? labels[state]
-        // 每个阶段只推送一次状态；后续文本增量不能重复创建状态帧。
-        if (state === runState && label === runLabel && !telemetry) return
-        runState = state
-        runLabel = label ?? ''
-        await writeSurface(surfaceRef.current.status(state, label, telemetry))
-      }
       try {
-        // 统一流式对话：创建 Pair、编译上下文、保存原始文本与工具调用都由服务处理。
-        const gen = ctx.conversationTurnService.streamTurn({
-          threadId,
-          agentId,
-          content,
-          attachmentIds: body.attachmentIds,
-          imageMode: body.imageMode,
-          workspaceContext: body.workspaceContext,
-          generationType: body.generationType,
-          signal,
-          onRagProgress: async (progress) => {
-            await writeEvent({
-              event: 'rag_progress',
-              data: JSON.stringify(progress),
-            })
-          },
-          onExecutionStarted: async (execution) => {
-            surfaceRef.current = new ConversationSurfaceSession(
-              threadId,
-              agentId,
-              execution.executionId,
-            )
-            await writeSurface(surfaceRef.current.open())
-          },
-          onModelResolved: async (config) => {
-            mode = config.stream === false ? 'non_stream' : 'stream'
-            await updateRunState('thinking', undefined, { mode })
-          },
-        })
-
-        let next = await gen.next()
-        while (!next.done) {
-          const chunk = next.value
-          if (chunk.event === 'context_budget') {
-            if (surfaceRef.current) await writeSurface(surfaceRef.current.contextBudget(chunk.data))
-          } else if (chunk.event === 'thinking_start') {
-            await updateRunState('thinking')
-            const data = chunk.data
-            if (surfaceRef.current)
-              await writeSurface(surfaceRef.current.startThinking(data.blockId, data.turn))
-          } else if (chunk.event === 'thinking_delta') {
-            await updateRunState('thinking')
-            const data = chunk.data
-            if (surfaceRef.current)
-              await writeSurface(surfaceRef.current.appendThinking(data.blockId, data.delta))
-          } else if (chunk.event === 'thinking_end') {
-            const data = chunk.data
-            if (surfaceRef.current)
-              await writeSurface(surfaceRef.current.completeThinking(data.blockId, data.durationMs))
-          } else if (chunk.event === 'native_reasoning_start') {
-            await updateRunState('thinking')
-            const data = chunk.data
-            if (surfaceRef.current)
-              await writeSurface(
-                surfaceRef.current.startNativeReasoning(data.blockId, data.mode, data.turn),
-              )
-          } else if (chunk.event === 'native_reasoning_delta') {
-            await updateRunState('thinking')
-            const data = chunk.data
-            if (surfaceRef.current)
-              await writeSurface(surfaceRef.current.appendNativeReasoning(data.blockId, data.delta))
-          } else if (chunk.event === 'native_reasoning_end') {
-            const data = chunk.data
-            if (surfaceRef.current)
-              await writeSurface(
-                surfaceRef.current.completeNativeReasoning(data.blockId, data.durationMs),
-              )
-          } else if (chunk.event === 'tool_call_start') {
-            await updateRunState('assembling')
-            const data = chunk.data
-            if (surfaceRef.current)
-              await writeSurface(surfaceRef.current.startToolDraft(data.draftId))
-          } else if (chunk.event === 'tool_call_delta') {
-            await updateRunState('assembling')
-            const data = chunk.data
-            if (surfaceRef.current) {
-              const frame = surfaceRef.current.appendToolDraft(
-                data.draftId,
-                data.nameDelta,
-                data.argumentsDelta,
-                data.receivedChars,
-              )
-              if (frame) await writeSurface(frame)
-            }
-          } else if (chunk.event === 'tool_file_baseline') {
-            if (surfaceRef.current)
-              await writeSurface(
-                surfaceRef.current.fileBaseline(chunk.data.draftId, chunk.data.baseline),
-              )
-          } else if (chunk.event === 'tool_call_ready') {
-            toolCallCount++
-            const data = chunk.data
-            if (surfaceRef.current) {
-              await writeSurface(surfaceRef.current.finalizeToolDraft(data))
-            }
-          } else if (chunk.event === 'model_retry') {
-            if (chunk.data.discardedTextCharacters)
-              fullContent = fullContent.slice(0, -chunk.data.discardedTextCharacters)
-            if (surfaceRef.current)
-              for (const frame of surfaceRef.current.modelRetry(chunk.data))
-                await writeSurface(frame)
-          } else if (chunk.event === 'narration_start') {
-            await updateRunState('generating')
-            const data = chunk.data
-            if (surfaceRef.current)
-              await writeSurface(surfaceRef.current.startNarration(data.blockId))
-          } else if (chunk.event === 'narration_delta') {
-            const data = chunk.data
-            const now = Date.now()
-            if (firstTokenMs === undefined) {
-              firstTokenMs = now - startTime
-              firstTokenAt = now
-              await updateRunState('generating', undefined, { mode, firstTokenMs })
-            }
-            await updateRunState('generating')
-            fullContent += data.delta
-            if (surfaceRef.current)
-              await writeSurface(surfaceRef.current.appendText(data.blockId, data.delta))
-          } else if (chunk.event === 'narration_end') {
-            if (surfaceRef.current)
-              await writeSurface(surfaceRef.current.completeNarration(chunk.data.blockId))
-          } else {
-            if (chunk.event === 'tool_call') {
-              // 兼容事件：正式节点已由tool_call_ready在原草稿节点上完成。
-              await updateRunState('calling')
-            } else if (chunk.event === 'tool_result') {
-              const data = chunk.data as {
-                callId: string
-                result: string
-                isError: boolean
-                durationMs?: number
-                automaticApproval?: import('@infos/shared').AutomaticApprovalRecord
-              }
-              if (surfaceRef.current) {
-                for (const frame of surfaceRef.current.toolResult(data)) await writeSurface(frame)
-                await updateRunState('thinking')
-              }
-            } else if (chunk.event === 'status') {
-              const data = chunk.data as {
-                state: Parameters<ConversationSurfaceSession['status']>[0]
-                message?: string
-              }
-              await updateRunState(data.state, data.message)
-            }
-          }
-          next = await gen.next()
-        }
-
-        const turnResult = next.value
-        // streamTurn 自然结束时消息已持久化；最终 Surface 必须来自统一 Projection。
-        const messageId = turnResult?.assistantMessage?.id
-        if (!messageId) throw new Error('流式对话完成后缺少持久消息身份')
-        ctx.conversationProjection.invalidate(threadId)
-        const projection = await ctx.conversationProjection.getSnapshot(threadId)
-        const committedMessage = projection.messages.find(
-          (message) => message.messageId === String(messageId),
-        )
-        const committedSurface = projection.surfaces.find(
-          (surface) => surface.messageId === String(messageId),
-        )
-        if (!committedMessage || !committedSurface) {
-          throw new Error(`Conversation Projection 不完整: message=${messageId}`)
-        }
-        const completedAt = Date.now()
-        const durationMs = completedAt - startTime
-        const outputDurationMs = firstTokenAt ? completedAt - firstTokenAt : 0
-        if (surfaceRef.current) {
-          await writeSurface(
-            surfaceRef.current.commit(projection, committedMessage, committedSurface, {
-              mode,
-              firstTokenMs,
-              outputDurationMs,
-              totalDurationMs: durationMs,
-            }),
-          )
-        }
-
-        // 完成遥测与done事件
-        await writeEvent({
-          event: 'done',
-          data: JSON.stringify({
-            usage: {
-              promptTokens: ctx.tokenCounter.countMessages(turnResult.initialPromptMessages),
-              completionTokens:
-                turnResult.generationStats?.outputTokens ??
-                ctx.tokenCounter.countTokens(fullContent),
-            },
-            generationStats: turnResult.generationStats,
-            toolCallCount,
-            executionPause: turnResult.executionPause,
-            mode,
-            firstTokenMs,
-            outputDurationMs,
-            durationMs,
-            threadId,
-            agentId,
-          }),
-        })
-      } catch (err) {
-        const appError = err instanceof AppError ? err : null
-        const code = appError?.code ?? 'INTERNAL_ERROR'
-        const message = appError?.message ?? (err instanceof Error ? err.message : String(err))
-        if (surfaceRef.current) {
-          await writeSurface(surfaceRef.current.fail(code, message, fullContent))
-        }
-        await writeEvent({
-          event: 'error',
-          data: JSON.stringify({
-            code,
-            message,
-            data: appError?.data,
-          }),
-        })
+        await runChatStream(ctx, body, writeEvent)
       } finally {
         clearInterval(heartbeat)
-        ctx.runtimeStateService.unregisterTask(threadId)
       }
     })
   })
@@ -497,10 +358,11 @@ export function createChatRouter(ctx: AppContext) {
     const body = await c.req.json().catch(() => ({}) as Record<string, unknown>)
     const threadId = ((body as Record<string, unknown>).threadId as string) ?? ''
     if (threadId) {
+      ctx.conversationQueue.pause(threadId, true)
       ctx.runtimeStateService.cancelTask(threadId)
       await disposeExecutionOwner({ threadId }, true)
     }
-    return c.json({ code: 'OK', message: '已停止生成' })
+    return c.json({ code: 'OK', message: __t('server.routers', '已停止生成') })
   })
 
   // ─────────────────────────────────────────────
@@ -538,7 +400,7 @@ export function createChatRouter(ctx: AppContext) {
       pageSize,
     })
 
-    return c.json({ code: 'OK', message: '获取成功', data: result })
+    return c.json({ code: 'OK', message: __t('server.routers', '获取成功'), data: result })
   })
 
   async function assertThreadMutable(threadId: string): Promise<void> {
@@ -550,7 +412,15 @@ export function createChatRouter(ctx: AppContext) {
     const taskBusy = ctx.backgroundTaskService
       ? await ctx.backgroundTaskService.hasActiveWork({ threadId })
       : false
-    if (reactBusy || taskBusy) {
+    const proactiveBusy =
+      ctx.kernelScheduler
+        ?.list()
+        .some(
+          (item) =>
+            item.descriptor.threadId === threadId &&
+            !['completed', 'failed', 'cancelled', 'timed_out'].includes(item.state),
+        ) ?? false
+    if (reactBusy || taskBusy || proactiveBusy) {
       throw new AppError('CONFLICT', {
         message: '会话关联的 Agent 工作仍在进行，请先停止或等待完成',
       })
@@ -609,7 +479,7 @@ export function createChatRouter(ctx: AppContext) {
       beforeCursor,
       pageSize,
     })
-    return c.json({ code: 'OK', message: '获取成功', data })
+    return c.json({ code: 'OK', message: __t('server.routers', '获取成功'), data })
   })
 
   /** GET /threads/:id/flow-state — 查看当前 Thread 的心流；group 返回全部 Agent。 */
@@ -633,7 +503,7 @@ export function createChatRouter(ctx: AppContext) {
     if (!thread) throw new AppError('NOT_FOUND', { message: `Thread 不存在: ${threadId}` })
     const agentId = c.req.query('agentId') ?? thread.agentId
     const data = await ctx.flowStateService.clear(threadId, agentId)
-    return c.json({ code: 'OK', message: '心流已清空', data })
+    return c.json({ code: 'OK', message: __t('server.routers', '心流已清空'), data })
   })
 
   router.post('/threads/:id/token-budget-preview', async (c) => {
@@ -646,15 +516,40 @@ export function createChatRouter(ctx: AppContext) {
       agentId: body.agentId,
       content: body.content,
     })
-    return c.json({ code: 'OK', message: '预算计算完成', data })
+    return c.json({ code: 'OK', message: __t('server.routers', '预算计算完成'), data })
   })
+
+  /** 会话级模型配置仅返回卡片摘要，不暴露认证信息。 */
+  router.get('/threads/:id/model-settings', async (c) => {
+    const thread = await ctx.threadService.getThread(c.req.param('id'))
+    if (!thread || thread.channel !== 'desktop' || thread.purpose !== 'conversation')
+      throw new AppError('NOT_FOUND', { message: '聊天会话不存在' })
+    return c.json({ code: 'OK', data: await ctx.threadModelService.settings(thread.id) })
+  })
+
+  router.put(
+    '/threads/:id/model-settings',
+    zValidator(
+      'json',
+      z.object({
+        modelConfigId: z.number().int().positive().nullable(),
+        reasoningEffort: z.enum(REASONING_EFFORT_VALUES).nullable(),
+      }),
+    ),
+    async (c) => {
+      const threadId = c.req.param('id')
+      await assertThreadMutable(threadId)
+      const data = await ctx.threadModelService.update(threadId, c.req.valid('json'))
+      return c.json({ code: 'OK', message: __t('server.routers', '已保存'), data })
+    },
+  )
 
   /** GET /threads/:id/tools — 仅返回当前 Channel 合法且可由会话控制的工具。 */
   router.get('/threads/:id/tools', async (c) => {
     const { thread, tools } = await resolveThreadTools(c.req.param('id'))
     return c.json({
       code: 'OK',
-      message: '获取成功',
+      message: __t('server.routers', '获取成功'),
       data: {
         threadId: thread.id,
         channel: thread.channel,
@@ -682,7 +577,7 @@ export function createChatRouter(ctx: AppContext) {
       const { thread: updated, tools } = await resolveThreadTools(threadId)
       return c.json({
         code: 'OK',
-        message: '会话模式已保存',
+        message: __t('server.routers', '会话模式已保存'),
         data: {
           threadId,
           channel: updated.channel,
@@ -712,7 +607,7 @@ export function createChatRouter(ctx: AppContext) {
       await ctx.threadService.updateExecutionMode(threadId, executionMode)
       return c.json({
         code: 'OK',
-        message: '执行模式已保存',
+        message: __t('server.routers', '执行模式已保存'),
         data: { threadId, executionMode, autoExecuteTools },
       })
     },
@@ -750,7 +645,7 @@ export function createChatRouter(ctx: AppContext) {
     const { thread: updatedThread, tools: updatedTools } = await resolveThreadTools(threadId)
     return c.json({
       code: 'OK',
-      message: '本会话工具配置已保存',
+      message: __t('server.routers', '本会话工具配置已保存'),
       data: {
         disabledTools,
         channel: updatedThread.channel,
@@ -793,7 +688,7 @@ export function createChatRouter(ctx: AppContext) {
 
     return c.json({
       code: 'OK',
-      message: '获取成功',
+      message: __t('server.routers', '获取成功'),
       data: {
         thread,
         messages: messagesWithAttachments,
@@ -817,7 +712,7 @@ export function createChatRouter(ctx: AppContext) {
       platformIdentifier: body.platformIdentifier,
       title: body.title,
     })
-    return c.json({ code: 'OK', message: 'Thread 已创建', data: { thread } })
+    return c.json({ code: 'OK', message: __t('server.routers', 'Thread 已创建'), data: { thread } })
   })
 
   /**
@@ -831,7 +726,7 @@ export function createChatRouter(ctx: AppContext) {
     const channel = 'desktop'
 
     const thread = await ctx.threadService.getOrCreateLatest(agentId, channel, 'conversation')
-    return c.json({ code: 'OK', message: '获取成功', data: { thread } })
+    return c.json({ code: 'OK', message: __t('server.routers', '获取成功'), data: { thread } })
   })
 
   /** PATCH /api/threads/:id — 修改会话标题。 */
@@ -839,7 +734,7 @@ export function createChatRouter(ctx: AppContext) {
     const threadId = c.req.param('id')
     const body = c.req.valid('json')
     await ctx.threadService.renameThread(threadId, body.title)
-    return c.json({ code: 'OK', message: '会话标题已更新' })
+    return c.json({ code: 'OK', message: __t('server.routers', '会话标题已更新') })
   })
 
   /** POST /threads/:id/rewind-preview — 返回删除及文件回滚清单，不产生副作用。 */
@@ -849,57 +744,68 @@ export function createChatRouter(ctx: AppContext) {
     const preview = body.wholeThread
       ? await ctx.threadService.previewThreadRewind(threadId)
       : await ctx.threadService.previewMessageRewind(threadId, body.messageId!)
-    return c.json({ code: 'OK', message: '预检成功', data: preview })
+    return c.json({ code: 'OK', message: __t('server.routers', '预检成功'), data: preview })
   })
 
   /** POST /threads/:id/rewind — 单轮撤回回滚文件；整条会话删除保留文件。 */
-  router.post('/threads/:id/rewind', zValidator('json', rewindSchema), async (c) => {
-    const threadId = c.req.param('id')
-    await assertThreadMutable(threadId)
-    const body = c.req.valid('json')
-    const preview = body.wholeThread
-      ? await ctx.threadService.previewThreadRewind(threadId)
-      : await ctx.threadService.previewMessageRewind(threadId, body.messageId!)
-    const result = body.wholeThread
-      ? await ctx.threadService.rewindThread(threadId)
-      : await ctx.threadService.rewindMessage(
-          threadId,
-          body.messageId!,
-          'user',
-          body.preserveInputAttachments,
-        )
-    if (body.wholeThread) {
-      await ctx.flowStateService.deleteThread(threadId)
-      ctx.toolContextService.deleteThread(threadId)
-    } else {
-      // 文件与消息都恢复到目标轮次之前，临时状态和材料按相同范围撤回。
-      if (preview.pairIds.length)
-        await ctx.flowStateService.rollbackPairs(threadId, preview.pairIds)
-      if (preview.pairIds.length) ctx.toolContextService.deletePairs(threadId, preview.pairIds)
-    }
-    let projection
-    if (!body.wholeThread) {
-      ctx.conversationProjection.invalidate(threadId)
-      projection = await ctx.conversationProjection.getSnapshot(threadId)
-    } else {
-      ctx.conversationProjection.invalidate(threadId)
-    }
-    return c.json({
-      code: 'OK',
-      message: body.wholeThread ? '会话已删除，文件保持原样' : '对话、工作区与心流已回滚',
-      data: { ...result, ...(projection ? { projection } : {}) },
-    })
-  })
+  router.post(
+    '/threads/:id/rewind',
+    zValidator('json', rewindSchema),
+    historyMutation,
+    async (c) => {
+      const threadId = c.req.param('id')
+      ctx.conversationQueue.pause(threadId, true)
+      await assertThreadMutable(threadId)
+      const body = c.req.valid('json')
+      const preview = body.wholeThread
+        ? await ctx.threadService.previewThreadRewind(threadId)
+        : await ctx.threadService.previewMessageRewind(threadId, body.messageId!)
+      const result = body.wholeThread
+        ? await ctx.threadService.rewindThread(threadId)
+        : await ctx.threadService.rewindMessage(
+            threadId,
+            body.messageId!,
+            'user',
+            body.preserveInputAttachments,
+          )
+      ctx.conversationQueue.historyChanged(threadId, body.wholeThread, true)
+      if (body.wholeThread) {
+        await ctx.flowStateService.deleteThread(threadId)
+        ctx.toolContextService.deleteThread(threadId)
+      } else {
+        // 文件与消息都恢复到目标轮次之前，临时状态和材料按相同范围撤回。
+        if (preview.pairIds.length)
+          await ctx.flowStateService.rollbackPairs(threadId, preview.pairIds)
+        if (preview.pairIds.length) ctx.toolContextService.deletePairs(threadId, preview.pairIds)
+      }
+      let projection
+      if (!body.wholeThread) {
+        ctx.conversationProjection.invalidate(threadId)
+        projection = await ctx.conversationProjection.getSnapshot(threadId)
+      } else {
+        ctx.conversationProjection.invalidate(threadId)
+      }
+      return c.json({
+        code: 'OK',
+        message: body.wholeThread
+          ? __t('server.routers', '会话已删除，文件保持原样')
+          : __t('server.routers', '对话、工作区与心流已回滚'),
+        data: { ...result, ...(projection ? { projection } : {}) },
+      })
+    },
+  )
 
   /** DELETE /api/threads/:id — 删除会话历史，保留全部文件。 */
-  router.delete('/threads/:id', async (c) => {
+  router.delete('/threads/:id', historyMutation, async (c) => {
     const threadId = c.req.param('id')
+    ctx.conversationQueue.pause(threadId, true)
     await assertThreadMutable(threadId)
     await ctx.threadService.rewindThread(threadId)
     await ctx.flowStateService.deleteThread(threadId)
     ctx.toolContextService.deleteThread(threadId)
     ctx.conversationProjection.invalidate(threadId)
-    return c.json({ code: 'OK', message: '会话已删除，文件保持原样' })
+    ctx.conversationQueue.historyChanged(threadId, true)
+    return c.json({ code: 'OK', message: __t('server.routers', '会话已删除，文件保持原样') })
   })
 
   // ─────────────────────────────────────────────
@@ -909,38 +815,48 @@ export function createChatRouter(ctx: AppContext) {
   /**
    * PATCH /api/threads/:id/messages/:msgId — 编辑消息内容
    */
-  router.patch('/threads/:id/messages/:msgId', zValidator('json', editMessageSchema), async (c) => {
-    const threadId = c.req.param('id')
-    await assertThreadMutable(threadId)
-    const msgId = Number(c.req.param('msgId'))
-    if (!Number.isInteger(msgId) || msgId <= 0) {
-      throw new AppError('INVALID_PARAMETER', {
-        message: '无效的消息 ID',
-        data: { field: 'msgId', expected: 'positive integer' },
+  router.patch(
+    '/threads/:id/messages/:msgId',
+    zValidator('json', editMessageSchema),
+    historyMutation,
+    async (c) => {
+      const threadId = c.req.param('id')
+      ctx.conversationQueue.pause(threadId, true)
+      await assertThreadMutable(threadId)
+      const msgId = Number(c.req.param('msgId'))
+      if (!Number.isInteger(msgId) || msgId <= 0) {
+        throw new AppError('INVALID_PARAMETER', {
+          message: '无效的消息 ID',
+          data: { field: 'msgId', expected: 'positive integer' },
+        })
+      }
+      const body = c.req.valid('json')
+      const success = await ctx.threadService.editMessage(
+        msgId,
+        body.content,
+        threadId,
+        body.expectedRevision,
+      )
+      if (!success) {
+        throw new AppError('NOT_FOUND', { message: '消息不存在' })
+      }
+      ctx.conversationProjection.invalidate(c.req.param('id'))
+      const data = await ctx.conversationProjection.getSnapshot(threadId, {
+        beforeCursor: String(msgId + 1),
+        pageSize: 100,
       })
-    }
-    const body = c.req.valid('json')
-    const success = await ctx.threadService.editMessage(
-      msgId,
-      body.content,
-      threadId,
-      body.expectedRevision,
-    )
-    if (!success) {
-      throw new AppError('NOT_FOUND', { message: '消息不存在' })
-    }
-    ctx.conversationProjection.invalidate(c.req.param('id'))
-    const data = await ctx.conversationProjection.getSnapshot(threadId, {
-      beforeCursor: String(msgId + 1),
-      pageSize: 100,
-    })
-    return c.json({ code: 'OK', message: '消息已更新', data })
-  })
+      ctx.conversationQueue.historyChanged(threadId, false)
+      return c.json({ code: 'OK', message: __t('server.routers', '消息已更新'), data })
+    },
+  )
 
   /**
    * DELETE /api/threads/:id/messages/:msgId — 软删除单条消息
    */
-  router.delete('/threads/:id/messages/:msgId', async (c) => {
+  router.delete('/threads/:id/messages/:msgId', historyMutation, async (c) => {
+    const threadId = c.req.param('id')
+    ctx.conversationQueue.pause(threadId, true)
+    await assertThreadMutable(threadId)
     const msgId = Number(c.req.param('msgId'))
     if (!Number.isInteger(msgId) || msgId <= 0) {
       throw new AppError('INVALID_PARAMETER', {
@@ -952,15 +868,16 @@ export function createChatRouter(ctx: AppContext) {
     if (!success) {
       throw new AppError('NOT_FOUND', { message: '消息不存在' })
     }
+    ctx.conversationQueue.historyChanged(threadId, false, true)
     ctx.conversationProjection.invalidate(c.req.param('id'))
     const data = await ctx.conversationProjection.getSnapshot(c.req.param('id'))
-    return c.json({ code: 'OK', message: '消息已删除', data })
+    return c.json({ code: 'OK', message: __t('server.routers', '消息已删除'), data })
   })
 
   /**
    * DELETE /api/threads/:id/messages/:msgId/pair — 软删除整对消息
    */
-  router.delete('/threads/:id/messages/:msgId/pair', async (c) => {
+  router.delete('/threads/:id/messages/:msgId/pair', historyMutation, async (c) => {
     const msgId = Number(c.req.param('msgId'))
     if (!Number.isInteger(msgId) || msgId <= 0) {
       throw new AppError('INVALID_PARAMETER', {
@@ -969,8 +886,10 @@ export function createChatRouter(ctx: AppContext) {
       })
     }
     const threadId = c.req.param('id')
+    ctx.conversationQueue.pause(threadId, true)
     await assertThreadMutable(threadId)
     const result = await ctx.threadService.rewindMessage(threadId, msgId)
+    ctx.conversationQueue.historyChanged(threadId, false, true)
     if (result.preview.pairIds.length) {
       await ctx.flowStateService.rollbackPairs(threadId, result.preview.pairIds)
       ctx.toolContextService.deletePairs(threadId, result.preview.pairIds)
@@ -979,7 +898,7 @@ export function createChatRouter(ctx: AppContext) {
     const projection = await ctx.conversationProjection.getSnapshot(threadId)
     return c.json({
       code: 'OK',
-      message: `已回滚 ${result.preview.pairCount} 轮对话及关联文件`,
+      message: __t('server.routers', '已回滚 {0} 轮对话及关联文件', [result.preview.pairCount]),
       data: {
         deletedCount: result.deletedMessageIds.length,
         preview: result.preview,
@@ -995,7 +914,7 @@ export function createChatRouter(ctx: AppContext) {
 
   router.get('/tasks', (c) => {
     const tasks = ctx.runtimeStateService.listActiveTasks()
-    return c.json({ code: 'OK', message: '获取成功', data: tasks })
+    return c.json({ code: 'OK', message: __t('server.routers', '获取成功'), data: tasks })
   })
 
   router.post('/tasks/pause', async (c) => {
@@ -1006,8 +925,8 @@ export function createChatRouter(ctx: AppContext) {
     }
     const ok = ctx.runtimeStateService.pauseTask(threadId)
     return ok
-      ? c.json({ code: 'OK', message: '任务已暂停' })
-      : c.json({ code: 'NOT_FOUND', message: '任务不存在' }, 404)
+      ? c.json({ code: 'OK', message: __t('server.routers', '任务已暂停') })
+      : c.json({ code: 'NOT_FOUND', message: __t('server.routers', '任务不存在') }, 404)
   })
 
   router.post('/tasks/resume', async (c) => {
@@ -1018,8 +937,8 @@ export function createChatRouter(ctx: AppContext) {
     }
     const ok = ctx.runtimeStateService.resumeTask(threadId)
     return ok
-      ? c.json({ code: 'OK', message: '任务已恢复' })
-      : c.json({ code: 'NOT_FOUND', message: '任务不存在' }, 404)
+      ? c.json({ code: 'OK', message: __t('server.routers', '任务已恢复') })
+      : c.json({ code: 'NOT_FOUND', message: __t('server.routers', '任务不存在') }, 404)
   })
 
   router.post('/tasks/inject', async (c) => {
@@ -1034,8 +953,8 @@ export function createChatRouter(ctx: AppContext) {
     }
     const ok = ctx.runtimeStateService.injectInstruction(threadId, instruction)
     return ok
-      ? c.json({ code: 'OK', message: '指令已注入' })
-      : c.json({ code: 'NOT_FOUND', message: '任务不存在' }, 404)
+      ? c.json({ code: 'OK', message: __t('server.routers', '指令已注入') })
+      : c.json({ code: 'NOT_FOUND', message: __t('server.routers', '任务不存在') }, 404)
   })
 
   return router

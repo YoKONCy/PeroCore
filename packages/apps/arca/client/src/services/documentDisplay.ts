@@ -1,3 +1,4 @@
+import { t as __t } from '../i18n'
 import type { DocumentSnapshot } from '@infos/document-engine'
 import { officeContent, runsOf, type OfficeNode } from '@infos/document-engine/office'
 
@@ -32,7 +33,8 @@ export function nodeText(node: OfficeNode): string {
 
 export function displayTime(value: string, short = false): string {
   const date = new Date(value)
-  if (!Number.isFinite(date.getTime()) || date.getTime() <= 0) return '时间未知'
+  if (!Number.isFinite(date.getTime()) || date.getTime() <= 0)
+    return __t('apps.arca.ui', '时间未知')
   return date.toLocaleString('zh-CN', {
     ...(short ? {} : { year: 'numeric' }),
     month: '2-digit',

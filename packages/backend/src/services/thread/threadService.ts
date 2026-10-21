@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * Thread Service — 交互线程业务逻辑
  *
@@ -154,7 +155,13 @@ export class ThreadService {
       purpose: params.purpose,
       interactionMode: params.interactionMode,
     })
-    logger.info(`Thread 已创建: id=${id}, agent=${params.agentId}, channel=${params.channel}`)
+    logger.info(
+      __t('logs.thread', 'Thread 已创建: id={0}, agent={1}, channel={2}', [
+        id,
+        params.agentId,
+        params.channel,
+      ]),
+    )
     return this.toThreadInfo(row)
   }
 
@@ -168,7 +175,10 @@ export class ThreadService {
     const success = await this.threadRepo.updateContextPolicy(threadId, contextPolicy)
     if (success) {
       logger.info(
-        `Thread ContextPolicy 已更新: thread=${threadId}, ${contextPolicy ? '自定义' : '默认'}`,
+        __t('logs.thread', 'Thread ContextPolicy 已更新: thread={0}, {1}', [
+          threadId,
+          contextPolicy ? '自定义' : '默认',
+        ]),
       )
     }
     return success
@@ -272,7 +282,7 @@ export class ThreadService {
       }
     }
 
-    logger.debug(`用户消息已追加: thread=${threadId}, msgId=${row.id}`)
+    logger.debug(__t('logs.thread', '用户消息已追加: thread={0}, msgId={1}', [threadId, row.id]))
     return this.toMessageInfo(row)
   }
 
@@ -308,7 +318,9 @@ export class ThreadService {
     // 更新 Thread 计数
     await this.threadRepo.updateMessageCount(params.threadId, 1)
 
-    logger.debug(`Agent 回复已追加: thread=${params.threadId}, msgId=${row.id}`)
+    logger.debug(
+      __t('logs.thread', 'Agent 回复已追加: thread={0}, msgId={1}', [params.threadId, row.id]),
+    )
     return this.toMessageInfo(row)
   }
 
@@ -327,7 +339,9 @@ export class ThreadService {
       pairId: params.pairId,
     })
     await this.threadRepo.updateMessageCount(params.threadId, 0)
-    logger.debug(`系统消息已追加: thread=${params.threadId}, msgId=${row.id}`)
+    logger.debug(
+      __t('logs.thread', '系统消息已追加: thread={0}, msgId={1}', [params.threadId, row.id]),
+    )
     return this.toMessageInfo(row)
   }
 
@@ -446,7 +460,7 @@ export class ThreadService {
       throw new AppError('NOT_FOUND', { message: '会话不存在' })
     }
     await this.threadRepo.updateTitle(threadId, title.trim())
-    logger.info(`Thread 已改名: thread=${threadId}`)
+    logger.info(__t('logs.thread', 'Thread 已改名: thread={0}', [threadId]))
   }
 
   /** 获取删除某轮的链式 rewind 预检：目标轮次及所有后续轮次。 */
@@ -505,7 +519,11 @@ export class ThreadService {
     await this.coverageInvalidator?.invalidatePairs(threadId, preview.pairIds)
     await this.threadRepo.syncThreadStats(threadId)
     logger.info(
-      `对话已链式回滚: thread=${threadId}, pairs=${preview.pairCount}, messages=${messageIds.length}`,
+      __t('logs.thread', '对话已链式回滚: thread={0}, pairs={1}, messages={2}', [
+        threadId,
+        preview.pairCount,
+        messageIds.length,
+      ]),
     )
     return {
       preview: this.completedRewindPreview(preview, workspace),
@@ -526,7 +544,12 @@ export class ThreadService {
     await this.characterStateLifecycle?.clearThread(threadId)
     await this.attachmentRepo?.softDeleteByMessageIds(messageIds)
     await this.coverageInvalidator?.invalidateThread(threadId)
-    logger.info(`Thread 已软删除，文件保持原样: thread=${threadId}, pairs=${preview.pairCount}`)
+    logger.info(
+      __t('logs.thread', 'Thread 已软删除，文件保持原样: thread={0}, pairs={1}', [
+        threadId,
+        preview.pairCount,
+      ]),
+    )
     return {
       preview: this.completedRewindPreview(preview, workspace),
       workspace,
@@ -557,7 +580,9 @@ export class ThreadService {
     const count = await this.threadRepo.softDeleteByChannel(channel)
     if (count > 0) {
       await this.characterStateLifecycle?.clearChannel?.(channel)
-      logger.info(`已软删除退役 Channel 会话: channel=${channel}, count=${count}`)
+      logger.info(
+        __t('logs.thread', '已软删除退役 Channel 会话: channel={0}, count={1}', [channel, count]),
+      )
     }
     return count
   }
@@ -571,13 +596,18 @@ export class ThreadService {
     try {
       await this.clearPromptVariables?.(threadId)
     } catch (error) {
-      logger.warn('会话已删除，但酒馆变量清理失败', { error })
+      logger.warn(__t('logs.thread', '会话已删除，但酒馆变量清理失败'), { error })
     }
     await this.planLifecycle?.clearThread(threadId)
     await this.characterStateLifecycle?.clearThread(threadId)
     await this.attachmentRepo?.softDeleteByMessageIds(result.messageIds)
     await this.coverageInvalidator?.invalidateThread(threadId)
-    logger.info(`Thread 已软删除: thread=${threadId}, messages=${result.messageIds.length}`)
+    logger.info(
+      __t('logs.thread', 'Thread 已软删除: thread={0}, messages={1}', [
+        threadId,
+        result.messageIds.length,
+      ]),
+    )
     return true
   }
 
@@ -595,7 +625,7 @@ export class ThreadService {
       if (context?.pairId) {
         await this.coverageInvalidator?.invalidatePairs(context.threadId, [context.pairId])
       }
-      logger.info(`消息已软删除: msgId=${messageId}`)
+      logger.info(__t('logs.thread', '消息已软删除: msgId={0}', [messageId]))
     }
     return success
   }
@@ -615,7 +645,7 @@ export class ThreadService {
       if (context?.pairId) {
         await this.coverageInvalidator?.invalidatePairs(context.threadId, [context.pairId])
       }
-      logger.info(`对话对已软删除: msgId=${messageId}, count=${count}`)
+      logger.info(__t('logs.thread', '对话对已软删除: msgId={0}, count={1}', [messageId, count]))
     }
     return count
   }
@@ -641,7 +671,7 @@ export class ThreadService {
       if (context?.pairId) {
         await this.coverageInvalidator?.invalidatePairs(context.threadId, [context.pairId])
       }
-      logger.info(`消息已编辑: msgId=${messageId}`)
+      logger.info(__t('logs.thread', '消息已编辑: msgId={0}', [messageId]))
     }
     return success
   }
@@ -662,7 +692,12 @@ export class ThreadService {
     coversMessageIds: string[],
   ): Promise<void> {
     await this.threadRepo.upsertSummary({ threadId, content, coversMessageIds })
-    logger.info(`摘要已更新: thread=${threadId}, covers=${coversMessageIds.length} 条消息`)
+    logger.info(
+      __t('logs.thread', '摘要已更新: thread={0}, covers={1} 条消息', [
+        threadId,
+        coversMessageIds.length,
+      ]),
+    )
   }
 
   // ── 私有转换 ──
@@ -682,7 +717,12 @@ export class ThreadService {
       status: (r.status as string) ?? 'active',
       contextPolicy: (r.contextPolicy as string) ?? null,
       disabledTools: this.parseDisabledTools(r.disabledToolsJson),
-      interactionMode: r.interactionMode === 'chat' ? 'chat' : 'work',
+      interactionMode:
+        r.interactionMode === 'minimal'
+          ? 'minimal'
+          : r.interactionMode === 'chat'
+            ? 'chat'
+            : 'work',
       autoExecuteTools: Boolean(r.autoExecuteTools),
       executionMode: resolveExecutionMode(r.executionMode, Boolean(r.autoExecuteTools)),
       purpose: (r.purpose as string) ?? 'conversation',

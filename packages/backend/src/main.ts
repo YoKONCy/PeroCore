@@ -1,3 +1,4 @@
+import { t as __t } from './lib/i18n'
 /**
  * 后端服务启动入口（开发期 / Electron spawn 兼容期）
  *
@@ -20,10 +21,10 @@ startServer({
   printBanner: printBanner,
   onHttpReady: (address, port) => {
     // backend 入口保留 success 日志（绿色对勾），与历史行为一致
-    logger.success(`infOS 后端已就绪 → http://${address}:${port}`)
+    logger.success(__t('logs.main.ts', 'infOS 后端已就绪 → http://{0}:{1}', [address, port]))
   },
 }).catch((err) => {
-  logger.error(`启动失败: ${err}`)
+  logger.error(__t('logs.main.ts', '启动失败: {0}', [err]))
   if (err instanceof Error) {
     console.error(err.stack)
   }
@@ -54,9 +55,15 @@ function printBanner(): void {
 
   console.log(banner)
   console.log(separator)
-  console.log(`\x1b[38;5;219m🚀 萌动链接：PeroperoChat!\x1b[0m`)
-  console.log(`\x1b[38;5;183m📅 时间: ${now}\x1b[0m`)
-  console.log(`\x1b[38;5;147m📂 数据目录: ${getDataDir()}\x1b[0m`)
-  console.log(`\x1b[38;5;117m💻 平台: ${process.platform} / Node ${process.version}\x1b[0m`)
+  console.log('\u001b[38;5;219m' + __t('logs.main.ts', '🚀 萌动链接：PeroperoChat!') + '\u001b[0m')
+  console.log('\u001b[38;5;183m' + __t('logs.main.ts', '📅 时间: {0}', [now]) + '\u001b[0m')
+  console.log(
+    '\u001b[38;5;147m' + __t('logs.main.ts', '📂 数据目录: {0}', [getDataDir()]) + '\u001b[0m',
+  )
+  console.log(
+    '\u001b[38;5;117m' +
+      __t('logs.main.ts', '💻 平台: {0} / Node {1}', [process.platform, process.version]) +
+      '\u001b[0m',
+  )
   console.log(separator)
 }

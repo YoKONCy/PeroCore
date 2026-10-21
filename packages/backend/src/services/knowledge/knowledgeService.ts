@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 import { createHash, randomUUID } from 'node:crypto'
 import type {
   KernelExecutionId,
@@ -101,7 +102,7 @@ export class KnowledgeService {
       throw new AppError('RESOURCE_BUSY', { message: '资料库已清理，请重新导入' })
     const normalized = normalizeKnowledgeText(input.content)
     const fields = {
-      title: input.title.trim().slice(0, 200) || '未命名资料',
+      title: input.title.trim().slice(0, 200) || __t('server.knowledge', '未命名资料'),
       sourceKind: input.sourceKind,
       source: input.source ?? '',
       ...normalized,
@@ -133,7 +134,7 @@ export class KnowledgeService {
       })
     }
     await cancellation?.catch((cause) =>
-      logger.warn(`旧资料任务取消失败：${(cause as Error).message}`),
+      logger.warn(__t('logs.knowledge', '旧资料任务取消失败：{0}', [(cause as Error).message])),
     )
     await this.enqueue(row)
     return this.repo.info(this.requireDocument(row.id))
@@ -267,7 +268,12 @@ export class KnowledgeService {
               status: 'failed',
               error: (cause as Error).message,
             })
-            logger.warn(`资料整理失败：${row.title}，${(cause as Error).message}`)
+            logger.warn(
+              __t('logs.knowledge', '资料整理失败：{0}，{1}', [
+                row.title,
+                (cause as Error).message,
+              ]),
+            )
             throw cause
           }
         },

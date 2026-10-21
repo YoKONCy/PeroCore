@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from './i18n'
+
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Icon from './components/PictoriaIcon.vue'
 import CanvasCard from './components/CanvasCard.vue'
@@ -128,10 +130,16 @@ const theme = ref<'dark' | 'light'>(
 )
 const collectionTitle = computed(
   () =>
-    store.collections.value.find((group) => group.id === project.collectionId)?.title || '独立画布',
+    store.collections.value.find((group) => group.id === project.collectionId)?.title ||
+    __t('apps.pictoria.ui', '独立画布'),
 )
 const collectionOptions = computed(() => [
-  { value: '', label: '独立画布' },
+  {
+    value: '',
+    get label() {
+      return __t('apps.pictoria.ui', '独立画布')
+    },
+  },
   ...store.collections.value.map((group) => ({ value: group.id, label: group.title })),
 ])
 const visible = computed(() => {
@@ -151,14 +159,14 @@ const visible = computed(() => {
 })
 const saveLabel = computed(() =>
   saving.value
-    ? '正在保存'
+    ? __t('apps.pictoria.ui', '正在保存')
     : dirty.value
       ? online.value
-        ? '未保存'
-        : '本地草稿'
+        ? __t('apps.pictoria.ui', '未保存')
+        : __t('apps.pictoria.ui', '本地草稿')
       : project.revision
-        ? '已保存'
-        : '新画布',
+        ? __t('apps.pictoria.ui', '已保存')
+        : __t('apps.pictoria.ui', '新画布'),
 )
 const counts = computed(() => ({
   images: project.items.filter((item) => item.content.mimeType?.startsWith('image/')).length,
@@ -687,7 +695,7 @@ onBeforeUnmount(() => {
         <a
           class="pictoria-brand"
           href="#"
-          aria-label="Pictoria 画布"
+          :aria-label="__t('apps.pictoria.ui', 'Pictoria 画布')"
           @click.prevent="navigation.fit()"
         >
           <svg viewBox="0 0 32 32" width="29" height="29" fill="none" aria-hidden="true">
@@ -717,7 +725,7 @@ onBeforeUnmount(() => {
       <div class="header-actions">
         <span class="quiet-button canvas-mode">
           <Icon name="grid" :size="15" />
-          画布
+          {{ __t('apps.pictoria.ui', '画布') }}
         </span>
         <button
           class="quiet-button"
@@ -725,42 +733,54 @@ onBeforeUnmount(() => {
           @click="openWorkflow"
         >
           <Icon name="workflow" :size="16" />
-          工作流
+          {{ __t('apps.pictoria.ui', '工作流') }}
         </button>
         <i class="header-divider" />
         <button
           class="quiet-button"
           :disabled="!project.items.length || arranging"
-          :title="selected.length ? '整理选中内容' : '整理整个画布'"
+          :title="
+            selected.length
+              ? __t('apps.pictoria.ui', '整理选中内容')
+              : __t('apps.pictoria.ui', '整理整个画布')
+          "
           @click="links.organize()"
         >
           <Icon name="arrange" :size="16" />
-          <span>整理</span>
+          <span>{{ __t('apps.pictoria.ui', '整理') }}</span>
         </button>
         <button
           class="icon-button"
-          :aria-label="theme === 'dark' ? '切换浅色' : '切换暗色'"
+          :aria-label="
+            theme === 'dark'
+              ? __t('apps.pictoria.ui', '切换浅色')
+              : __t('apps.pictoria.ui', '切换暗色')
+          "
           @click="toggleTheme"
         >
           <Icon :name="theme === 'dark' ? 'sun' : 'moon'" :size="18" />
         </button>
         <button class="quiet-button" @click="openAssets">
           <Icon name="layers" :size="17" />
-          <span>资源库</span>
+          <span>{{ __t('apps.pictoria.ui', '资源库') }}</span>
         </button>
         <button class="quiet-button" @click="providersOpen = true">
           <Icon name="link" :size="17" />
-          <span>供应商</span>
+          <span>{{ __t('apps.pictoria.ui', '供应商') }}</span>
         </button>
-        <button class="icon-button" aria-label="画布设置" @click="togglePanel('settings')">
+        <button
+          class="icon-button"
+          :aria-label="__t('apps.pictoria.ui', '画布设置')"
+          @click="togglePanel('settings')"
+        >
           <Icon name="settings" :size="18" />
         </button>
         <i class="header-divider" />
         <button
           class="icon-button danger-button"
           :disabled="exitDisabled"
-          title="退出 Pictoria"
-          aria-label="退出 Pictoria"
+          :title="__t('apps.pictoria.ui', '退出 Pictoria')"
+          :aria-label="__t('apps.pictoria.ui', '退出 Pictoria')"
           @click="openExit"
         >
           <Icon name="power" :size="18" />
@@ -776,16 +796,22 @@ onBeforeUnmount(() => {
         data-ui
         role="status"
       >
-        <span>{{ error || notice || '此画布有待恢复的本地草稿。' }}</span>
+        <span>{{ error || notice || __t('apps.pictoria.ui', '此画布有待恢复的本地草稿。') }}</span>
         <button v-if="conflictDraft" class="text-button" @click="store.recoverConflict">
-          恢复为新画布
+          {{ __t('apps.pictoria.ui', '恢复为新画布') }}
         </button>
-        <button v-if="saveBlocked" class="text-button" @click="store.retrySave">重试保存</button>
-        <button v-if="saveBlocked" class="text-button" @click="store.saveAsCopy">另存副本</button>
-        <button v-if="saveBlocked" class="text-button" @click="store.exportDraft">导出草稿</button>
+        <button v-if="saveBlocked" class="text-button" @click="store.retrySave">
+          {{ __t('apps.pictoria.ui', '重试保存') }}
+        </button>
+        <button v-if="saveBlocked" class="text-button" @click="store.saveAsCopy">
+          {{ __t('apps.pictoria.ui', '另存副本') }}
+        </button>
+        <button v-if="saveBlocked" class="text-button" @click="store.exportDraft">
+          {{ __t('apps.pictoria.ui', '导出草稿') }}
+        </button>
         <button
           class="icon-button"
-          aria-label="关闭提示"
+          :aria-label="__t('apps.pictoria.ui', '关闭提示')"
           @click="
             () => {
               error = ''
@@ -845,15 +871,15 @@ onBeforeUnmount(() => {
             stroke-dasharray="3 5"
           />
         </svg>
-        <h1>开始创作</h1>
+        <h1>{{ __t('apps.pictoria.ui', '开始创作') }}</h1>
         <div class="welcome-actions">
           <button class="welcome-primary" @click="fileInput?.click()">
             <Icon name="upload" :size="17" />
-            导入素材
+            {{ __t('apps.pictoria.ui', '导入素材') }}
           </button>
           <button class="welcome-secondary" @click="addNote()">
             <Icon name="note" :size="17" />
-            便签
+            {{ __t('apps.pictoria.ui', '便签') }}
           </button>
         </div>
       </div>
@@ -863,7 +889,12 @@ onBeforeUnmount(() => {
       class="canvas-world"
       :style="{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})` }"
     >
-      <svg class="canvas-connections" width="1" height="1" aria-label="创作引用关系">
+      <svg
+        class="canvas-connections"
+        width="1"
+        height="1"
+        :aria-label="__t('apps.pictoria.ui', '创作引用关系')"
+      >
         <g
           v-for="edge in edges"
           :key="edge.id"
@@ -881,7 +912,13 @@ onBeforeUnmount(() => {
             "
           />
           <path class="edge-stroke" :d="edge.path" />
-          <title>{{ edge.historical ? '实际创作来源' : `输入引用：${edge.field}` }}</title>
+          <title>
+            {{
+              edge.historical
+                ? __t('apps.pictoria.ui', '实际创作来源')
+                : __t('apps.pictoria.ui', '输入引用：{0}', [edge.field])
+            }}
+          </title>
         </g>
         <path v-if="connecting" class="edge-pending" :d="pendingPath" />
       </svg>
@@ -959,12 +996,16 @@ onBeforeUnmount(() => {
     </div>
     <CanvasGuides :guides="guides" :viewport="viewport" />
 
-    <nav class="canvas-toolrail floating-panel" data-ui aria-label="画布工具">
+    <nav
+      class="canvas-toolrail floating-panel"
+      data-ui
+      :aria-label="__t('apps.pictoria.ui', '画布工具')"
+    >
       <button
         class="icon-button"
         :class="{ active: tool === 'free' }"
-        title="自由操作 · A；拖动时 Alt 暂停吸附，Ctrl 对齐网格"
-        aria-label="自由操作"
+        :title="__t('apps.pictoria.ui', '自由操作 · A；拖动时 Alt 暂停吸附，Ctrl 对齐网格')"
+        :aria-label="__t('apps.pictoria.ui', '自由操作')"
         @click="tool = 'free'"
       >
         <Icon name="arrow" />
@@ -972,8 +1013,8 @@ onBeforeUnmount(() => {
       <button
         class="icon-button"
         :class="{ active: tool === 'select' }"
-        title="框选 · V / Shift＋左键"
-        aria-label="框选"
+        :title="__t('apps.pictoria.ui', '框选 · V / Shift＋左键')"
+        :aria-label="__t('apps.pictoria.ui', '框选')"
         @click="tool = 'select'"
       >
         <Icon name="select" />
@@ -981,8 +1022,8 @@ onBeforeUnmount(() => {
       <button
         class="icon-button"
         :class="{ active: tool === 'hand' }"
-        title="拖动画布 · H / 空格 / 中键"
-        aria-label="拖动画布"
+        :title="__t('apps.pictoria.ui', '拖动画布 · H / 空格 / 中键')"
+        :aria-label="__t('apps.pictoria.ui', '拖动画布')"
         @click="tool = 'hand'"
       >
         <Icon name="hand" />
@@ -991,36 +1032,41 @@ onBeforeUnmount(() => {
       <button
         class="icon-button"
         :class="{ active: searchOpen }"
-        title="搜索节点 · Ctrl F"
-        aria-label="搜索节点"
+        :title="__t('apps.pictoria.ui', '搜索节点 · Ctrl F')"
+        :aria-label="__t('apps.pictoria.ui', '搜索节点')"
         @click="searchOpen ? search.close() : search.show()"
       >
         <Icon name="search" :size="18" />
       </button>
       <button
         class="icon-button"
-        title="导入素材"
-        aria-label="导入素材"
+        :title="__t('apps.pictoria.ui', '导入素材')"
+        :aria-label="__t('apps.pictoria.ui', '导入素材')"
         @click="fileInput?.click()"
       >
         <Icon name="plus" :size="23" />
       </button>
-      <button class="icon-button" title="文字便签 · N" aria-label="添加便签" @click="addNote()">
+      <button
+        class="icon-button"
+        :title="__t('apps.pictoria.ui', '文字便签 · N')"
+        :aria-label="__t('apps.pictoria.ui', '添加便签')"
+        @click="addNote()"
+      >
         <Icon name="note" />
       </button>
       <span class="rail-divider" />
       <button
         class="icon-button"
-        title="粘贴 · Ctrl V"
-        aria-label="粘贴节点"
+        :title="__t('apps.pictoria.ui', '粘贴 · Ctrl V')"
+        :aria-label="__t('apps.pictoria.ui', '粘贴节点')"
         @click="clipboard.paste"
       >
         <Icon name="paste" :size="18" />
       </button>
       <button
         class="icon-button"
-        title="撤销 · Ctrl Z"
-        aria-label="撤销"
+        :title="__t('apps.pictoria.ui', '撤销 · Ctrl Z')"
+        :aria-label="__t('apps.pictoria.ui', '撤销')"
         :disabled="!history.length"
         @click="store.undo"
       >
@@ -1028,8 +1074,8 @@ onBeforeUnmount(() => {
       </button>
       <button
         class="icon-button"
-        title="重做 · Ctrl Shift Z"
-        aria-label="重做"
+        :title="__t('apps.pictoria.ui', '重做 · Ctrl Shift Z')"
+        :aria-label="__t('apps.pictoria.ui', '重做')"
         :disabled="!future.length"
         @click="store.redo"
       >
@@ -1049,23 +1095,31 @@ onBeforeUnmount(() => {
             v-model="searchQuery"
             class="canvas-search-input"
             maxlength="200"
-            placeholder="备注 / 提示词"
-            aria-label="搜索备注或提示词"
+            :placeholder="__t('apps.pictoria.ui', '备注 / 提示词')"
+            :aria-label="__t('apps.pictoria.ui', '搜索备注或提示词')"
             @keydown.enter.prevent.stop="search.jump($event.shiftKey ? -1 : 1)"
           />
-          <button class="icon-button" aria-label="关闭搜索" @click="search.close()">
+          <button
+            class="icon-button"
+            :aria-label="__t('apps.pictoria.ui', '关闭搜索')"
+            @click="search.close()"
+          >
             <Icon name="close" :size="14" />
           </button>
         </div>
         <footer v-if="searchQuery.trim()">
           <small>
-            {{ searchMatches.length ? `${searchPosition} / ${searchMatches.length}` : '无匹配' }}
+            {{
+              searchMatches.length
+                ? `${searchPosition} / ${searchMatches.length}`
+                : __t('apps.pictoria.ui', '无匹配')
+            }}
           </small>
           <button
             class="icon-button"
             :disabled="!searchMatches.length"
-            title="上一个 · Shift F3"
-            aria-label="上一个匹配"
+            :title="__t('apps.pictoria.ui', '上一个 · Shift F3')"
+            :aria-label="__t('apps.pictoria.ui', '上一个匹配')"
             @click="search.jump(-1)"
           >
             <Icon class="search-previous" name="down" :size="15" />
@@ -1073,8 +1127,8 @@ onBeforeUnmount(() => {
           <button
             class="icon-button"
             :disabled="!searchMatches.length"
-            title="下一个 · F3"
-            aria-label="下一个匹配"
+            :title="__t('apps.pictoria.ui', '下一个 · F3')"
+            :aria-label="__t('apps.pictoria.ui', '下一个匹配')"
             @click="search.jump(1)"
           >
             <Icon name="down" :size="15" />
@@ -1087,7 +1141,9 @@ onBeforeUnmount(() => {
         <Icon name="link" :size="15" />
         <span>
           {{
-            edges.find((edge) => edge.id === selectedEdge)?.historical ? '实际创作来源' : '输入引用'
+            edges.find((edge) => edge.id === selectedEdge)?.historical
+              ? __t('apps.pictoria.ui', '实际创作来源')
+              : __t('apps.pictoria.ui', '输入引用')
           }}
         </span>
         <button
@@ -1095,9 +1151,13 @@ onBeforeUnmount(() => {
           class="text-button"
           @click="links.disconnect(selectedEdge)"
         >
-          断开连线
+          {{ __t('apps.pictoria.ui', '断开连线') }}
         </button>
-        <button class="icon-button" aria-label="取消选择连线" @click="selectedEdge = ''">
+        <button
+          class="icon-button"
+          :aria-label="__t('apps.pictoria.ui', '取消选择连线')"
+          @click="selectedEdge = ''"
+        >
           <Icon name="close" :size="13" />
         </button>
       </div>
@@ -1112,13 +1172,13 @@ onBeforeUnmount(() => {
       >
         <button class="quiet-button" @click="composer?.focus()">
           <Icon name="sparkle" :size="16" />
-          下一步
+          {{ __t('apps.pictoria.ui', '下一步') }}
         </button>
         <i class="header-divider" />
         <button
           class="icon-button"
-          aria-label="复制选中内容"
-          title="复制 · Ctrl C"
+          :aria-label="__t('apps.pictoria.ui', '复制选中内容')"
+          :title="__t('apps.pictoria.ui', '复制 · Ctrl C')"
           @click="clipboard.copy"
         >
           <Icon name="copy" :size="17" />
@@ -1126,14 +1186,14 @@ onBeforeUnmount(() => {
         <button
           v-if="activeItems.some((item) => item.content.assetId)"
           class="icon-button"
-          aria-label="下载选中素材"
+          :aria-label="__t('apps.pictoria.ui', '下载选中素材')"
           @click="downloadSelected"
         >
           <Icon name="download" :size="17" />
         </button>
         <button
           class="icon-button danger-button"
-          aria-label="删除选中内容"
+          :aria-label="__t('apps.pictoria.ui', '删除选中内容')"
           @click="store.removeSelection"
         >
           <Icon name="trash" :size="17" />
@@ -1197,31 +1257,47 @@ onBeforeUnmount(() => {
     <div class="canvas-bottom-left" data-ui>
       <span class="connection-indicator" :class="{ connected: online }">
         <span class="status-dot" />
-        {{ online ? '创作后台已连接' : '本地画布' }}
+        {{
+          online ? __t('apps.pictoria.ui', '创作后台已连接') : __t('apps.pictoria.ui', '本地画布')
+        }}
       </span>
       <button v-if="!online" class="text-button" :disabled="loading" @click="connect">
-        {{ loading ? '连接中…' : '连接后台' }}
+        {{ loading ? __t('apps.pictoria.ui', '连接中…') : __t('apps.pictoria.ui', '连接后台') }}
       </button>
       <small>
-        {{ project.items.length }} 项内容
-        <span v-if="counts.images">· {{ counts.images }} 张图片</span>
+        {{ project.items.length }} {{ __t('apps.pictoria.ui', '项内容') }}
+        <span v-if="counts.images">
+          · {{ counts.images }} {{ __t('apps.pictoria.ui', '张图片') }}
+        </span>
       </small>
     </div>
     <div class="canvas-zoom floating-panel" data-ui>
-      <button class="icon-button" aria-label="缩小" @click="navigation.zoom(viewport.scale / 1.2)">
+      <button
+        class="icon-button"
+        :aria-label="__t('apps.pictoria.ui', '缩小')"
+        @click="navigation.zoom(viewport.scale / 1.2)"
+      >
         <Icon name="minus" :size="16" />
       </button>
-      <button class="zoom-percent" title="还原 100%" @click="navigation.zoom(1)">
+      <button
+        class="zoom-percent"
+        :title="__t('apps.pictoria.ui', '还原 100%')"
+        @click="navigation.zoom(1)"
+      >
         {{ Math.round(viewport.scale * 100) }}%
       </button>
-      <button class="icon-button" aria-label="放大" @click="navigation.zoom(viewport.scale * 1.2)">
+      <button
+        class="icon-button"
+        :aria-label="__t('apps.pictoria.ui', '放大')"
+        @click="navigation.zoom(viewport.scale * 1.2)"
+      >
         <Icon name="plus" :size="16" />
       </button>
       <i class="header-divider" />
       <button
         class="icon-button"
-        aria-label="适应画布"
-        title="适应全部内容 · 0"
+        :aria-label="__t('apps.pictoria.ui', '适应画布')"
+        :title="__t('apps.pictoria.ui', '适应全部内容 · 0')"
         @click="navigation.fit()"
       >
         <Icon name="fit" :size="17" />
@@ -1244,27 +1320,31 @@ onBeforeUnmount(() => {
         data-ui
       >
         <header>
-          <strong>画布设置</strong>
-          <button class="icon-button" aria-label="关闭面板" @click="panel = null">
+          <strong>{{ __t('apps.pictoria.ui', '画布设置') }}</strong>
+          <button
+            class="icon-button"
+            :aria-label="__t('apps.pictoria.ui', '关闭面板')"
+            @click="panel = null"
+          >
             <Icon name="close" :size="17" />
           </button>
         </header>
         <label class="panel-field">
-          画布名称
+          {{ __t('apps.pictoria.ui', '画布名称') }}
           <input v-model="project.title" maxlength="120" @focus="store.checkpoint" />
         </label>
         <div class="panel-field">
-          <span>所属项目</span>
+          <span>{{ __t('apps.pictoria.ui', '所属项目') }}</span>
           <PictoriaSelect
             :model-value="project.collectionId || ''"
             :options="collectionOptions"
             :disabled="loading || saving || store.hierarchyBusy.value"
-            label="所属项目"
+            :label="__t('apps.pictoria.ui', '所属项目')"
             @update:model-value="store.moveToCollection(project.id, $event || null)"
           />
         </div>
         <div class="panel-field">
-          <span>角色</span>
+          <span>{{ __t('apps.pictoria.ui', '角色') }}</span>
           <PictoriaSelect
             :model-value="agentId"
             :disabled="
@@ -1277,13 +1357,13 @@ onBeforeUnmount(() => {
               store.hierarchyBusy.value
             "
             :options="agents.map((agent) => ({ value: agent.id, label: agent.name }))"
-            label="角色"
+            :label="__t('apps.pictoria.ui', '角色')"
             @update:model-value="switchOwner"
           />
         </div>
         <button class="quiet-button outlined" @click="providersOpen = true">
           <Icon name="link" :size="16" />
-          模型供应商
+          {{ __t('apps.pictoria.ui', '模型供应商') }}
         </button>
         <div class="settings-section">
           <button
@@ -1292,42 +1372,44 @@ onBeforeUnmount(() => {
             @click="configInput?.click()"
           >
             <Icon name="upload" :size="15" />
-            {{ configBusy ? '导入中…' : '导入步骤' }}
+            {{
+              configBusy ? __t('apps.pictoria.ui', '导入中…') : __t('apps.pictoria.ui', '导入步骤')
+            }}
           </button>
           <button class="quiet-button outlined" @click="store.exportDraft">
             <Icon name="download" :size="15" />
-            导出画布
+            {{ __t('apps.pictoria.ui', '导出画布') }}
           </button>
         </div>
         <details class="settings-section keyboard-help">
-          <summary>快捷键</summary>
+          <summary>{{ __t('apps.pictoria.ui', '快捷键') }}</summary>
           <span>
-            <kbd>空格 / 中键 + 拖动</kbd>
-            平移视野
+            <kbd>{{ __t('apps.pictoria.ui', '空格 / 中键 + 拖动') }}</kbd>
+            {{ __t('apps.pictoria.ui', '平移视野') }}
           </span>
           <span>
-            <kbd>Ctrl + 滚轮</kbd>
-            缩放
+            <kbd>{{ __t('apps.pictoria.ui', 'Ctrl + 滚轮') }}</kbd>
+            {{ __t('apps.pictoria.ui', '缩放') }}
           </span>
           <span>
-            <kbd>Shift + 单击</kbd>
-            多选
+            <kbd>{{ __t('apps.pictoria.ui', 'Shift + 单击') }}</kbd>
+            {{ __t('apps.pictoria.ui', '多选') }}
           </span>
           <span>
-            <kbd>Shift + 左键拖动</kbd>
-            追加框选
+            <kbd>{{ __t('apps.pictoria.ui', 'Shift + 左键拖动') }}</kbd>
+            {{ __t('apps.pictoria.ui', '追加框选') }}
           </span>
           <span>
             <kbd>Ctrl + D</kbd>
-            复制
+            {{ __t('apps.pictoria.ui', '复制') }}
           </span>
           <span>
             <kbd>0</kbd>
-            适应全部
+            {{ __t('apps.pictoria.ui', '适应全部') }}
           </span>
         </details>
         <div v-if="layerItems.length" class="settings-section">
-          <strong>画布内容</strong>
+          <strong>{{ __t('apps.pictoria.ui', '画布内容') }}</strong>
           <button
             v-for="item in layerItems"
             :key="item.id"
@@ -1350,7 +1432,13 @@ onBeforeUnmount(() => {
               "
               :size="14"
             />
-            <span>{{ item.content.name || item.content.text?.slice(0, 20) || '画布内容' }}</span>
+            <span>
+              {{
+                item.content.name ||
+                item.content.text?.slice(0, 20) ||
+                __t('apps.pictoria.ui', '画布内容')
+              }}
+            </span>
           </button>
         </div>
       </section>
@@ -1360,15 +1448,15 @@ onBeforeUnmount(() => {
       <div v-if="dropActive" class="canvas-dropzone">
         <div>
           <Icon name="upload" :size="34" />
-          <strong>释放以导入</strong>
-          <span>每份最多 20 MB</span>
+          <strong>{{ __t('apps.pictoria.ui', '释放以导入') }}</strong>
+          <span>{{ __t('apps.pictoria.ui', '每份最多 20 MB') }}</span>
         </div>
       </div>
     </Transition>
     <Transition name="float">
       <div v-if="importing" class="import-indicator floating-panel" data-ui>
         <Icon name="refresh" :size="16" />
-        <span>正在导入素材…</span>
+        <span>{{ __t('apps.pictoria.ui', '正在导入素材…') }}</span>
       </div>
     </Transition>
     <input

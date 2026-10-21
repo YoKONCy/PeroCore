@@ -59,25 +59,27 @@ export interface AppBackgroundSettings {
   positionY: number
   fit: 'cover' | 'contain'
 }
+export type AppBackgroundPresetId = 'preset-1' | 'preset-2' | 'preset-3'
 
 export const systemApi = {
   /** 应用背景沿用原有存储接口，已有图片无需重新上传。 */
-  uploadAppBackground: (background: Blob) => {
+  uploadAppBackground: (background: Blob, preset: AppBackgroundPresetId = 'preset-1') => {
     const data = new FormData()
     data.append('background', background, 'chat-background.webp')
-    return apiClient.put<{ contentUrl: string }>('/system/chat-background', data)
+    return apiClient.put<{ contentUrl: string }>(`/system/chat-background?preset=${preset}`, data)
   },
 
-  deleteAppBackground: () => apiClient.delete<void>('/system/chat-background'),
+  deleteAppBackground: (preset: AppBackgroundPresetId = 'preset-1') =>
+    apiClient.delete<void>(`/system/chat-background?preset=${preset}`),
 
-  appBackgroundContentUrl: (version = Date.now()) =>
+  appBackgroundContentUrl: (version = Date.now(), preset: AppBackgroundPresetId = 'preset-1') =>
     getApiResourceUrl(
       '/system/chat-background/content',
-      new URLSearchParams({ v: String(version) }),
+      new URLSearchParams({ preset, v: String(version) }),
     ),
 
   /** 健康检查 */
-  health: () => apiClient.get<HealthStatus>('/health'),
+  health: (signal?: AbortSignal) => apiClient.request<HealthStatus>('/health', { signal }),
 
   /** 系统信息（嵌套结构） */
   info: () => apiClient.get<SystemInfo>('/system/info'),

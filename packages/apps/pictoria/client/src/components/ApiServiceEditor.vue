@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import type { FieldSchema, ProviderDirectory, ServiceProfile } from '../types'
 import { pictoria } from '../services/transport'
@@ -277,24 +279,24 @@ defineExpose({ save })
 <template>
   <div class="workflow-api-fields">
     <label v-if="services.length" class="panel-field">
-      复制已有 API
+      {{ __t('apps.pictoria.ui', '复制已有 API') }}
       <PictoriaSelect
         :model-value="selected"
         :disabled="loading || busy"
         :options="[
-          { value: '', label: '自定义' },
+          { value: '', label: __t('apps.pictoria.ui', '自定义') },
           ...services.map((service) => ({ value: service.id, label: service.name })),
         ]"
         @update:model-value="choose"
       />
     </label>
     <label class="panel-field">
-      供应商
+      {{ __t('apps.pictoria.ui', '供应商') }}
       <PictoriaSelect
         v-model="api.providerId"
         :disabled="loading || busy"
         :options="[
-          { value: '', label: '独立 API' },
+          { value: '', label: __t('apps.pictoria.ui', '独立 API') },
           ...directory.providers.map((item) => ({
             value: item.id,
             label: item.name,
@@ -304,17 +306,17 @@ defineExpose({ save })
       />
     </label>
     <label class="panel-field">
-      适配器
+      {{ __t('apps.pictoria.ui', '适配器') }}
       <PictoriaSelect
         v-model="adapter"
         :options="[
-          { value: '', label: '通用 HTTP' },
+          { value: '', label: __t('apps.pictoria.ui', '通用 HTTP') },
           ...directory.adapters.map((item) => ({ value: item.id, label: item.name })),
         ]"
       />
     </label>
     <label class="panel-field">
-      API 名称
+      {{ __t('apps.pictoria.ui', 'API 名称') }}
       <input v-model="api.name" maxlength="100" />
     </label>
     <label class="panel-field">
@@ -323,14 +325,14 @@ defineExpose({ save })
       <input v-else v-model="api.baseUrl" placeholder="https://…/v1/" />
     </label>
     <label class="panel-field">
-      请求路径
+      {{ __t('apps.pictoria.ui', '请求路径') }}
       <input v-model="api.path" placeholder="images/generations" />
     </label>
     <label class="panel-field">
-      模型
+      {{ __t('apps.pictoria.ui', '模型') }}
       <input
         v-model="api.model"
-        :placeholder="provider?.defaultModel || 'API 模型名（可选）'"
+        :placeholder="provider?.defaultModel || __t('apps.pictoria.ui', 'API 模型名（可选）')"
         maxlength="200"
       />
     </label>
@@ -341,40 +343,44 @@ defineExpose({ save })
           v-model="api.apiKey"
           type="password"
           autocomplete="new-password"
-          :placeholder="keepCredential ? '已保存 · 留空不改' : '输入 API Key'"
+          :placeholder="
+            keepCredential
+              ? __t('apps.pictoria.ui', '已保存 · 留空不改')
+              : __t('apps.pictoria.ui', '输入 API Key')
+          "
         />
       </label>
       <label class="workflow-checkbox">
         <input v-model="api.requiresCredential" type="checkbox" />
-        需要认证
+        {{ __t('apps.pictoria.ui', '需要认证') }}
       </label>
     </template>
     <details class="workflow-advanced">
-      <summary>请求配置</summary>
+      <summary>{{ __t('apps.pictoria.ui', '请求配置') }}</summary>
       <label class="panel-field">
-        方法
+        {{ __t('apps.pictoria.ui', '方法') }}
         <PictoriaSelect
           v-model="api.method"
           :options="['POST', 'GET', 'PUT'].map((value) => ({ value, label: value }))"
         />
       </label>
       <label class="panel-field">
-        传输
+        {{ __t('apps.pictoria.ui', '传输') }}
         <PictoriaSelect
           v-model="api.bodyFormat"
           :options="[
             { value: 'json', label: 'JSON' },
-            { value: 'multipart', label: '表单' },
+            { value: 'multipart', label: __t('apps.pictoria.ui', '表单') },
           ]"
         />
       </label>
       <template v-if="!provider">
         <label class="panel-field">
-          认证 Header
+          {{ __t('apps.pictoria.ui', '认证 Header') }}
           <input v-model="api.authHeader" />
         </label>
         <label class="panel-field">
-          认证前缀
+          {{ __t('apps.pictoria.ui', '认证前缀') }}
           <input v-model="api.authPrefix" />
         </label>
       </template>
@@ -384,45 +390,45 @@ defineExpose({ save })
       </label>
     </details>
     <label class="panel-field">
-      请求主体
+      {{ __t('apps.pictoria.ui', '请求主体') }}
       <textarea v-model="api.body" rows="4" spellcheck="false" />
     </label>
     <label class="panel-field">
-      输入映射
+      {{ __t('apps.pictoria.ui', '输入映射') }}
       <textarea v-model="api.fields" rows="4" spellcheck="false" />
     </label>
     <label class="panel-field">
-      输出映射
+      {{ __t('apps.pictoria.ui', '输出映射') }}
       <textarea v-model="api.outputs" rows="4" spellcheck="false" />
     </label>
     <label class="workflow-checkbox">
       <input v-model="api.async" type="checkbox" />
-      异步任务
+      {{ __t('apps.pictoria.ui', '异步任务') }}
     </label>
     <template v-if="api.async">
       <label class="panel-field">
-        任务 ID
+        {{ __t('apps.pictoria.ui', '任务 ID') }}
         <input v-model="api.taskId" />
       </label>
       <label class="panel-field">
-        查询路径
+        {{ __t('apps.pictoria.ui', '查询路径') }}
         <input v-model="api.pollPath" />
       </label>
       <label class="panel-field">
-        状态字段
+        {{ __t('apps.pictoria.ui', '状态字段') }}
         <input v-model="api.stateField" />
       </label>
       <label class="panel-field">
-        成功状态
+        {{ __t('apps.pictoria.ui', '成功状态') }}
         <input v-model="api.success" />
       </label>
       <label class="panel-field">
-        失败状态
+        {{ __t('apps.pictoria.ui', '失败状态') }}
         <input v-model="api.failed" />
       </label>
     </template>
     <p v-if="loading || loadFailed" class="workflow-field-error" role="status">
-      {{ error || '读取配置…' }}
+      {{ error || __t('apps.pictoria.ui', '读取配置…') }}
     </p>
   </div>
 </template>

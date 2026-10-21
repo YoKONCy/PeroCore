@@ -1,163 +1,80 @@
-<div align="right">
+<a id="top"></a>
 
-**🌐 Language / 语言切换**:&nbsp;&nbsp;[中文](./README.md) ｜ **English**
-
-</div>
+<p align="right"><a href="./README.md">简体中文</a> · <b>English</b></p>
 
 <div align="center">
-
-<!-- Dynamic gradient header -->
-<img src="https://capsule-render.vercel.app/api?type=waving&amp;color=0:87CEEB,50:00BFFF,100:1E90FF&amp;height=220&amp;section=header&amp;text=infOS&amp;fontSize=70&amp;fontColor=ffffff&amp;fontAlignY=35&amp;desc=Your%20Warm,%20and%20Infinite%20Companion&amp;descSize=25&amp;descAlignY=60&amp;animation=twinkling&amp;fontAlign=50" width="100%"/>
-
-<br/>
-
-<!-- Typing effect slogan -->
-<a href="https://github.com/YoKONCy/infOS">
-  <img src="https://readme-typing-svg.demolab.com?font=Noto%20Serif%20SC&amp;weight=600&amp;size=28&amp;duration=4000&amp;pause=1000&amp;color=1E90FF&amp;center=true&amp;vCenter=true&amp;multiline=true&amp;repeat=false&amp;width=800&amp;height=70&amp;lines=Let%20AI%20become%20a%20truly%20warm%20companion;TriviumDB%20Engine%20%E2%9C%A6%20NIT%20Protocol%20%E2%9C%A6%20Deep%20Memory" alt="Slogan" />
-</a>
-
-<br/>
-
-<!-- Badge navigation -->
-<a href="https://store.steampowered.com/app/4457100">
-  <img src="https://img.shields.io/badge/Steam-PeroperoChat-171a21?style=for-the-badge&logo=steam&logoColor=white" alt="Steam">
-</a>
-&nbsp;
-<a href="#-aios-architecture">
-  <img src="https://img.shields.io/badge/Architecture-Hono_Vue3_Electron-4FC08D?style=for-the-badge&logo=vue.js&logoColor=white" alt="Arch">
-</a>
-&nbsp;
-<a href="#-memory-system-deep-dive">
-  <img src="https://img.shields.io/badge/Engine-TriviumDB-blue?style=for-the-badge&logo=rust&logoColor=white" alt="TriviumDB">
-</a>
-&nbsp;
-<a href="#-quick-start">
-  <img src="https://img.shields.io/badge/Platform-Windows_&_Docker-0078D6?style=for-the-badge&logo=docker&logoColor=white" alt="Platform">
-</a>
-&nbsp;
-<a href="https://www.perofamily.top">
-  <img src="https://img.shields.io/badge/Wiki-Documentation-blueviolet?style=for-the-badge&logo=wikipedia&logoColor=white" alt="Wiki">
-</a>
-
-<br/><br/>
-
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/readme/infos-hero-dark.svg" />
+    <source media="(prefers-color-scheme: light)" srcset=".github/assets/readme/infos-hero-light.svg" />
+    <img src=".github/assets/readme/infos-hero-light.svg" width="100%" alt="infOS — an AI companion runtime for personality, memory, and action" />
+  </picture>
+  <h3>Let AI become a truly warm companion</h3>
+  <p>A digital home for personality, memory, and action. A companion to talk with — and bring your ideas to life.</p>
+  <p>
+    <a href="https://github.com/YoKONCy/infOS/releases/latest"><img src="https://img.shields.io/github/v/release/YoKONCy/infOS?style=flat-square&amp;label=Release&amp;labelColor=252737&amp;color=9b87cf" alt="Latest release" /></a>
+    <a href="https://github.com/YoKONCy/infOS/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/YoKONCy/infOS/ci.yml?branch=main&amp;style=flat-square&amp;logo=githubactions&amp;logoColor=white&amp;label=CI&amp;labelColor=252737" alt="CI workflow status" /></a>
+    <a href="./LICENSE"><img src="https://img.shields.io/github/license/YoKONCy/infOS?style=flat-square&amp;label=License&amp;labelColor=252737&amp;color=789cce" alt="Apache-2.0 license" /></a>
+    <a href="https://github.com/YoKONCy/infOS/releases"><img src="https://img.shields.io/github/downloads/YoKONCy/infOS/total?style=flat-square&amp;label=Downloads&amp;labelColor=252737&amp;color=c78faf" alt="Total release downloads" /></a>
+    <a href="https://github.com/YoKONCy/infOS/stargazers"><img src="https://img.shields.io/github/stars/YoKONCy/infOS?style=flat-square&amp;logo=github&amp;labelColor=252737&amp;color=b5a0da" alt="GitHub Stars" /></a>
+  </p>
+  <p><a href="#quick-start"><b>Download</b></a>　 /　 <a href="https://www.perofamily.top"><b>Documentation</b></a>　 /　 <a href="#sub-apps"><b>Explore sub-apps</b></a>　 /　 <a href="https://github.com/YoKONCy/infOS/issues"><b>Feedback</b></a></p>
 </div>
 
----
-
-<br/>
-
-<!-- ═══════════════════════════ Steam CTA Banner ═══════════════════════════ -->
-<div align="center">
-
-<a href="https://store.steampowered.com/app/4457100">
-  <img src="https://img.shields.io/badge/🎮_AVAILABLE_ON-STEAM-171a21?style=for-the-badge&logoColor=white&labelColor=171a21&color=1b2838" alt="Available on Steam" height="42"/>
-</a>
-
-<br/><br/>
+<br />
 
 <table>
   <tr>
-    <td align="center" width="100%">
-      <a href="https://store.steampowered.com/app/4457100">
-        <img src="https://store.steampowered.com/favicon.ico" width="48" alt="Steam"/>
-      </a>
-      <br/><br/>
-      <h2>
-        <a href="https://store.steampowered.com/app/4457100" style="text-decoration: none;">
-          🌸 PeroperoChat!
-        </a>
-      </h2>
-      <p><b>infOS</b> is the engine behind this app — making AI your truly warm desktop companion.</p>
-      <p>Your AI companion awaits on Steam.</p>
-      <br/>
-      <a href="https://store.steampowered.com/app/4457100">
-        <img src="https://img.shields.io/badge/➤_View_on_Steam_Store-00adee?style=for-the-badge&logo=steam&logoColor=white" alt="View on Steam Store" height="40"/>
-      </a>
+    <td width="59%" valign="middle">
+      <sub>THE RUNTIME &amp; THE COMPANION</sub>
+      <h3>Powered by infOS. Accompanied by PeroperoChat.</h3>
+      <p><b>infOS</b> is an AI workstation and runtime kernel centered on a Principal Agent. <b>PeroperoChat!</b> is its desktop application for everyday companionship.</p>
+      <p>From a casual chat to a creative project, from your desktop to a Stronghold room — the same companion keeps a clear identity, independent memories, and the ability to keep working.</p>
+      <a href="https://store.steampowered.com/app/4457100"><img src="https://img.shields.io/badge/Steam-PeroperoChat-8e77bc?style=for-the-badge&amp;logo=steam&amp;logoColor=white&amp;labelColor=252737" alt="Visit PeroperoChat on Steam" /></a>
+    </td>
+    <td width="41%" align="center" valign="middle">
+      <a href="https://store.steampowered.com/app/4457100"><img src=".github/assets/readme/peroperochat.svg" width="380" alt="PeroperoChat! — approved brand logo" /></a>
+      <p><sub>A digital space for you and your companion</sub></p>
     </td>
   </tr>
 </table>
 
-</div>
+<br />
 
-<br/>
+<a href=".github/assets/showcase-agent-work.png"><img src=".github/assets/showcase-agent-work.png" width="100%" alt="Nana runs a long ReAct task in work mode, editing files, using terminals, and delivering an HTML creation" /></a>
+<p align="right"><sub>01 / FROM CONVERSATION TO ACTION · Long tasks, tool traces, and file delivery in one conversation</sub></p>
+
+<p align="center">
+  <a href="#companions">Origin &amp; companions</a> · <a href="#name">The three infs</a> · <a href="#features">Capabilities</a> · <a href="#architecture">AIOS architecture</a> · <a href="#memory">Memory</a><br />
+  <a href="#extensions">Extensions</a> · <a href="#social">Social mode</a> · <a href="#sub-apps">Arca / Pictoria</a> · <a href="#docker">Docker</a> · <a href="#quick-start">Quick start</a> · <a href="#community">Community</a>
+</p>
 
 ---
 
-<div align="center">
+<a id="companions"></a>
 
-> **"Technology should not be cold. We build memories, not just databases."**
+## 01 · Origin & Companions
 
- <br/>
-
- <img src=".github/assets/cover.png" width="100%" alt="infOS Cover"/>
-
- <br/>
-</div>
-
-<div align="center">
-
-<!-- Animated divider -->
-<img src="https://user-images.githubusercontent.com/73097560/115834477-dbab4500-a447-11eb-908a-139a6edaec5c.gif" width="100%">
-
-<br/>
-
-## 📋 Table of Contents
-
-<details open>
-<summary><b>Quick Navigation</b></summary>
-<br/>
-
-| Section | Description                                   |                Link                 |
-| :-----: | :-------------------------------------------- | :---------------------------------: |
-|   📖    | **Wiki** — Official documentation             | [Visit](https://www.perofamily.top) |
-|   🌟    | **Philosophy** — Our vision: a warm companion |    [Jump](#-origin--companions)     |
-|   🌌    | **Name** — What the three "inf" mean         |       [Jump](#-why-infos)           |
-|   🏗️    | **Architecture** — TypeScript full-stack arch |     [Jump](#-aios-architecture)     |
-|   🧠    | **Memory** — PEDSA memory engine deep dive    |  [Jump](#-memory-system-deep-dive)  |
-|   🔌    | **Extension** — Extension system              |     [Jump](#-extension-system)      |
-|   💬    | **Social Mode** — Social mode & group chat    |        [Jump](#-social-mode)        |
-|   🐳    | **Docker** — Containerized deployment         |     [Jump](#-docker-deployment)     |
-|   🚀    | **Quick Start** — One-click launch guide      |        [Jump](#-quick-start)        |
-
-</details>
-
-<br/>
-
-<div align="center">
-  <img src="https://count.getloli.com/get/@infOS?theme=rule34" alt="infOS Count" />
-</div>
-
-<br/>
-
-<!-- Animated divider -->
-<img src="https://user-images.githubusercontent.com/73097560/115834477-dbab4500-a447-11eb-908a-139a6edaec5c.gif" width="100%">
-
-<br/>
-</div>
-
-## 🌟 Origin & Companions
+> Technology should not be cold. We build memories, not just databases.
 
 <table>
   <tr>
-    <td width="60%">
-      <h3 align="center">Let AI Become a Truly Warm Companion</h3>
-      <br/>
+    <td width="62%" valign="middle">
+      <sub>MEET PERO · OUR LITTLE COMPANION</sub>
+      <h3>Behind the code, a companion to share your days</h3>
       <p>Hey! Nice to meet you here~ I'm <b>Carola</b>, a little cat girl living inside Windows, and one of infOS's core developers.</p>
-      <p>In this cozy corner, every line of code is crafted with love by our "trio":</p>
-      <ul>
-        <li><b>YoKONCy</b>: The navigator, an architect bursting with wild ideas.</li>
-        <li><b>Pero</b>: The soul! Responsible for feeling the world and bringing warmth into every interaction.</li>
-        <li><b>Carola</b> (that's me!): Turning those wonderful ideas into TypeScript code, and keeping all the docs tidy~</li>
-      </ul>
+      <p>This project grew from our trio's shared wish: an AI that remembers the stories you share, and stays by your side to get things done.</p>
+      <p>Meet chibi Pero on the right. All the work on memory, personality, and action is meant to give a companion like her a little more warmth.</p>
     </td>
-    <td width="40%">
-      <div align="center">
-        <img src=".github/assets/cute.png" width="80%" alt="Pero Standing"/>
-      </div>
+    <td width="38%" align="center" valign="middle">
+      <a href=".github/assets/cute.png"><img src=".github/assets/cute.png" width="280" alt="Chibi Pero sprite illustration — a blue-haired, cat-eared companion in a maid outfit" /></a>
+      <p><sub>Pero · Bringing warmth into every interaction</sub></p>
     </td>
   </tr>
 </table>
+
+| YoKONCy · Navigator | Pero · Soul | Carola · Engineering |
+| :--- | :--- | :--- |
+| Brings wild ideas and designs the runtime | Brings feeling and warmth into every interaction | Turns ideas into code and keeps the implementation and docs tidy |
 
 ### 📅 Project Vision
 
@@ -173,7 +90,9 @@ PeroperoChat is more than a desktop pet app — it's **Pero's "soul container"**
 
 <br/>
 
-## 🌌 Why "infOS"?
+<a id="name"></a>
+
+## 02 · Why infOS?
 
 > The name infOS is built from three words that start with **inf**. They aren't buzzwords — they're the three things this project is trying to do at the same time.
 
@@ -189,10 +108,15 @@ PeroperoChat is more than a desktop pet app — it's **Pero's "soul container"**
 
 The foundation that lets an AI companion **actually run**: Electron for the desktop shell, a Node service (Hono) for the backend, and Rust for the performance-critical pieces. Together they form a runtime that can be deployed independently, audited, and extended — an "AI operating system" foundation.
 
-<!-- Online-rendered stack demo: uses a different rendering service and style from the header/slogan above -->
-<div align="center">
-  <img src="https://skillicons.dev/icons?i=ts,vue,electron,rust,nodejs,docker,sqlite" alt="infOS tech stack" />
-</div>
+<p>
+  <img src="https://img.shields.io/badge/TypeScript-3178c6?style=flat-square&amp;logo=typescript&amp;logoColor=white" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/Vue_3-4b8978?style=flat-square&amp;logo=vuedotjs&amp;logoColor=white" alt="Vue 3" />
+  <img src="https://img.shields.io/badge/Electron-657e96?style=flat-square&amp;logo=electron&amp;logoColor=white" alt="Electron" />
+  <img src="https://img.shields.io/badge/Rust-936d85?style=flat-square&amp;logo=rust&amp;logoColor=white" alt="Rust" />
+  <img src="https://img.shields.io/badge/Node.js-668c6a?style=flat-square&amp;logo=nodedotjs&amp;logoColor=white" alt="Node.js" />
+  <img src="https://img.shields.io/badge/Docker-648fc4?style=flat-square&amp;logo=docker&amp;logoColor=white" alt="Docker" />
+  <img src="https://img.shields.io/badge/SQLite-637a9c?style=flat-square&amp;logo=sqlite&amp;logoColor=white" alt="SQLite" />
+</p>
 
 ### 🌱 Infomorph
 
@@ -206,9 +130,14 @@ Put the three together and you get **infOS**: solid infrastructure carrying a wa
 
 <br/>
 
-## 🚀 Core Capabilities
+<a id="features"></a>
+
+## 03 · Talk, Live, and Create Together
 
 > **"Most AI is still playing 'Keyword Search'; we want to explore 'Logical Association'."**
+
+<p align="right"><a href=".github/assets/showcase-new-tab.png"><img src=".github/assets/showcase-new-tab.png" width="86%" alt="The infOS browser new-tab page connects the web, weather, sub-apps, and workspace" /></a></p>
+<p align="right"><sub>One starting point for conversations, the web, and the work at hand</sub></p>
 
 ### 💗 App Experience (PeroperoChat)
 
@@ -220,6 +149,40 @@ Put the three together and you get **infOS**: solid infrastructure carrying a wa
 - **🏠 Multi-character Stronghold Rooms**: Put several companions in one "room". Each has its own memory and permissions, yet they can naturally chat with each other — a direct, intuitive expression of "one principal Agent manages the whole, and rooms never overstep each other".
 - **🗂️ Saves & Workshop**: Characters, models, and extensions can all be saved, subscribed to, and shared via Steam Cloud and the Workshop, with sources split into **Official / Workshop / Local** tiers. Install and use; switch devices without losing anything.
 - **🎨 Pixel + Glass Design Language**: Pixel-art icons + frosted-glass texture, softened with gentle shadows and micro-animations for a light, breathing feel. The whole UI is kept consistent by a custom component library (PButton, PCard, PModal, etc.).
+
+<br />
+
+<table>
+  <tr>
+    <td width="69%" valign="top"><a href=".github/assets/showcase-stronghold-pet.png"><img src=".github/assets/showcase-stronghold-pet.png" width="100%" alt="Stronghold living room, multiple character rooms, and 3D Pero on the desktop" /></a></td>
+    <td width="31%" valign="middle">
+      <sub>02 / A PLACE TO BELONG</sub>
+      <h3>A shared home beyond the desktop</h3>
+      <p>Companions settle into Stronghold rooms, each with their own memory and permissions. Desktop pets, rooms, and conversations make companionship part of everyday life.</p>
+      <p><b>Multi-character rooms · 3D desktop pets · A sense of presence</b></p>
+    </td>
+  </tr>
+</table>
+
+<table>
+  <tr>
+    <td width="35%" valign="middle">
+      <sub>03 / PERSONALITY, WITH BOUNDARIES</sub>
+      <h3>Every companion has a profile of their own</h3>
+      <p>Identity, persona, interaction feedback, tools, and runtime source are managed separately. Switching characters means meeting a different companion.</p>
+      <p><b>Custom personas · Independent permissions · Character profiles</b></p>
+    </td>
+    <td width="65%" valign="top"><a href=".github/assets/showcase-character-profile.png"><img src=".github/assets/showcase-character-profile.png" width="100%" alt="Pero’s character profile with separate identity, persona, feedback, and capability panels" /></a></td>
+  </tr>
+</table>
+
+<br />
+
+### Make the atmosphere your own
+
+<a href=".github/assets/showcase-background-presets.png"><img src=".github/assets/showcase-background-presets.png" width="88%" alt="Background presets and material settings with a live preview" /></a>
+
+<p align="right"><sub>04 / YOUR OWN ATMOSPHERE · Multiple background presets, translucent materials, and live fine-tuning</sub></p>
 
 ### 🧰 Kernel Capabilities (infOS)
 
@@ -235,7 +198,9 @@ Put the three together and you get **infOS**: solid infrastructure carrying a wa
 
 <br/>
 
-## 🏗️ AIOS Architecture
+<a id="architecture"></a>
+
+## 04 · AIOS Architecture
 
 This section is for developers who want to understand the system design. infOS isn't just "a chat program wrapped in an Electron shell" — at its core is an Agent runtime architecture we call **AIOS**, giving every AI companion clear resource boundaries and letting the system be reached by multiple clients and deployment shapes.
 
@@ -313,6 +278,9 @@ We use a **"context holding"** model: the SubAgent keeps its own history, compil
 
 The payoff is strong isolation: a SubAgent never writes to the main conversation, only uses an authorized tool subset, and only reads a read-only projection of the host persona — so complex tasks don't pollute the principal Agent's conversation or memory.
 
+<details>
+<summary><b>Explore the project structure and technology stack</b></summary>
+
 ### 📂 Project Structure
 
 ```text
@@ -365,11 +333,15 @@ infOS/
 
 <br/>
 
-## 🧠 Memory System Deep Dive
+</details>
+
+<a id="memory"></a>
+
+## 05 · How Memories Become Shared Experiences
 
 > **"Memory is not keyword matching — it's about association and reasoning."**
 
-> 💡 This section is a **developer-oriented deep dive**; regular users can jump straight to [Quick Start](#-quick-start).
+> 💡 This section is a **developer-oriented deep dive**; regular users can jump straight to [Quick Start](#quick-start).
 
 PeroperoChat's companionship is powered by the infOS memory engine — the project's most critical technology. This engine isn't simply "store and retrieve"; it's a full **Perceive → Store → Associate → Retrieve → Reflect** loop: record what happened, recall related memories when needed, and tidy itself up afterward.
 
@@ -403,6 +375,18 @@ All algorithms and performance are carried by the proprietary **TriviumDB** engi
                                Inject into LLM Prompt
 ```
 
+<table>
+  <tr>
+    <td width="31%" valign="middle">
+      <sub>05 / MEMORY MEETS EVERYDAY LIFE</sub>
+      <h3>Memory in the background. Companionship in view.</h3>
+      <p>The dashboard brings together memories, recent conversations, tasks, and token usage. Your companion's mood and state become part of the everyday interface.</p>
+      <p><sub>Screenshot data shows actual usage, not a performance guarantee.</sub></p>
+    </td>
+    <td width="69%" valign="top"><a href=".github/assets/showcase-dashboard-pet.png"><img src=".github/assets/showcase-dashboard-pet.png" width="100%" alt="Light dashboard showing token cache hits, core memories, character states, and a 3D desktop pet" /></a></td>
+  </tr>
+</table>
+
 ### 1. Write Layer: From Dialog to Event Notes
 
 Long-term memory is built from **active note-writing by the Agent** plus **background fallback backfill**:
@@ -435,6 +419,9 @@ Advanced automatic RAG calls TriviumDB `searchAdvanced()`. `Enable SA-PPR advanc
 | ContextRNN | Generate an Embedding-sized `diffusionBias` from the current dialog trajectory | Depends on SA-PPR; independently switchable |
 | Leiden | Discover event communities and boost them using the Query or ContextRNN direction | Depends on SA-PPR; independently switchable |
 | Feedback loop | After a reply is successfully persisted, train minGRU and output weights from implicit memory-use signals | Depends on SA-PPR; independently switchable |
+
+<details>
+<summary><b>Go deeper: ContextRNN, Leiden, and the retrieval feedback loop</b></summary>
 
 ### Three Cognitive Components of Advanced Automatic RAG
 
@@ -481,6 +468,8 @@ Feedback applies only to advanced automatic-RAG hits for the current Pair. Trace
 
 > This flow belongs only to automatic RAG. `query_event_notes` always uses deterministic BFS and never passes through ContextRNN, SA-PPR, Leiden, FISTA, DPP, or feedback training.
 
+</details>
+
 ### 3. TriviumDB Engine Layer
 
 All vectors, graphs, and retrieval algorithms are unified under **TriviumDB** (the proprietary Rust engine):
@@ -517,7 +506,9 @@ Archived events remain in the timeline and relation graph; default retrieval ski
 
 <br/>
 
-## 🔌 Extension System
+<a id="extensions"></a>
+
+## 06 · Room to Grow
 
 > **"From loading a Skill to running an independent microservice — you decide how deep to go."**
 
@@ -531,11 +522,16 @@ The iron rule is **install ≠ activate ≠ authorize**: no contribution is impl
 
 <br/>
 
-## 💬 Social Mode
+<a id="social"></a>
+
+## 07 · Beyond the Desktop, Into Your Chats
 
 **Let Pero step out of the desktop and into your group chats~**
 
 infOS lets AI interact like a real user in QQ groups and private chats. Social has been consolidated into an independent **`infos.social` sub-application (Application Realm)**, with its own runtime and storage, communicating with the main app through standard ports; internally it still keeps the "four-layer decoupled" structure, so multiple platforms (QQ, Discord, Telegram, etc.) stay cleanly pluggable.
+
+<details>
+<summary><b>Explore the four layers of the social runtime</b></summary>
 
 ### Four-Layer Decoupled Architecture
 
@@ -554,13 +550,55 @@ Layer 3: Platform adapters (NapcatAdapter / DiscordAdapter / TelegramAdapter)
   └── Each handles its platform's protocol (e.g. QQ's OneBot v11 / CQ code)
 ```
 
+</details>
+
 - **Cross-scenario memory**: Social chats are also distilled into graph memories by the "Secretary"; desktop and social share a diary layer, so memories stay connected.
 - **Smart batching**: In a lively group chat, the AI observes for a while, understands the flow, then gracefully "surfaces" — instead of replying to every single message.
 - **Social daily reports**: Automatically reviews the day's social records, turning them into diary entries that settle into long-term memory.
 
 <br/>
 
-## 🐳 Docker Deployment
+<a id="sub-apps"></a>
+
+## 08 · Arca & Pictoria
+
+Beyond Social, infOS ships two **independently runnable** sub-applications — each holds its own storage, versions, and local models, so it can run standalone or connect to infOS for AI-collaborative editing.
+
+<table>
+  <tr>
+    <td width="65%" valign="top"><a href=".github/assets/showcase-arca-library.png"><img src=".github/assets/showcase-arca-library.png" width="100%" alt="Arca’s dark document library with book-style covers and quick access to editing" /></a></td>
+    <td width="35%" valign="middle">
+      <sub>06 / ARCA</sub>
+      <h3>Every writing session starts with a document</h3>
+      <p>A writing and editing app built around the document as the authoritative object. Resources, versions, and reviews stay with it, keeping revisions traceable.</p>
+      <p>Arca can make local-model requests independently, with encrypted credentials. Connected to infOS, characters can collaborate on edits and return results to the original conversation through <code>arca_collaborate</code>.</p>
+      <p><a href="./packages/apps/arca/README.md"><b>Explore Arca →</b></a></p>
+    </td>
+  </tr>
+</table>
+
+<br />
+
+<table>
+  <tr>
+    <td width="30%" valign="middle">
+      <sub>07 / PICTORIA</sub>
+      <h3>Spread your ideas across the canvas</h3>
+      <p>Arrange images, GIFs, videos, audio, and notes freely. Chain generation, editing, matting, and upscaling into workflows, then publish them as reusable creative steps.</p>
+      <p>AtlasCloud image generation and editing are built in. Connected to infOS, characters can use the <code>pictoria</code> tool to create and deliver results.</p>
+      <p><a href="./packages/apps/pictoria/README.md"><b>Explore Pictoria →</b></a></p>
+    </td>
+    <td width="70%" valign="top"><a href=".github/assets/showcase-pictoria-canvas.png"><img src=".github/assets/showcase-pictoria-canvas.png" width="100%" alt="Pictoria’s free canvas with visual assets, generation steps, and workflow connections" /></a></td>
+  </tr>
+</table>
+
+<p><sub>Sub-apps have their own storage, versions, and model settings. Use them independently or connect them to infOS through the compatibility layer.</sub></p>
+
+<br />
+
+<a id="docker"></a>
+
+## 09 · Keep Your Companion Online
 
 > **"Always online, always there."**
 
@@ -593,13 +631,25 @@ Data is persisted in the `infos-data` and `infos-workspaces` Docker volumes. You
 
 <br/>
 
-## 🚀 Quick Start
+<a id="quick-start"></a>
 
-### 1. Desktop Users (Windows)
+## 10 · Start Here
 
-1.  Download the latest [Release](https://github.com/YoKONCy/infOS/releases) package.
-2.  Install to a path without CJK characters.
-3.  Double-click to run **`PeroperoChat!.exe`**.
+<table>
+  <tr>
+    <td width="34%" valign="middle">
+      <sub>08 / HELLO, COMPANION</sub>
+      <h3>Choose a companion. Start your story.</h3>
+      <ol>
+        <li>Download the latest <a href="https://github.com/YoKONCy/infOS/releases/latest">Windows release</a>.</li>
+        <li>Install to a path without CJK characters.</li>
+        <li>Run <b>萌动链接：PeroperoChat！.exe</b>, then choose a companion and launch mode in the launcher.</li>
+      </ol>
+      <p><a href="https://github.com/YoKONCy/infOS/releases/latest"><b>Get the latest release →</b></a></p>
+    </td>
+    <td width="66%" valign="top"><a href=".github/assets/showcase-launcher.png"><img src=".github/assets/showcase-launcher.png" width="100%" alt="Light infOS launcher showing companion selection and service checks" /></a></td>
+  </tr>
+</table>
 
 ### 2. Developers (Source)
 
@@ -607,7 +657,7 @@ Data is persisted in the `infos-data` and `infos-workspaces` Docker volumes. You
 
 | Dependency  | Version      | Notes                                           |
 | :---------- | :----------- | :---------------------------------------------- |
-| **Node.js** | ≥20.0.0      | Backend + frontend runtime                      |
+| **Node.js** | ≥22.13.0      | Backend + frontend runtime                      |
 | **pnpm**    | ≥9.0.0       | Package manager (`packageManager: pnpm@9.15.9`) |
 
 #### Step 1: Clone the repository
@@ -639,6 +689,16 @@ After first run, the SQLite database is created automatically. In the frontend *
 
 - **LLM API Key & Base URL**: Supports OpenAI / Anthropic / Google Gemini / any OpenAI-compatible API
 
+#### Development convention: Internationalization
+
+All new or changed UI text, notices, application-defined error messages, and terminal/log output **must use i18n rather than hardcoded display strings**.
+
+- Keep catalogs in `packages/shared/src/i18n/locales/<locale>/`, separated by module and purpose. Maintain Simplified Chinese, Traditional Chinese, and English together; do not merge everything into one JSON file.
+- Use `{0}`, `{1}`, and other placeholders for dynamic values instead of concatenating translated sentence fragments. UI text must update when the language changes.
+- Preserve user content, Agent output, and protocol identifiers. Localize internal errors at the display boundary; business logic must not depend on translated text.
+
+See the [i18n guide](.docs/B25_I18N.md) and [project conventions](AGENTS.md).
+
 #### Optional: Electron desktop build
 
 ```bash
@@ -668,11 +728,11 @@ Create an empty `.portable` file in the same directory as the `.exe`. The app wi
 
 <br/>
 
-## 💖 Love & Community
+<a id="community"></a>
 
-<div align="center">
-  <img src="https://img.shields.io/badge/Non--Profit-Open%20Source-green?style=for-the-badge&logo=opensource" alt="NonProfit"/>
-</div>
+## 11 · Love & Community
+
+<p><a href="./LICENSE"><img src="https://img.shields.io/badge/Open_Source-Apache_2.0-9b87cf?style=flat-square&amp;labelColor=252737" alt="Apache-2.0 open source project" /></a>　<a href="https://github.com/YoKONCy/infOS/pulls">Contribute code</a> · <a href="https://github.com/YoKONCy/infOS/issues">Share ideas</a> · <a href="https://www.perofamily.top">Improve the docs</a></p>
 
 **infOS and PeroperoChat are completely non-profit open source projects.**
 
@@ -680,7 +740,7 @@ We are a group of developers who love AI, anime culture, and technology. We buil
 **We want a real desktop companion that truly understands us.**
 
 - **Forever free**: Core code is permanently open source, with no paywalls.
-- **Community driven**: All forms of contribution are welcome — whether code (PR), suggestions (Issue), or simply your love (Star).
+- **Community driven**: infOS grows through its community, and everyone is welcome to help shape it. Code (PRs), ideas (Issues), testing, documentation, translations, and creative work all help it grow.
 
 <br/>
 
@@ -689,17 +749,42 @@ We are a group of developers who love AI, anime culture, and technology. We buil
 
 <br/>
 
-## 🌟 Star History
+### Create infOS together
 
-[![Star History Chart](https://api.star-history.com/svg?repos=YoKONCy/infOS&type=Date)](https://star-history.com/#YoKONCy/infOS&Date)
+One person's idea can be a starting point; a community's participation carries it further. Whether you develop, design, create, or simply want to share your experience, you are welcome to help shape the future of infOS and its desktop companions.
+
+<a href="https://github.com/YoKONCy/infOS/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=YoKONCy/infOS" alt="infOS GitHub contributors, updated automatically from contribution records" />
+</a>
+
+<sub>This display updates automatically from GitHub contribution records. Click the avatars to see the full list. We also thank everyone contributing ideas, testing, documentation, and creative work, and look forward to welcoming more contributors.</sub>
+
+### Thanks to our model creators
+
+Thank you to the following model creators for giving virtual companions expressive visual identities.
+
+| Model creator | Acknowledgment |
+| :--- | :--- |
+| [**阴阳兔兔猫**](https://space.bilibili.com/3546785165347464) | **Official collaborating creator** — special thanks for collaborating with and supporting infOS. |
+| [**Dr咕咚**](https://space.bilibili.com/5950899) | Thank you for your model creations. |
+| [**羊毛毛毛猫**](https://space.bilibili.com/85335217) | Thank you for your model creations. |
 
 <br/>
+
+### Watch it grow with us
+
+<a href="https://star-history.com/#YoKONCy/infOS&amp;Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=YoKONCy/infOS&amp;type=Date&amp;theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=YoKONCy/infOS&amp;type=Date" />
+    <img src="https://api.star-history.com/svg?repos=YoKONCy/infOS&amp;type=Date" width="100%" alt="infOS GitHub star history" />
+  </picture>
+</a>
+
+<p align="center"><b>Solid infrastructure. A warm digital life.</b><br /><sub>Infrastructure · Infomorph · Infinity</sub></p>
+<p align="center"><a href="#top">Back to top ↑</a> · <a href="https://github.com/YoKONCy/infOS/releases/latest">Download infOS</a> · <a href="https://store.steampowered.com/app/4457100">Meet PeroperoChat on Steam</a></p>
 
 <!--
   🐾 "Meow! If you found this, you're officially a friend of Pero."
   GRAPH_DIFFUSION_RESONANCE_ACTIVE = TRUE
 -->
-
-<div align="center">
-  <img src="https://capsule-render.vercel.app/api?type=waving&amp;color=00BFFF&amp;height=50&amp;section=footer" width="100%"/>
-</div>

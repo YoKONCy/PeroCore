@@ -1,3 +1,4 @@
+import { t as __t } from './i18n.mjs'
 /**
  * 官方应用发行资源构建脚本
  *
@@ -155,5 +156,10 @@ for (const application of applications.filter(
   }
   fs.writeFileSync(path.join(output, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n')
   if (!fs.existsSync(path.join(output, 'host.mjs'))) throw new Error('应用后台资源缺失')
-  console.log('官方应用发行资源已生成：' + application.name + '，文件数量：' + (files.length + 1))
+  console.log(
+    __t('scripts.build-official-apps', '官方应用发行资源已生成：') +
+      application.name +
+      __t('scripts.build-official-apps', '，文件数量：') +
+      (files.length + 1),
+  )
 }

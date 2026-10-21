@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { getDisplayLocale } from '../../../i18n/index'
+
+import { t as __t } from '../../../i18n/index'
+
 /**
  * MemoryList — 记忆档案列表
  *
@@ -33,14 +37,28 @@ interface DayGroup {
 }
 
 const grouped = computed<DayGroup[]>(() => {
-  const weekdays = ['日', '一', '二', '三', '四', '五', '六']
+  const weekdays = [
+    __t('ui.settings', '日'),
+    __t('ui.settings', '一'),
+    __t('ui.settings', '二'),
+    __t('ui.settings', '三'),
+    __t('ui.settings', '四'),
+    __t('ui.settings', '五'),
+    __t('ui.settings', '六'),
+  ]
   const map = new Map<string, DayGroup>()
   for (const note of props.items) {
     const date = new Date(note.eventAt)
     const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
     let group = map.get(key)
     if (!group) {
-      group = { date: key, weekday: `周${weekdays[date.getDay()] ?? '?'}`, notes: [] }
+      group = {
+        date: key,
+        get weekday() {
+          return __t('ui.settings', '周{0}', [weekdays[date.getDay()] ?? '?'])
+        },
+        notes: [],
+      }
       map.set(key, group)
     }
     group.notes.push(note)
@@ -49,7 +67,7 @@ const grouped = computed<DayGroup[]>(() => {
 })
 
 function formatClock(value: string): string {
-  return new Date(value).toLocaleTimeString('zh-CN', {
+  return new Date(value).toLocaleTimeString(getDisplayLocale(), {
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
@@ -69,17 +87,21 @@ const pageEnd = computed(() => Math.min(props.page * props.pageSize, props.total
   <div class="memory-list">
     <div v-if="isLoading && !items.length" class="list-loading">
       <PixelIcon name="refresh" size="sm" animation="spin" />
-      <span class="font-pixel">读取记忆档案...</span>
+      <span class="font-pixel">{{ __t('ui.settings', '读取记忆档案...') }}</span>
     </div>
 
-    <PEmpty v-else-if="!items.length" description="没有匹配的记忆" class="list-empty" />
+    <PEmpty
+      v-else-if="!items.length"
+      :description="__t('ui.settings', '没有匹配的记忆')"
+      class="list-empty"
+    />
 
     <div v-else class="list-scroll">
       <section v-for="group in grouped" :key="group.date" class="day-group">
         <div class="day-header">
           <span class="day-date font-pixel">{{ group.date }}</span>
           <span class="day-weekday">{{ group.weekday }}</span>
-          <span class="day-count">{{ group.notes.length }} 条</span>
+          <span class="day-count">{{ group.notes.length }} {{ __t('ui.settings', '条') }}</span>
         </div>
 
         <div class="day-body">
@@ -99,7 +121,7 @@ const pageEnd = computed(() => Math.min(props.page * props.pageSize, props.total
               <input
                 type="checkbox"
                 :checked="checkedIds?.includes(note.id)"
-                aria-label="选择记忆"
+                :aria-label="__t('ui.settings', '选择记忆')"
                 @click.stop
                 @change="emit('toggle', note.id)"
               />
@@ -127,7 +149,11 @@ const pageEnd = computed(() => Math.min(props.page * props.pageSize, props.total
                     :name="note.origin.mode === 'active' ? 'pencil' : 'thought'"
                     size="xs"
                   />
-                  {{ note.origin.mode === 'active' ? '主动记事' : '后台炼化' }}
+                  {{
+                    note.origin.mode === 'active'
+                      ? __t('ui.settings', '主动记事')
+                      : __t('ui.settings', '后台炼化')
+                  }}
                 </span>
                 <span v-if="note.participants.length" class="meta-item">
                   <PixelIcon name="user" size="xs" />
@@ -135,12 +161,15 @@ const pageEnd = computed(() => Math.min(props.page * props.pageSize, props.total
                   }}{{ note.participants.length > 2 ? ` +${note.participants.length - 2}` : '' }}
                 </span>
                 <span v-if="note.status === 'archived'" class="meta-item meta-archived">
-                  已归档
+                  {{ __t('ui.settings', '已归档') }}
                 </span>
               </div>
             </div>
 
-            <div class="entry-importance" :title="`重要度 ${note.importance}/10`">
+            <div
+              class="entry-importance"
+              :title="__t('ui.settings', '重要度 {0}/10', [note.importance])"
+            >
               <span
                 v-for="level in 5"
                 :key="level"
@@ -159,10 +188,11 @@ const pageEnd = computed(() => Math.min(props.page * props.pageSize, props.total
       <div class="pagination">
         <PButton variant="ghost" size="sm" :disabled="page <= 1" @click="emit('page', page - 1)">
           <PixelIcon name="chevron-down" size="xs" class="rotate-90" />
-          上一页
+          {{ __t('ui.settings', '上一页') }}
         </PButton>
         <span class="pagination-info font-pixel">
-          第 {{ page }} / {{ pageCount }} 页 · {{ pageStart }}-{{ pageEnd }} / {{ total }}
+          {{ __t('ui.settings', '第') }} {{ page }} / {{ pageCount }}
+          {{ __t('ui.settings', '页 ·') }} {{ pageStart }}-{{ pageEnd }} / {{ total }}
         </span>
         <PButton
           variant="ghost"
@@ -170,7 +200,7 @@ const pageEnd = computed(() => Math.min(props.page * props.pageSize, props.total
           :disabled="page >= pageCount"
           @click="emit('page', page + 1)"
         >
-          下一页
+          {{ __t('ui.settings', '下一页') }}
           <PixelIcon name="chevron-down" size="xs" class="-rotate-90" />
         </PButton>
       </div>

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /**
  * DebugLogDialog — 调试日志弹窗
  *
@@ -26,9 +28,9 @@ const lastSystem = computed(() =>
 
 const displayContent = computed(() => {
   if (tab.value === 'prompt') {
-    return lastSystem.value?.content || '（无 system prompt 记录）'
+    return lastSystem.value?.content || __t('ui.settings', '（无 system prompt 记录）')
   }
-  return lastAssistant.value?.content || '（无 assistant 响应记录）'
+  return lastAssistant.value?.content || __t('ui.settings', '（无 assistant 响应记录）')
 })
 
 function open() {
@@ -39,7 +41,7 @@ defineExpose({ open })
 </script>
 
 <template>
-  <PDialog v-model="isOpen" title="调试日志" width="720px">
+  <PDialog v-model="isOpen" :title="__t('ui.settings', '调试日志')" width="720px">
     <div class="flex flex-col gap-3">
       <!-- 选项卡 -->
       <div class="flex gap-1">
@@ -77,7 +79,7 @@ defineExpose({ open })
     </div>
 
     <template #footer>
-      <PButton variant="ghost" @click="isOpen = false">关闭</PButton>
+      <PButton variant="ghost" @click="isOpen = false">{{ __t('ui.settings', '关闭') }}</PButton>
     </template>
   </PDialog>
 </template>

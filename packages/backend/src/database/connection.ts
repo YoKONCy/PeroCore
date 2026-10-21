@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * SQLite 连接管理
  *
@@ -147,10 +148,26 @@ function ensureKernelResourceSchema(sqlite: Database.Database): void {
         status TEXT DEFAULT 'unread' NOT NULL,
         revision INTEGER DEFAULT 1 NOT NULL,
         created_at TEXT NOT NULL,
-        read_at TEXT
+        read_at TEXT,
+        metadata_json TEXT DEFAULT '{}' NOT NULL,
+        expires_at TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_durable_notifications_principal_status
         ON durable_notifications (principal_id, status, created_at);
+
+      CREATE TABLE IF NOT EXISTS notification_feed (
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+        notification_id TEXT NOT NULL UNIQUE REFERENCES durable_notifications(notification_id) ON DELETE CASCADE
+      );
+      CREATE TABLE IF NOT EXISTS notification_device_receipts (
+        device_id TEXT NOT NULL,
+        notification_id TEXT NOT NULL REFERENCES durable_notifications(notification_id) ON DELETE CASCADE,
+        revision INTEGER NOT NULL,
+        received_at TEXT NOT NULL,
+        presented_at TEXT,
+        read_at TEXT,
+        PRIMARY KEY (device_id, notification_id)
+      );
 
       CREATE TABLE IF NOT EXISTS subscription_cursors (
         stream_id TEXT NOT NULL,
@@ -413,7 +430,7 @@ export type DrizzleDb = ReturnType<typeof createDrizzleConnection>
  * @param databasePath - SQLite 文件路径
  */
 export function createDrizzleConnection(databasePath: string) {
-  logger.info(`正在连接数据库 → ${databasePath}`)
+  logger.info(__t('logs.database', '正在连接数据库 → {0}', [databasePath]))
 
   // Steam Cloud 下载不能覆盖正在打开的 SQLite。Electron 将云端快照写为
   // infos.db.cloud-pending，Daemon 下次启动在建连前原子替换主库。
@@ -426,9 +443,11 @@ export function createDrizzleConnection(databasePath: string) {
       renameSync(pendingRestorePath, databasePath)
       rmSync(`${databasePath}-wal`, { force: true })
       rmSync(`${databasePath}-shm`, { force: true })
-      logger.info(`已在启动前恢复 Steam Cloud 数据库快照，旧库备份: ${backupPath}`)
+      logger.info(
+        __t('logs.database', '已在启动前恢复 Steam Cloud 数据库快照，旧库备份: {0}', [backupPath]),
+      )
     } catch (error) {
-      logger.error(`恢复 Steam Cloud 数据库快照失败: ${error}`)
+      logger.error(__t('logs.database', '恢复 Steam Cloud 数据库快照失败: {0}', [error]))
       if (!existsSync(databasePath) && existsSync(backupPath)) renameSync(backupPath, databasePath)
     }
   }
@@ -453,12 +472,12 @@ export function createDrizzleConnection(databasePath: string) {
     : resolve(dirname(fileURLToPath(import.meta.url)), 'migrations')
   const db = drizzle(sqlite, { schema })
   try {
-    if (!tableCheck) logger.info('检测到首次启动，正在执行数据库迁移...')
+    if (!tableCheck) logger.info(__t('logs.database', '检测到首次启动，正在执行数据库迁移...'))
     applySchemaMigrations(sqlite, db, migrationsDir, Boolean(tableCheck))
-    logger.success('数据库结构迁移完成')
+    logger.success(__t('logs.database', '数据库结构迁移完成'))
   } catch (error) {
     sqlite.close()
-    logger.error(`数据库结构迁移失败: ${error}`)
+    logger.error(__t('logs.database', '数据库结构迁移失败: {0}', [error]))
     throw error
   }
 
@@ -469,7 +488,7 @@ export function createDrizzleConnection(databasePath: string) {
   removeLegacyMemorySchema(sqlite)
 
   sqliteConnections.set(db, sqlite)
-  logger.success('数据库连接成功')
+  logger.success(__t('logs.database', '数据库连接成功'))
   return db
 }
 
@@ -480,5 +499,18 @@ export function closeDrizzleConnection(db: DrizzleDb): void {
   sqlite.pragma('wal_checkpoint(TRUNCATE)')
   sqlite.close()
   sqliteConnections.delete(db)
-  logger.info('数据库 WAL已收口，连接已关闭')
+  logger.info(__t('logs.database', '数据库 WAL已收口，连接已关闭'))
+}
+
+/** 队列提交必须先完成 WAL 同步，再向客户端确认已接收。 */
+export function durableQueueWrite<T>(db: DrizzleDb, operation: () => T): T {
+  const sqlite = sqliteConnections.get(db)
+  if (!sqlite) throw new Error('消息队列无法取得数据库持久连接')
+  const previous = sqlite.pragma('synchronous', { simple: true }) as number
+  sqlite.pragma('synchronous = FULL')
+  try {
+    return db.transaction(operation)
+  } finally {
+    sqlite.pragma(`synchronous = ${previous}`)
+  }
 }

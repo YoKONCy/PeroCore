@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Run } from '../types'
 import type { CanvasStore } from '../composables/useCanvas'
@@ -138,50 +140,62 @@ onBeforeUnmount(() => {
       class="task-recovery floating-panel"
       role="dialog"
       aria-modal="true"
-      aria-label="恢复任务"
+      :aria-label="__t('apps.pictoria.ui', '恢复任务')"
       tabindex="-1"
       @keydown="trapFocus"
     >
       <header>
-        <strong>恢复任务</strong>
-        <button class="icon-button" aria-label="关闭" @click="emit('close')">
+        <strong>{{ __t('apps.pictoria.ui', '恢复任务') }}</strong>
+        <button
+          class="icon-button"
+          :aria-label="__t('apps.pictoria.ui', '关闭')"
+          @click="emit('close')"
+        >
           <Icon name="close" :size="17" />
         </button>
       </header>
-      <span v-if="busy && !run" class="field-help">读取中…</span>
+      <span v-if="busy && !run" class="field-help">{{ __t('apps.pictoria.ui', '读取中…') }}</span>
       <template v-if="run && node">
         <div v-if="candidates.length > 1" class="panel-field">
-          <span>节点</span>
+          <span>{{ __t('apps.pictoria.ui', '节点') }}</span>
           <PictoriaSelect
             v-model="nodeId"
             :options="candidates.map((node) => ({ value: node.id, label: node.id }))"
-            label="待恢复节点"
+            :label="__t('apps.pictoria.ui', '待恢复节点')"
             :disabled="busy"
           />
         </div>
         <p v-if="node.error" class="recovery-error">{{ node.error }}</p>
         <label v-if="node.state === 'uncertain'" class="panel-field">
-          远程任务 ID
+          {{ __t('apps.pictoria.ui', '远程任务 ID') }}
           <input
             v-model="remoteId"
             :disabled="busy || confirmRetry"
             maxlength="500"
-            placeholder="填写供应商的任务 ID"
+            :placeholder="__t('apps.pictoria.ui', '填写供应商的任务 ID')"
           />
         </label>
         <code v-else-if="node.remoteId" class="recovery-id">{{ node.remoteId }}</code>
         <label v-if="['uncertain', 'failed'].includes(node.state)" class="retry-confirmation">
           <input v-model="confirmRetry" type="checkbox" :disabled="busy" />
-          <span>已核验，需要重新提交（可能再次计费）</span>
+          <span>{{ __t('apps.pictoria.ui', '已核验，需要重新提交（可能再次计费）') }}</span>
         </label>
         <footer>
-          <button class="text-button" @click="emit('close')">取消</button>
+          <button class="text-button" @click="emit('close')">
+            {{ __t('apps.pictoria.ui', '取消') }}
+          </button>
           <button
             class="create-button"
             :disabled="busy || (node.state === 'uncertain' && !confirmRetry && !remoteId.trim())"
             @click="resume"
           >
-            {{ busy ? '处理中' : confirmRetry ? '重新提交' : '继续恢复' }}
+            {{
+              busy
+                ? __t('apps.pictoria.ui', '处理中')
+                : confirmRetry
+                  ? __t('apps.pictoria.ui', '重新提交')
+                  : __t('apps.pictoria.ui', '继续恢复')
+            }}
           </button>
         </footer>
       </template>

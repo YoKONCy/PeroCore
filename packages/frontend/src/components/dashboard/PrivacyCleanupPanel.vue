@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import { onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue'
 import { memoryApi, type PrivacyCleanupJob } from '../../api/modules/memoryApi'
 import { PButton, PCard } from '../pixel'
@@ -7,11 +9,21 @@ const jobs = ref<PrivacyCleanupJob[]>([])
 const error = ref('')
 const retrying = ref('')
 const labels = {
-  memory: '记忆',
-  fact: '事实',
-  knowledge: '知识',
-  'reset-memory': '全部记忆',
-  'social-memory': '社交长记忆',
+  get memory() {
+    return __t('ui.settings', '记忆')
+  },
+  get fact() {
+    return __t('ui.settings', '事实')
+  },
+  get knowledge() {
+    return __t('ui.settings', '知识')
+  },
+  get 'reset-memory'() {
+    return __t('ui.settings', '全部记忆')
+  },
+  get 'social-memory'() {
+    return __t('ui.settings', '社交长记忆')
+  },
 }
 let timer: ReturnType<typeof setTimeout> | undefined
 let active = true
@@ -60,14 +72,21 @@ onBeforeUnmount(stop)
 <template>
   <PCard v-if="jobs.length" pixel padding="sm" class="privacy-cleanup">
     <header>
-      <strong>数据清理</strong>
-      <PButton size="sm" variant="ghost" @click="load">刷新</PButton>
+      <strong>{{ __t('ui.settings', '数据清理') }}</strong>
+      <PButton size="sm" variant="ghost" @click="load">{{ __t('ui.settings', '刷新') }}</PButton>
     </header>
     <p v-if="error">{{ error }}</p>
     <article v-for="job in jobs" :key="job.id">
       <div>
         <strong>{{ labels[job.kind] }}</strong>
-        <span>{{ job.status === 'failed' ? '需要重试' : '正在清理' }} · {{ job.attempts }}/5</span>
+        <span>
+          {{
+            job.status === 'failed'
+              ? __t('ui.settings', '需要重试')
+              : __t('ui.settings', '正在清理')
+          }}
+          · {{ job.attempts }}/5
+        </span>
       </div>
       <p v-if="job.lastError">{{ job.lastError }}</p>
       <PButton
@@ -77,7 +96,7 @@ onBeforeUnmount(stop)
         :disabled="Boolean(retrying)"
         @click="retry(job.id)"
       >
-        {{ retrying === job.id ? '处理中…' : '重试清理' }}
+        {{ retrying === job.id ? __t('ui.settings', '处理中…') : __t('ui.settings', '重试清理') }}
       </PButton>
     </article>
   </PCard>

@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * Prompt Template Loader — 提示词模板加载器
  *
@@ -38,7 +39,7 @@ export class PromptTemplateLoader {
     // 1. 用户自定义优先
     const customPath = this.pathResolver.resolve(`@data/custom/prompts/${templatePath}`)
     if (existsSync(customPath)) {
-      logger.debug(`加载自定义提示词: ${templatePath}`)
+      logger.debug(__t('logs.core', '加载自定义提示词: {0}', [templatePath]))
       return readFile(customPath, 'utf-8')
     }
 
@@ -47,7 +48,7 @@ export class PromptTemplateLoader {
     for (let index = workshopRoots.length - 1; index >= 0; index -= 1) {
       const workshopPath = path.resolve(workshopRoots[index]!, 'prompts', templatePath)
       if (existsSync(workshopPath)) {
-        logger.debug(`加载 Workshop 提示词: ${templatePath}`)
+        logger.debug(__t('logs.core', '加载 Workshop 提示词: {0}', [templatePath]))
         return readFile(workshopPath, 'utf-8')
       }
     }
@@ -61,7 +62,7 @@ export class PromptTemplateLoader {
     }
 
     // 全部不存在 → 空字符串 + 警告
-    logger.warn(`提示词模板未找到: ${templatePath}`)
+    logger.warn(__t('logs.core', '提示词模板未找到: {0}', [templatePath]))
     return ''
   }
 
@@ -124,7 +125,7 @@ export class PromptTemplateLoader {
     const { writeFile } = await import('node:fs/promises')
     await writeFile(customPath, content, 'utf-8')
 
-    logger.info(`提示词模板已导出到自定义层: ${templatePath}`)
+    logger.info(__t('logs.core', '提示词模板已导出到自定义层: {0}', [templatePath]))
     return customPath
   }
 
@@ -139,7 +140,7 @@ export class PromptTemplateLoader {
     const { unlink } = await import('node:fs/promises')
     await unlink(customPath)
 
-    logger.info(`提示词模板已恢复为官方版本: ${templatePath}`)
+    logger.info(__t('logs.core', '提示词模板已恢复为官方版本: {0}', [templatePath]))
     return true
   }
 }

@@ -154,7 +154,8 @@ export class SqliteSocialStoragePort implements SocialStoragePort {
 
   async insert(message: Parameters<SocialStoragePort['insert']>[0]): Promise<void> {
     const transaction = this.db.transaction(() => {
-      this.assertTurnWritable(message.turnId, message.agentId)
+      if (message.confirmedDeliveryKey) this.assertConfirmedDelivery(message)
+      else this.assertTurnWritable(message.turnId, message.agentId)
       const inserted = this.db
         .prepare(
           `INSERT OR IGNORE INTO social_messages
@@ -520,6 +521,41 @@ export class SqliteSocialStoragePort implements SocialStoragePort {
         .all(...args, limit) as SocialMessageRecord[]
     ).reverse()
   }
+  private assertConfirmedDelivery(message: Parameters<SocialStoragePort['insert']>[0]): void {
+    const row = this.db
+      .prepare('SELECT record_json FROM social_turns WHERE id=? AND agent_id=?')
+      .get(message.turnId, message.agentId) as { record_json: string } | undefined
+    if (!row) throw new Error('原社交任务已清理，不能恢复已删除的发送记录')
+    const record = JSON.parse(row.record_json) as SocialTurnRecord
+    const pending = record.checkpoint.pendingHistory as
+      | Record<string, Parameters<SocialStoragePort['insert']>[0]>
+      | undefined
+    const confirmed = pending?.[message.confirmedDeliveryKey!]
+    if (!confirmed) throw new Error('没有找到已确认的原发送记录')
+    const fields: Array<keyof typeof message> = [
+      'msgId',
+      'platform',
+      'accountId',
+      'channelId',
+      'channelType',
+      'senderId',
+      'senderName',
+      'content',
+      'agentId',
+      'timestamp',
+      'rawEventJson',
+    ]
+    if (fields.some((field) => confirmed[field] !== message[field]))
+      throw new Error('补存消息与已确认的发送记录不一致')
+    const version = this.db
+      .prepare(
+        "SELECT coalesce(sum(version),0) AS value FROM social_data_fences WHERE agent_id=? AND (channel_type='' OR (channel_type=? AND channel_id=?))",
+      )
+      .get(record.agentId, record.channelType, record.channelId) as { value: number }
+    if (version.value !== record.checkpoint.deliveryDataVersion)
+      throw new Error('社交数据已清理，不能重新写入旧发送记录')
+  }
+
   private assertTurnWritable(id?: string, agentId?: string): number | undefined {
     if (!id) return
     const row = this.db

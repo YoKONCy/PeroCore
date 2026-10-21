@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * ResetService — 危险区域重置服务
  *
@@ -14,6 +15,7 @@
  */
 
 import type { DrizzleDb } from '../../database'
+import { sql } from 'drizzle-orm'
 import {
   threads,
   threadMessages,
@@ -41,6 +43,9 @@ import {
   taskPlanMutations,
   tarotReadings,
   tarotDays,
+  durableNotifications,
+  notificationFeed,
+  notificationDeviceReceipts,
 } from '../../database/schema'
 import { createLogger } from '../../lib/logger'
 import { disposeExecutionOwner } from '../../tools/productivityRuntimeHolder'
@@ -73,7 +78,14 @@ export class ResetService {
     cleared.file_change_snapshots = this.clearTable(fileChangeSnapshots)
     cleared.task_plan_mutations = this.clearTable(taskPlanMutations)
     cleared.task_plans = this.clearTable(taskPlans)
-    logger.info(`对话记录已清空: ${JSON.stringify(cleared)}`)
+    // 通知正文同属对话派生数据，清空记录后不能再向离线手机补发。
+    cleared.conversation_notifications = this.db
+      .delete(durableNotifications)
+      .where(
+        sql`json_extract(${durableNotifications.metadataJson}, '$.target.kind') = 'conversation'`,
+      )
+      .run().changes
+    logger.info(__t('logs.maintenance', '对话记录已清空: {0}', [JSON.stringify(cleared)]))
     return { operation: 'clear_logs', cleared }
   }
 
@@ -99,7 +111,7 @@ export class ResetService {
       for (const [name, table] of tables) counts[name] = tx.delete(table).run().changes
       return counts
     })
-    logger.info(`记忆已重置: ${JSON.stringify(cleared)}`)
+    logger.info(__t('logs.maintenance', '记忆已重置: {0}', [JSON.stringify(cleared)]))
     return { operation: 'reset_memories', cleared }
   }
 
@@ -110,6 +122,9 @@ export class ResetService {
     // 先清空记忆/对话相关，再清空业务数据，最后清空配置与审批审计。
     // 使用显式表名映射，避免依赖 drizzle 内部 symbol 反射。
     const tables: Array<[string, Parameters<DrizzleDb['delete']>[0]]> = [
+      ['notification_device_receipts', notificationDeviceReceipts],
+      ['notification_feed', notificationFeed],
+      ['durable_notifications', durableNotifications],
       ['tarot_readings', tarotReadings],
       ['tarot_days', tarotDays],
       ['llm_usage_records', llmUsageRecords],
@@ -139,7 +154,7 @@ export class ResetService {
     ]
     const cleared: Record<string, number> = {}
     for (const [name, table] of tables) cleared[name] = this.clearTable(table)
-    logger.info(`出厂重置完成: ${JSON.stringify(cleared)}`)
+    logger.info(__t('logs.maintenance', '出厂重置完成: {0}', [JSON.stringify(cleared)]))
     return { operation: 'factory_reset', cleared }
   }
 
@@ -150,7 +165,7 @@ export class ResetService {
       return result.changes
     } catch (error) {
       // 单表失败不阻断整体重置，避免外键/锁定导致部分表永远无法清空
-      logger.warn(`清空表失败（已跳过）: ${(error as Error).message}`)
+      logger.warn(__t('logs.maintenance', '清空表失败（已跳过）: {0}', [(error as Error).message]))
       return 0
     }
   }

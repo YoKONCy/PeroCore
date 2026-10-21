@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 import { createHash, randomUUID } from 'node:crypto'
 import type { OfficeSelection } from '@infos/document-engine/office'
 import type { ApplicationToolProjection, KernelCallContext } from '@infos/shared'
@@ -102,7 +103,9 @@ export class ArcaCollaborationService {
     this.timer = setInterval(() => {
       if (this.monitoring || this.closing) return
       this.monitoring = this.reconcile()
-        .catch((error) => logger.warn(`核对 Arca 协作任务失败：${String(error)}`))
+        .catch((error) =>
+          logger.warn(__t('logs.applications', '核对 Arca 协作任务失败：{0}', [String(error)])),
+        )
         .finally(() => {
           this.monitoring = undefined
         })
@@ -204,7 +207,7 @@ export class ArcaCollaborationService {
         correlationId: collaborationId,
         input: {
           agentId: input.agentId,
-          title: `Arca 协作：${input.instruction.slice(0, 24)}`,
+          title: __t('server.applications', 'Arca 协作：{0}', [input.instruction.slice(0, 24)]),
           targetThreadId: input.originThreadId,
           instruction: this.instruction(input, metadata),
           metadata: {
@@ -224,7 +227,7 @@ export class ArcaCollaborationService {
       return this.project(task)
     } catch (error) {
       await this.revoke(collaborationId).catch((failure) =>
-        logger.warn(`撤销协作授权失败：${String(failure)}`),
+        logger.warn(__t('logs.applications', '撤销协作授权失败：{0}', [String(failure)])),
       )
       throw error
     }
@@ -497,7 +500,7 @@ export class ArcaCollaborationService {
       await this.revoke(id)
       this.pendingRevocations.delete(id)
     } catch (error) {
-      logger.warn(`协作授权等待重连后撤销：${String(error)}`)
+      logger.warn(__t('logs.applications', '协作授权等待重连后撤销：{0}', [String(error)]))
     }
   }
   private context(key: string): KernelCallContext {

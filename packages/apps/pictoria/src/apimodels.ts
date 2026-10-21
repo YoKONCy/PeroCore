@@ -1,3 +1,4 @@
+import { t as __t } from './i18n'
 import { z } from 'zod'
 import type { Assets } from './assets'
 import { serviceSchema, stepSchema, type ServiceProfile } from './domain'
@@ -202,7 +203,10 @@ export function configureApiModels(store: Store, owner: string, raw: unknown) {
           properties: {
             prompt: {
               type: 'string',
-              title: mode === 'edit' ? '编辑说明' : '提示词',
+              title:
+                mode === 'edit'
+                  ? __t('apps.pictoria.ui', '编辑说明')
+                  : __t('apps.pictoria.ui', '提示词'),
               minLength: 1,
               maxLength: 20000,
             },
@@ -210,7 +214,7 @@ export function configureApiModels(store: Store, owner: string, raw: unknown) {
               ? {
                   images: {
                     type: 'array',
-                    title: '参考图片',
+                    title: __t('apps.pictoria.ui', '参考图片'),
                     items: asset,
                     minItems: 1,
                     maxItems: family.maxImages,

@@ -8,6 +8,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import path from 'node:path'
 import {
   mkdir,
+  link,
   lstat,
   open,
   readFile,
@@ -366,6 +367,93 @@ export class VirtualWorkspace {
         checkpointWarning = '文件已写入，但检查点保存失败；请核对文件，不要重复写入。'
       }
       return { ...written, checkpointWarning }
+    })
+  }
+
+  /** 文档导出只创建新文件；同内容重试可复用，禁止覆盖用户或其他任务的版本。 */
+  async createBinary(
+    session: ExecutionSession,
+    input: {
+      path: string
+      bytes: Buffer
+      signal?: AbortSignal
+      beforeWrite?: () => Promise<unknown>
+      afterWrite?: (captured: unknown, bytes: Buffer) => Promise<void>
+    },
+  ) {
+    return this.withFileMutation(session, input.path, false, async (filePath) => {
+      input.signal?.throwIfAborted()
+      const assertWorkspaceParent = async () => {
+        let probe = path.dirname(filePath)
+        for (;;) {
+          const actual = await realpath(probe).catch((error: NodeJS.ErrnoException) => {
+            if (error.code !== 'ENOENT') throw error
+            return undefined
+          })
+          if (actual) {
+            const relative = path.relative(await realpath(session.workspaceRoot), actual)
+            if (
+              relative === '..' ||
+              relative.startsWith(`..${path.sep}`) ||
+              path.isAbsolute(relative)
+            )
+              throw new Error('文档输出目录通过链接越出当前工作区')
+            return
+          }
+          const parent = path.dirname(probe)
+          if (parent === probe) throw new Error('文档输出目录无效')
+          probe = parent
+        }
+      }
+      await assertWorkspaceParent()
+      const newHash = createHash('sha256').update(input.bytes).digest('hex')
+      const current = await lstat(filePath).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== 'ENOENT') throw error
+        return null
+      })
+      if (current) {
+        if (
+          current.isFile() &&
+          current.size === input.bytes.length &&
+          createHash('sha256')
+            .update(await readFile(filePath))
+            .digest('hex') === newHash
+        )
+          return { path: input.path, newHash, bytes: input.bytes.length, created: false }
+        throw new Error('目标文件已存在，请换一个输出文件名')
+      }
+      const captured = await input.beforeWrite?.()
+      await mkdir(path.dirname(filePath), { recursive: true })
+      const temporary = path.join(path.dirname(filePath), `.${randomUUID()}.document.tmp`)
+      try {
+        await writeFile(temporary, input.bytes, { flag: 'wx' })
+        const handle = await open(temporary, 'r+')
+        try {
+          await handle.sync()
+        } finally {
+          await handle.close()
+        }
+        await this.resolvePath(session, input.path, 'write')
+        await assertWorkspaceParent()
+        input.signal?.throwIfAborted()
+        // 原子发布且不替换已出现的文件，避免生成期间夹入的人工文件被覆盖。
+        await link(temporary, filePath)
+      } finally {
+        await rm(temporary, { force: true }).catch(() => undefined)
+      }
+      let checkpointWarning: string | undefined
+      try {
+        await input.afterWrite?.(captured, input.bytes)
+      } catch {
+        checkpointWarning = '文件已保存，但回滚记录保存失败，请勿重复导出'
+      }
+      return {
+        path: input.path,
+        newHash,
+        bytes: input.bytes.length,
+        created: true,
+        checkpointWarning,
+      }
     })
   }
 

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   TAROT_DECK,
@@ -208,9 +210,12 @@ async function continueChat(): Promise<void> {
         .filter(Boolean)
         .join('\n\n'),
     }
-    notify.toast('这次抽牌已放进聊天输入框，可以改好再发送', 'success')
+    notify.toast(__t('ui.tarot', '抽牌结果已放入输入框'), 'success')
   } catch (cause) {
-    notify.toast(cause instanceof Error ? cause.message : '暂时无法打开聊天', 'error')
+    notify.toast(
+      cause instanceof Error ? cause.message : __t('ui.tarot', '暂时无法打开聊天'),
+      'error',
+    )
   } finally {
     chatOpening.value = false
   }
@@ -268,20 +273,20 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="tarot-page" aria-label="和角色一起抽牌">
+  <section class="tarot-page" :aria-label="__t('ui.tarot', '和角色一起抽牌')">
     <div class="tarot-content">
       <header class="tarot-header">
         <div>
           <div class="tarot-eyebrow">
             <PixelIcon name="sparkle" size="sm" />
-            与你共享的片刻
+            {{ __t('ui.tarot', '与你共享的片刻') }}
           </div>
-          <h1>一起抽牌</h1>
-          <p>你一张，我一张。让一个小小的巧合，成为今天的话题。</p>
+          <h1>{{ __t('ui.tarot', '一起抽牌') }}</h1>
+          <p>{{ __t('ui.tarot', '你一张，我一张。让一个小小的巧合，成为今天的话题。') }}</p>
         </div>
         <PButton variant="ghost" size="sm" @click="modal = 'deck'">
           <PixelIcon name="book" size="sm" />
-          完整牌组
+          {{ __t('ui.tarot', '完整牌组') }}
           <span class="tarot-count">78</span>
         </PButton>
       </header>
@@ -293,13 +298,13 @@ onBeforeUnmount(() => {
           :agent-name="companion?.name"
           as="button"
           class="tarot-avatar"
-          aria-label="查看角色的完整状态"
+          :aria-label="__t('ui.tarot', '查看角色的完整状态')"
         >
           <img v-if="avatarUrl" :src="avatarUrl" alt="" />
           <PixelIcon v-else name="cat" size="lg" />
         </AgentStateHover>
         <div>
-          <label for="tarot-companion">今天和谁一起</label>
+          <label for="tarot-companion">{{ __t('ui.tarot', '今天和谁一起') }}</label>
           <select
             id="tarot-companion"
             v-model="agentId"
@@ -311,74 +316,87 @@ onBeforeUnmount(() => {
           </select>
         </div>
         <span class="tarot-day">
-          {{ day || '今天' }}
-          <small>同一天，同一份小巧合</small>
+          {{ day || __t('ui.tarot', '今天') }}
+          <small>{{ __t('ui.tarot', '同一天，同一份小巧合') }}</small>
         </span>
       </div>
 
       <div v-if="!availableAgents.length && !loading" class="tarot-notice" role="status">
-        先启用一个角色，就能邀请它一起抽牌了。
+        {{ __t('ui.tarot', '先启用一个角色，就能邀请它一起抽牌了。') }}
       </div>
       <div v-if="error" class="tarot-notice" role="alert">
         <span>{{ error }}</span>
-        <PButton variant="ghost" size="sm" :loading="loading" @click="refresh">重试</PButton>
+        <PButton variant="ghost" size="sm" :loading="loading" @click="refresh">
+          {{ __t('ui.tarot', '重试') }}
+        </PButton>
       </div>
       <div v-if="loading" class="tarot-loading" role="status">
         <PixelIcon name="refresh" size="sm" animation="spin" />
-        正在整理今天的牌桌…
+        {{ __t('ui.tarot', '正在整理今天的牌桌…') }}
       </div>
 
       <template v-else-if="availableAgents.length && !error">
         <form v-if="!reading" class="tarot-question" @submit.prevent="drawTogether">
           <label for="tarot-question">
-            有什么想聊的？
-            <span>也可以什么都不填</span>
+            {{ __t('ui.tarot', '有什么想聊的？') }}
+            <span>{{ __t('ui.tarot', '也可以什么都不填') }}</span>
           </label>
           <input
             id="tarot-question"
             v-model="question"
             :disabled="drawing || !!dailyCard"
             maxlength="500"
-            placeholder="比如：今天有一点没动力……"
+            :placeholder="__t('ui.tarot', '比如：今天有一点没动力……')"
             autocomplete="off"
           />
           <p v-if="dailyCard">
-            你的今日牌已经留下了，接下来让 {{ companion?.name }} 抽一张回应牌。
+            {{ __t('ui.tarot', '你的今日牌已经留下了，接下来让') }} {{ companion?.name }}
+            {{ __t('ui.tarot', '抽一张回应牌。') }}
           </p>
           <div class="tarot-table tarot-table--waiting" aria-hidden="true">
-            <TarotCard :draw="dailyCard" label="你的今日牌" disabled />
+            <TarotCard :draw="dailyCard" :label="__t('ui.tarot', '你的今日牌')" disabled />
             <span class="tarot-between"><PixelIcon name="sparkle" size="lg" /></span>
-            <TarotCard label="角色的回应牌" />
+            <TarotCard :label="__t('ui.tarot', '角色的回应牌')" />
           </div>
           <PButton type="submit" :loading="drawing" :disabled="!companion">
             {{
               drawing
-                ? '正在一起抽牌…'
+                ? __t('ui.tarot', '正在一起抽牌…')
                 : dailyCard
-                  ? `听听 ${companion?.name} 的回应`
-                  : '和我一起翻牌'
+                  ? __t('ui.tarot', '听听 {0} 的回应', [companion?.name])
+                  : __t('ui.tarot', '和我一起翻牌')
             }}
             <PixelIcon name="chevron-right" size="sm" />
           </PButton>
-          <small class="tarot-footnote">完整 78 张 · 随机正逆位 · 每日保存</small>
+          <small class="tarot-footnote">
+            {{ __t('ui.tarot', '完整 78 张 · 随机正逆位 · 每日保存') }}
+          </small>
         </form>
 
         <template v-else>
           <div class="tarot-reading-heading">
-            <span>{{ isToday ? '今天的小巧合' : `${reading.day} 的共同回忆` }}</span>
-            <PButton v-if="!isToday" variant="ghost" size="sm" @click="refresh">回到今天</PButton>
+            <span>
+              {{
+                isToday
+                  ? __t('ui.tarot', '今天的小巧合')
+                  : __t('ui.tarot', '{0} 的共同回忆', [reading.day])
+              }}
+            </span>
+            <PButton v-if="!isToday" variant="ghost" size="sm" @click="refresh">
+              {{ __t('ui.tarot', '回到今天') }}
+            </PButton>
             <small v-else>
               <PixelIcon name="check" size="xs" />
-              已保存
+              {{ __t('ui.tarot', '已保存') }}
             </small>
           </div>
           <p v-if="reading.question" class="tarot-saved-question">“{{ reading.question }}”</p>
           <div :key="reading.id" class="tarot-table tarot-table--revealed">
             <div class="tarot-position">
-              <span class="tarot-position-label">你的今日牌</span>
+              <span class="tarot-position-label">{{ __t('ui.tarot', '你的今日牌') }}</span>
               <TarotCard
                 :draw="reading.userCard"
-                label="你的今日牌"
+                :label="__t('ui.tarot', '你的今日牌')"
                 @select="openCard(reading.userCard)"
               />
               <p>{{ tarotMeaning(reading.userCard) }}</p>
@@ -389,44 +407,53 @@ onBeforeUnmount(() => {
               <span />
             </span>
             <div class="tarot-position">
-              <span class="tarot-position-label">{{ reading.agentName }} 的回应牌</span>
+              <span class="tarot-position-label">
+                {{ reading.agentName }} {{ __t('ui.tarot', '的回应牌') }}
+              </span>
               <TarotCard
                 :draw="reading.companionCard"
-                label="角色的回应牌"
+                :label="__t('ui.tarot', '角色的回应牌')"
                 @select="openCard(reading.companionCard)"
               />
               <p>{{ tarotMeaning(reading.companionCard) }}</p>
             </div>
           </div>
-          <p class="tarot-tap-hint">点一下牌面，看看它还想说什么</p>
+          <p class="tarot-tap-hint">{{ __t('ui.tarot', '点一下牌面，看看它还想说什么') }}</p>
           <article class="tarot-response" aria-live="polite" :aria-busy="interpreting">
             <div class="tarot-response-heading">
               <PixelIcon name="chat" size="sm" />
-              <strong>{{ reading.agentName }} 想对你说</strong>
-              <span v-if="reading.interpretation" class="tarot-saved-dot">已留下</span>
+              <strong>{{ reading.agentName }} {{ __t('ui.tarot', '想对你说') }}</strong>
+              <span v-if="reading.interpretation" class="tarot-saved-dot">
+                {{ __t('ui.tarot', '已留下') }}
+              </span>
             </div>
             <p v-if="reading.interpretation" class="tarot-response-text">
               {{ reading.interpretation }}
             </p>
             <div v-else-if="interpreting" class="tarot-response-pending">
               <PixelIcon name="refresh" size="sm" animation="spin" />
-              正在想两张牌之间的小故事…
+              {{ __t('ui.tarot', '正在想两张牌之间的小故事…') }}
             </div>
             <template v-else>
               <p class="tarot-response-placeholder">
-                牌已经翻开了，让 {{ reading.agentName }} 说说自己的想法吧。
+                {{ __t('ui.tarot', '牌已经翻开了，让') }} {{ reading.agentName }}
+                {{ __t('ui.tarot', '说说自己的想法吧。') }}
               </p>
               <PButton variant="secondary" size="sm" @click="interpret(reading)">
-                {{ unavailable ? '再听一次角色的回应' : '听听角色的回应' }}
+                {{
+                  unavailable
+                    ? __t('ui.tarot', '再听一次角色的回应')
+                    : __t('ui.tarot', '听听角色的回应')
+                }}
               </PButton>
               <small v-if="unavailable" class="tarot-retry-hint">
-                角色暂时没能回应，可能还没有可用模型。两张牌已经保存，稍后重试就好。
+                {{ __t('ui.tarot', '回应失败，抽牌已保存，可稍后重试。') }}
               </small>
             </template>
             <div class="tarot-invitation">
               <PixelIcon name="heart" size="sm" />
               <span>
-                <small>回应牌带来的小邀请</small>
+                <small>{{ __t('ui.tarot', '回应牌带来的小邀请') }}</small>
                 {{ companionInvitation }}
               </span>
             </div>
@@ -434,9 +461,9 @@ onBeforeUnmount(() => {
           <div class="tarot-actions">
             <PButton :loading="chatOpening" @click="continueChat">
               <PixelIcon name="chat" size="sm" />
-              带着这次抽牌，继续聊聊
+              {{ __t('ui.tarot', '带着这次抽牌，继续聊聊') }}
             </PButton>
-            <small>把两张牌和这段话一起带进对话</small>
+            <small>{{ __t('ui.tarot', '把两张牌和这段话一起带进对话') }}</small>
           </div>
         </template>
       </template>
@@ -444,16 +471,21 @@ onBeforeUnmount(() => {
       <details class="tarot-history" :open="historyOpen" @toggle="toggleHistory">
         <summary>
           <PixelIcon name="clock" size="sm" />
-          和 {{ companion?.name || '角色' }} 的抽牌回忆
-          <span>最近 30 次</span>
+          {{ __t('ui.tarot', '和') }} {{ companion?.name || __t('ui.tarot', '角色') }}
+          {{ __t('ui.tarot', '的抽牌回忆') }}
+          <span>{{ __t('ui.tarot', '最近 30 次') }}</span>
         </summary>
-        <div v-if="historyLoading" class="tarot-history-feedback">正在翻找回忆…</div>
+        <div v-if="historyLoading" class="tarot-history-feedback">
+          {{ __t('ui.tarot', '正在翻找回忆…') }}
+        </div>
         <div v-else-if="historyError" class="tarot-history-feedback">
           {{ historyError }}
-          <PButton variant="ghost" size="sm" @click="loadHistory">重试</PButton>
+          <PButton variant="ghost" size="sm" @click="loadHistory">
+            {{ __t('ui.tarot', '重试') }}
+          </PButton>
         </div>
         <div v-else-if="!history.length" class="tarot-history-feedback">
-          第一份回忆，会从今天开始。
+          {{ __t('ui.tarot', '第一份回忆，会从今天开始。') }}
         </div>
         <div v-else class="tarot-history-list">
           <button
@@ -471,27 +503,31 @@ onBeforeUnmount(() => {
               {{ getTarotCard(item.companionCard.cardId).name
               }}{{ item.companionCard.reversed ? ' ↓' : ' ↑' }}
             </span>
-            <small>{{ item.question || '没有问题，也想一起待一会儿' }}</small>
+            <small>{{ item.question || __t('ui.tarot', '没有问题，也想一起待一会儿') }}</small>
             <PixelIcon name="chevron-right" size="xs" />
           </button>
         </div>
       </details>
       <footer class="tarot-page-footer">
         <PixelIcon name="sparkle" size="xs" />
-        牌是聊天的起点，今天怎么过，还是由你决定。
+        {{ __t('ui.tarot', '牌是聊天的起点，今天怎么过，还是由你决定。') }}
       </footer>
     </div>
 
     <PDialog
       :model-value="modal === 'deck'"
-      title="完整牌组 · 78 张"
+      :title="__t('ui.tarot', '完整牌组 · 78 张')"
       width="min(900px, calc(100vw - 32px))"
       @update:model-value="closeModal"
     >
       <div class="tarot-deck-controls">
-        <input v-model="deckQuery" aria-label="搜索塔罗牌" placeholder="搜索牌名或关键词…" />
-        <select v-model="deckSuit" aria-label="选择牌组">
-          <option value="all">全部 78 张</option>
+        <input
+          v-model="deckQuery"
+          :aria-label="__t('ui.tarot', '搜索塔罗牌')"
+          :placeholder="__t('ui.tarot', '搜索牌名或关键词…')"
+        />
+        <select v-model="deckSuit" :aria-label="__t('ui.tarot', '选择牌组')">
+          <option value="all">{{ __t('ui.tarot', '全部 78 张') }}</option>
           <option v-for="(label, suit) in TAROT_SUIT_LABELS" :key="suit" :value="suit">
             {{ label }}
           </option>
@@ -505,15 +541,17 @@ onBeforeUnmount(() => {
           compact
           @select="openCard({ cardId: card.id, reversed: false })"
         />
-        <p v-if="!visibleDeck.length">没有找到这张牌，换个关键词试试。</p>
+        <p v-if="!visibleDeck.length">{{ __t('ui.tarot', '没有找到这张牌，换个关键词试试。') }}</p>
       </div>
       <template #footer>
-        <PButton variant="secondary" @click="modal = null">收好牌组</PButton>
+        <PButton variant="secondary" @click="modal = null">
+          {{ __t('ui.tarot', '收好牌组') }}
+        </PButton>
       </template>
     </PDialog>
     <PDialog
       :model-value="modal === 'card'"
-      :title="detail?.card.name || '牌意'"
+      :title="detail?.card.name || __t('ui.tarot', '牌意')"
       width="min(540px, calc(100vw - 32px))"
       @update:model-value="closeModal"
     >
@@ -527,17 +565,21 @@ onBeforeUnmount(() => {
         </div>
         <div>
           <span class="tarot-detail-keywords">{{ detail.card.keywords }}</span>
-          <h3>正位</h3>
+          <h3>{{ __t('ui.tarot', '正位') }}</h3>
           <p :class="{ 'tarot-detail-current': !detail.reversed }">{{ detail.card.upright }}</p>
-          <h3>逆位</h3>
+          <h3>{{ __t('ui.tarot', '逆位') }}</h3>
           <p :class="{ 'tarot-detail-current': detail.reversed }">{{ detail.card.reversed }}</p>
-          <h3>一个小邀请</h3>
+          <h3>{{ __t('ui.tarot', '一个小邀请') }}</h3>
           <p>{{ detail.card.invitation }}。</p>
         </div>
       </div>
       <template #footer>
-        <PButton variant="ghost" @click="modal = 'deck'">浏览全部牌</PButton>
-        <PButton variant="secondary" @click="modal = null">收好这张牌</PButton>
+        <PButton variant="ghost" @click="modal = 'deck'">
+          {{ __t('ui.tarot', '浏览全部牌') }}
+        </PButton>
+        <PButton variant="secondary" @click="modal = null">
+          {{ __t('ui.tarot', '收好这张牌') }}
+        </PButton>
       </template>
     </PDialog>
   </section>

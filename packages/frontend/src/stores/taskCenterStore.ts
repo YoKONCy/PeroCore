@@ -1,3 +1,4 @@
+import { t as __t } from '../i18n/index'
 /**
  * taskCenterStore — 统一任务中心状态管理（M05 篇2-4）
  *
@@ -36,7 +37,7 @@ async function sendSystemNotification(title: string, body: string): Promise<void
     if (isElectron() || typeof Notification !== 'undefined')
       await invoke('show-notification', { title, body })
   } catch (error) {
-    logger.warn('taskCenterStore', '系统通知失败', error)
+    logger.warn('taskCenterStore', __t('logs.frontend.taskCenterStore', '系统通知失败'), error)
   }
 }
 
@@ -129,7 +130,11 @@ export const useTaskCenterStore = defineStore('taskCenter', () => {
       for (const item of counts.data ?? []) map[item.agentId] = item.count
       activeCountByAgent.value = map
     } catch (err) {
-      logger.warn('taskCenterStore', '刷新进行中任务失败', err)
+      logger.warn(
+        'taskCenterStore',
+        __t('logs.frontend.taskCenterStore', '刷新进行中任务失败'),
+        err,
+      )
     } finally {
       isLoadingActive.value = false
     }
@@ -157,7 +162,7 @@ export const useTaskCenterStore = defineStore('taskCenter', () => {
       historyTasks.value = items
       historyTotal.value = res.data?.total ?? 0
     } catch (err) {
-      logger.warn('taskCenterStore', '刷新历史任务失败', err)
+      logger.warn('taskCenterStore', __t('logs.frontend.taskCenterStore', '刷新历史任务失败'), err)
     } finally {
       isLoadingHistory.value = false
     }
@@ -178,7 +183,9 @@ export const useTaskCenterStore = defineStore('taskCenter', () => {
           type: 'task_started',
           agentId: task.agentId,
           avatarUrl: avatarUrlOf(task.agentId),
-          title: '任务已派发',
+          get title() {
+            return __t('ui.taskCenterStore', '任务已派发')
+          },
           message: `${task.title}`,
           taskId: task.id,
         })
@@ -188,8 +195,10 @@ export const useTaskCenterStore = defineStore('taskCenter', () => {
     } catch (err) {
       taskToast.push({
         type: 'task_failed',
-        title: '任务派发失败',
-        message: err instanceof Error ? err.message : '派发失败',
+        get title() {
+          return __t('ui.taskCenterStore', '任务派发失败')
+        },
+        message: err instanceof Error ? err.message : __t('ui.taskCenterStore', '派发失败'),
       })
       return null
     }
@@ -369,7 +378,10 @@ export const useTaskCenterStore = defineStore('taskCenter', () => {
             : undefined
       if (!action || !taskId || !action.startsWith('background_task_')) return
       void handleGatewayEvent(action, taskId, payload.replayed === true).catch((error) => {
-        logger.warn('TaskCenter', `刷新任务Projection失败: ${error}`)
+        logger.warn(
+          'TaskCenter',
+          __t('logs.frontend.taskCenterStore', '刷新任务Projection失败: {0}', [error]),
+        )
       })
     }
 

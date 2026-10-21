@@ -1,3 +1,4 @@
+import { t as __t } from '../utils/i18n'
 /**
  * 桌面感知服务
  *
@@ -66,13 +67,13 @@ export async function captureScreen(
     })
 
     if (sources.length === 0) {
-      logger.warn('DesktopAwareness', '未找到可截取的屏幕')
+      logger.warn('DesktopAwareness', __t('electron.logs.desktopAwareness', '未找到可截取的屏幕'))
       return null
     }
 
     const primary = sources.find((source) => String(source.display_id) === String(display.id))
     if (!primary) {
-      logger.warn('DesktopAwareness', '未找到主显示器截图源')
+      logger.warn('DesktopAwareness', __t('electron.logs.desktopAwareness', '未找到主显示器截图源'))
       return null
     }
     let thumbnail = primary.thumbnail
@@ -120,7 +121,7 @@ export async function captureScreen(
       timestamp: Date.now(),
     }
   } catch (err) {
-    logger.error('DesktopAwareness', `截屏失败: ${err}`)
+    logger.error('DesktopAwareness', __t('electron.logs.desktopAwareness', '截屏失败: {0}', [err]))
     return null
   }
 }

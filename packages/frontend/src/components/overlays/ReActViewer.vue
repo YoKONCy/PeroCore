@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /**
  * ReActViewer — ReAct 思维链查看器
  *
@@ -57,7 +59,7 @@ async function togglePause() {
     }
     isTaskPaused.value = !isTaskPaused.value
   } catch (err) {
-    logger.error('ReActViewer', '任务控制失败', err)
+    logger.error('ReActViewer', __t('logs.frontend.overlays', '任务控制失败'), err)
   }
 }
 
@@ -69,7 +71,7 @@ async function sendInjection() {
     await chatApi.injectInstruction(sessionId, injection.value)
     injection.value = ''
   } catch (err) {
-    logger.error('ReActViewer', '指令注入失败', err)
+    logger.error('ReActViewer', __t('logs.frontend.overlays', '指令注入失败'), err)
   } finally {
     isSending.value = false
   }
@@ -117,19 +119,19 @@ function labelColor(type: string): string {
     <div v-if="isLive" class="react-viewer-toolbar">
       <RunPulse
         :state="isTaskPaused ? 'paused' : 'thinking'"
-        :label="isTaskPaused ? '任务已暂停' : '正在思考中'"
+        :label="isTaskPaused ? __t('ui.overlays', '任务已暂停') : __t('ui.overlays', '正在思考中')"
         :live="!isTaskPaused"
         compact
       />
       <PButton :variant="isTaskPaused ? 'primary' : 'ghost'" size="sm" @click="togglePause">
-        {{ isTaskPaused ? '继续运行' : '暂停思考' }}
+        {{ isTaskPaused ? __t('ui.overlays', '继续运行') : __t('ui.overlays', '暂停思考') }}
       </PButton>
     </div>
 
     <!-- 内容区 -->
     <div ref="scrollRef" class="flex-1 overflow-y-auto p-4 flex flex-col gap-3 rv-scrollbar">
       <div v-if="segments.length === 0" class="text-center text-slate-400 font-bold mt-[60px]">
-        {{ isLive ? '等待思考数据...' : '无思考过程记录' }}
+        {{ isLive ? __t('ui.overlays', '等待思考数据...') : __t('ui.overlays', '无思考过程记录') }}
       </div>
 
       <div
@@ -150,11 +152,11 @@ function labelColor(type: string): string {
           <span>
             {{
               {
-                thinking: '思考链',
-                action: '动作',
-                error: '错误',
-                reflection: '自我反思',
-                text: '文本',
+                thinking: __t('ui.overlays', '思考链'),
+                action: __t('ui.overlays', '动作'),
+                error: __t('ui.overlays', '错误'),
+                reflection: __t('ui.overlays', '自我反思'),
+                text: __t('ui.overlays', '文本'),
               }[seg.type]
             }}
           </span>
@@ -175,7 +177,7 @@ function labelColor(type: string): string {
       <input
         v-model="injection"
         class="flex-1 px-3 py-2 border-2 border-slate-200 bg-white text-slate-800 text-[13px] outline-none transition-colors focus:border-sky-300"
-        placeholder="发送指令干预思考..."
+        :placeholder="__t('ui.overlays', '发送指令干预思考...')"
         :disabled="isSending"
         @keyup.enter="sendInjection"
       />
@@ -185,7 +187,7 @@ function labelColor(type: string): string {
         :disabled="!injection.trim() || isSending"
         @click="sendInjection"
       >
-        {{ isSending ? '发送中...' : '发送' }}
+        {{ isSending ? __t('ui.overlays', '发送中...') : __t('ui.overlays', '发送') }}
       </PButton>
     </div>
   </div>

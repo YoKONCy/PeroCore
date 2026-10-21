@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * Realtime Session Manager — 语音全链路编排器
  *
@@ -98,7 +99,7 @@ export class RealtimeSessionManager {
 
   constructor(deps: RealtimeSessionDeps) {
     this.deps = deps
-    logger.info('实时语音会话管理器初始化完成')
+    logger.info(__t('logs.voice', '实时语音会话管理器初始化完成'))
   }
 
   /**
@@ -168,11 +169,11 @@ export class RealtimeSessionManager {
       }
       const asrMs = Date.now() - asrStartMs
 
-      logger.info(`ASR 完成: "${asrResult.text}" (${asrMs}ms)`)
+      logger.info(__t('logs.voice', 'ASR 完成: "{0}" ({1}ms)', [asrResult.text, asrMs]))
 
       // 广播识别结果
       await this.deps.gatewayHub.pushNotification({
-        title: '语音识别',
+        title: __t('server.voice', '语音识别'),
         body: asrResult.text,
       })
 
@@ -189,7 +190,7 @@ export class RealtimeSessionManager {
       )
       const agentMs = Date.now() - agentStartMs
 
-      logger.info(`Agent 回复: "${reply.slice(0, 50)}..." (${agentMs}ms)`)
+      logger.info(__t('logs.voice', 'Agent 回复: "{0}..." ({1}ms)', [reply.slice(0, 50), agentMs]))
 
       // ── 阶段 3: 文本清洗 (ReAct 过滤) ──
       const ttsText = cleanTextForTts(spokenReply)
@@ -211,7 +212,7 @@ export class RealtimeSessionManager {
           endTtsIo()
         }
         ttsMs = Date.now() - ttsStartMs
-        logger.info(`TTS 完成: ${ttsMs}ms`)
+        logger.info(__t('logs.voice', 'TTS 完成: {0}ms', [ttsMs]))
       }
 
       // ── 完成 ──
@@ -229,7 +230,7 @@ export class RealtimeSessionManager {
     } catch (err) {
       session.state = 'error'
       await this.broadcastState(sessionId, 'error')
-      logger.error(`语音管道错误: ${err}`)
+      logger.error(__t('logs.voice', '语音管道错误: {0}', [err]))
       throw err
     } finally {
       this.activeSessions.delete(sessionId)
@@ -256,7 +257,7 @@ export class RealtimeSessionManager {
 
     session.state = 'idle'
     void this.deps.kernelScheduler.cancel(session.executionId)
-    logger.info(`语音会话取消请求已提交: ${sessionId}`)
+    logger.info(__t('logs.voice', '语音会话取消请求已提交: {0}', [sessionId]))
     return true
   }
 
@@ -292,7 +293,7 @@ export class RealtimeSessionManager {
         id: threadId, // 语音场景复用 sessionId 作为 threadId
         agentId,
         channel: 'desktop',
-        title: '语音对话',
+        title: __t('server.voice', '语音对话'),
       })
     }
 

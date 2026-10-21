@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../../i18n/index'
+
 defineOptions({ name: 'SocialTab' })
 /**
  * SocialTab — Dashboard 社交适配器管理面板
@@ -59,10 +61,23 @@ const modeConfig = ref<SocialModeConfig>({
   groupBlacklist: [],
   userBlacklist: [],
   ownerPrivateOnlyAgentIds: [],
+  loopGuard: {
+    knownBotIds: [],
+    trustedHumanIds: [],
+    botMarks: [],
+    maxBotTurns: 4,
+    maxTurnsPerWindow: 20,
+    windowSeconds: 60,
+    maxModelRequests: 24,
+    maxSends: 16,
+    cooldownSeconds: 600,
+  },
 })
 const groupWhitelistText = ref('')
 const groupBlacklistText = ref('')
 const userBlacklistText = ref('')
+const knownBotText = ref('')
+const trustedHumanText = ref('')
 const selectedContact = computed(
   () => contacts.value.find((item) => item.userId === selectedContactId.value) ?? null,
 )
@@ -89,7 +104,9 @@ const adapters: AdapterCard[] = [
     name: 'NapCat',
     platform: 'qq',
     icon: 'chat',
-    description: 'QQ 机器人 (OneBot v11)',
+    get description() {
+      return __t('ui.settings', 'QQ 机器人 (OneBot v11)')
+    },
     available: true,
   },
   {
@@ -117,12 +134,48 @@ const activeSection = ref<'overview' | 'mode' | 'contacts' | 'data' | 'cards' | 
   'overview',
 )
 const sections = [
-  { id: 'overview', label: '概览与账号', icon: 'desktop' },
-  { id: 'mode', label: '社交模式', icon: 'chat' },
-  { id: 'cards', label: '状态卡片', icon: 'desktop' },
-  { id: 'stickers', label: '收藏表情', icon: 'image' },
-  { id: 'contacts', label: '联系人', icon: 'users' },
-  { id: 'data', label: '数据管理', icon: 'alert' },
+  {
+    id: 'overview',
+    get label() {
+      return __t('ui.settings', '概览与账号')
+    },
+    icon: 'desktop',
+  },
+  {
+    id: 'mode',
+    get label() {
+      return __t('ui.settings', '社交模式')
+    },
+    icon: 'chat',
+  },
+  {
+    id: 'cards',
+    get label() {
+      return __t('ui.settings', '状态卡片')
+    },
+    icon: 'desktop',
+  },
+  {
+    id: 'stickers',
+    get label() {
+      return __t('ui.settings', '收藏表情')
+    },
+    icon: 'image',
+  },
+  {
+    id: 'contacts',
+    get label() {
+      return __t('ui.settings', '联系人')
+    },
+    icon: 'users',
+  },
+  {
+    id: 'data',
+    get label() {
+      return __t('ui.settings', '数据管理')
+    },
+    icon: 'alert',
+  },
 ] as const
 const napcatInstalled = ref(false)
 const napcatRunning = ref(false)
@@ -212,10 +265,18 @@ async function installNapCat(update = false): Promise<void> {
       )
     napcatInstalled.value = true
     applyNapCatStatus(await invoke('napcat-status'))
-    notification.toast(update ? 'NapCat 已更新，可以启动了' : 'NapCat 已安装', { type: 'success' })
+    notification.toast(
+      update
+        ? __t('ui.settings', 'NapCat 已更新，可以启动了')
+        : __t('ui.settings', 'NapCat 已安装'),
+      { type: 'success' },
+    )
   } catch (e) {
-    logger.error('SocialTab', 'NapCat 安装或更新失败', e)
-    notification.toast(e instanceof Error ? e.message : 'NapCat 安装或更新失败', { type: 'error' })
+    logger.error('SocialTab', __t('logs.frontend.settings', 'NapCat 安装或更新失败'), e)
+    notification.toast(
+      e instanceof Error ? e.message : __t('ui.settings', 'NapCat 安装或更新失败'),
+      { type: 'error' },
+    )
   } finally {
     napcatInstalling.value = false
   }
@@ -230,10 +291,12 @@ async function startNapCat(): Promise<void> {
     await invoke('start-napcat')
     applyNapCatStatus(await invoke('napcat-status'))
   } catch (e) {
-    logger.error('SocialTab', 'NapCat 启动失败', e)
-    notification.toast(e instanceof Error ? e.message : 'NapCat 启动失败', {
+    logger.error('SocialTab', __t('logs.frontend.settings', 'NapCat 启动失败'), e)
+    notification.toast(e instanceof Error ? e.message : __t('ui.settings', 'NapCat 启动失败'), {
       type: 'error',
-      title: '启动失败',
+      get title() {
+        return __t('ui.settings', '启动失败')
+      },
     })
   } finally {
     napcatBusy.value = false
@@ -247,9 +310,11 @@ async function openNapCatDashboard(): Promise<void> {
     await invoke('open-napcat-dashboard')
     applyNapCatStatus(await invoke('napcat-status'))
   } catch (e) {
-    notification.toast(e instanceof Error ? e.message : '管理页打开失败', {
+    notification.toast(e instanceof Error ? e.message : __t('ui.settings', '管理页打开失败'), {
       type: 'error',
-      title: '打开失败',
+      get title() {
+        return __t('ui.settings', '打开失败')
+      },
     })
   } finally {
     napcatBusy.value = false
@@ -265,7 +330,7 @@ async function stopNapCat(): Promise<void> {
     napcatRunning.value = false
     napcatWebUi.value = 'stopped'
   } catch (e) {
-    logger.error('SocialTab', 'NapCat 停止失败', e)
+    logger.error('SocialTab', __t('logs.frontend.settings', 'NapCat 停止失败'), e)
   } finally {
     napcatBusy.value = false
   }
@@ -289,7 +354,7 @@ async function loadSocialConfig(): Promise<void> {
     ownerQqInput.value = cfg.ownerQq ?? ''
     socialAgentId.value = agentConfig.data?.agentId ?? cfg.agentId ?? 'pero'
   } catch (e) {
-    logger.error('SocialTab', '加载社交配置失败', e)
+    logger.error('SocialTab', __t('logs.frontend.settings', '加载社交配置失败'), e)
   } finally {
     configLoading.value = false
   }
@@ -303,10 +368,20 @@ async function saveSocialAgent(): Promise<void> {
     const response = await socialApi.saveAgentConfig(socialAgentId.value)
     socialAgentId.value = response.data?.agentId ?? socialAgentId.value
     await loadContacts()
-    notification.toast('社交角色已切换并立即生效', { type: 'success', title: '保存成功' })
+    notification.toast(__t('ui.settings', '社交角色已切换并立即生效'), {
+      type: 'success',
+      get title() {
+        return __t('ui.settings', '保存成功')
+      },
+    })
   } catch (error) {
-    logger.error('SocialTab', '切换社交角色失败', error)
-    notification.toast('社交角色切换失败', { type: 'error', title: '保存失败' })
+    logger.error('SocialTab', __t('logs.frontend.settings', '切换社交角色失败'), error)
+    notification.toast(__t('ui.settings', '社交角色切换失败'), {
+      type: 'error',
+      get title() {
+        return __t('ui.settings', '保存失败')
+      },
+    })
   } finally {
     agentSaving.value = false
   }
@@ -316,7 +391,12 @@ async function saveSocialAgent(): Promise<void> {
 async function saveOwnerQq(): Promise<void> {
   const ownerQq = ownerQqInput.value.trim()
   if (ownerQq && !/^[1-9]\d{4,19}$/.test(ownerQq)) {
-    notification.toast('请输入有效的 QQ 号', { type: 'error', title: '保存失败' })
+    notification.toast(__t('ui.settings', '请输入有效的 QQ 号'), {
+      type: 'error',
+      get title() {
+        return __t('ui.settings', '保存失败')
+      },
+    })
     return
   }
   configSaving.value = true
@@ -327,14 +407,24 @@ async function saveOwnerQq(): Promise<void> {
     existing.ownerQq = ownerQq || undefined
     await socialApi.saveConfig(existing)
     configSaved.value = true
-    notification.toast('主人 QQ 已更新', { type: 'success', title: '保存成功' })
+    notification.toast(__t('ui.settings', '主人 QQ 已更新'), {
+      type: 'success',
+      get title() {
+        return __t('ui.settings', '保存成功')
+      },
+    })
     // 2 秒后清除成功提示
     setTimeout(() => {
       configSaved.value = false
     }, 2000)
   } catch (e) {
-    logger.error('SocialTab', '保存主人QQ配置失败', e)
-    notification.toast('主人 QQ 配置保存失败', { type: 'error', title: '保存失败' })
+    logger.error('SocialTab', __t('logs.frontend.settings', '保存主人QQ配置失败'), e)
+    notification.toast(__t('ui.settings', '主人 QQ 配置保存失败'), {
+      type: 'error',
+      get title() {
+        return __t('ui.settings', '保存失败')
+      },
+    })
   } finally {
     configSaving.value = false
   }
@@ -343,12 +433,19 @@ async function saveOwnerQq(): Promise<void> {
 async function loadModeConfig(): Promise<void> {
   try {
     const response = await socialApi.getModeConfig()
-    if (response.data) modeConfig.value = response.data
+    if (response.data)
+      modeConfig.value = {
+        ...modeConfig.value,
+        ...response.data,
+        loopGuard: { ...modeConfig.value.loopGuard, ...response.data.loopGuard },
+      }
     groupWhitelistText.value = modeConfig.value.groupWhitelist.join('\n')
     groupBlacklistText.value = modeConfig.value.groupBlacklist.join('\n')
     userBlacklistText.value = modeConfig.value.userBlacklist.join('\n')
+    knownBotText.value = modeConfig.value.loopGuard.knownBotIds.join('\n')
+    trustedHumanText.value = modeConfig.value.loopGuard.trustedHumanIds.join('\n')
   } catch (error) {
-    logger.error('SocialTab', '加载社交模式配置失败', error)
+    logger.error('SocialTab', __t('logs.frontend.settings', '加载社交模式配置失败'), error)
   }
 }
 
@@ -369,12 +466,31 @@ async function saveModeConfig(): Promise<void> {
     modeConfig.value.groupWhitelist = parseIdList(groupWhitelistText.value)
     modeConfig.value.groupBlacklist = parseIdList(groupBlacklistText.value)
     modeConfig.value.userBlacklist = parseIdList(userBlacklistText.value)
+    modeConfig.value.loopGuard.knownBotIds = parseIdList(knownBotText.value)
+    modeConfig.value.loopGuard.trustedHumanIds = parseIdList(trustedHumanText.value)
     const response = await socialApi.saveModeConfig(modeConfig.value)
-    if (response.data) modeConfig.value = response.data
-    notification.toast('社交模式配置已保存并生效', { type: 'success', title: '保存成功' })
+    if (response.data)
+      modeConfig.value = {
+        ...modeConfig.value,
+        ...response.data,
+        loopGuard: { ...modeConfig.value.loopGuard, ...response.data.loopGuard },
+      }
+    knownBotText.value = modeConfig.value.loopGuard.knownBotIds.join('\n')
+    trustedHumanText.value = modeConfig.value.loopGuard.trustedHumanIds.join('\n')
+    notification.toast(__t('ui.settings', '社交模式配置已保存并生效'), {
+      type: 'success',
+      get title() {
+        return __t('ui.settings', '保存成功')
+      },
+    })
   } catch (error) {
-    logger.error('SocialTab', '保存社交模式配置失败', error)
-    notification.toast('社交模式配置保存失败', { type: 'error', title: '保存失败' })
+    logger.error('SocialTab', __t('logs.frontend.settings', '保存社交模式配置失败'), error)
+    notification.toast(__t('ui.settings', '社交模式配置保存失败'), {
+      type: 'error',
+      get title() {
+        return __t('ui.settings', '保存失败')
+      },
+    })
   } finally {
     modeSaving.value = false
   }
@@ -404,7 +520,7 @@ async function loadContacts(): Promise<void> {
       selectedContactId.value = contacts.value[0]?.userId ?? ''
     }
   } catch (error) {
-    logger.error('SocialTab', '加载联系人印象失败', error)
+    logger.error('SocialTab', __t('logs.frontend.settings', '加载联系人印象失败'), error)
   }
 }
 
@@ -427,7 +543,7 @@ async function clearSocialData(): Promise<void> {
     confirmDialogVisible.value = false
     await loadContacts()
   } catch (error) {
-    logger.error('SocialTab', '清理社交数据失败', error)
+    logger.error('SocialTab', __t('logs.frontend.settings', '清理社交数据失败'), error)
     notification.toast((error as Error).message, 'error')
   } finally {
     dataBusy.value = false
@@ -469,12 +585,12 @@ onUnmounted(() => {
     <div class="sp-header">
       <div class="sp-header-title">
         <PixelIcon name="chat" size="sm" class="sp-title-icon" />
-        <span class="sp-title-text">社交适配器</span>
+        <span class="sp-title-text">{{ __t('ui.settings', '社交适配器') }}</span>
         <span class="sp-badge">SOCIAL</span>
       </div>
     </div>
 
-    <nav class="sp-sections" aria-label="社交应用功能">
+    <nav class="sp-sections" :aria-label="__t('ui.settings', '社交应用功能')">
       <button
         v-for="section in sections"
         :key="section.id"
@@ -488,7 +604,11 @@ onUnmounted(() => {
 
     <StatusCardDesigner v-if="activeSection === 'cards'" :key="socialAgentId" />
     <AccountStickers v-if="activeSection === 'stickers'" />
-    <SocialTurnPanel v-if="activeSection === 'mode'" :agent-id="socialAgentId" />
+    <SocialTurnPanel
+      v-if="activeSection === 'mode'"
+      class="sp-turn-panel"
+      :agent-id="socialAgentId"
+    />
     <template v-if="activeSection === 'overview'">
       <div class="sp-adapter-cards">
         <button
@@ -513,14 +633,14 @@ onUnmounted(() => {
               :class="['sp-status-dot', adapterConnected ? 'sp-dot-on' : 'sp-dot-off']"
             />
           </div>
-          <span v-else class="sp-card-tag">待实现</span>
+          <span v-else class="sp-card-tag">{{ __t('ui.settings', '待实现') }}</span>
         </button>
       </div>
       <!-- Social 单实例角色与主人身份配置 -->
       <div class="sp-owner-config">
         <div class="sp-block-header">
           <PixelIcon name="user" size="xs" />
-          <span>社交身份</span>
+          <span>{{ __t('ui.settings', '社交身份') }}</span>
         </div>
         <div class="sp-owner-body">
           <div class="sp-owner-row">
@@ -540,18 +660,16 @@ onUnmounted(() => {
               @click="saveSocialAgent"
             >
               <PixelIcon name="save" size="xs" />
-              {{ agentSaving ? '切换中...' : '切换角色' }}
+              {{ agentSaving ? __t('ui.settings', '切换中...') : __t('ui.settings', '切换角色') }}
             </PButton>
           </div>
-          <div class="sp-hint">
-            单实例 Social 的消息、人格、记忆、工具和回复全部归属该角色，切换后立即生效。
-          </div>
+          <div class="sp-hint">{{ __t('ui.settings', '选择负责社交回复的角色。') }}</div>
           <div class="sp-owner-row">
             <input
               v-model="ownerQqInput"
               class="sp-owner-input"
               type="text"
-              placeholder="输入主人的 QQ 号（用于权限识别）"
+              :placeholder="__t('ui.settings', '输入主人的 QQ 号（用于权限识别）')"
               :disabled="configLoading || configSaving"
             />
             <PButton
@@ -561,12 +679,17 @@ onUnmounted(() => {
               @click="saveOwnerQq"
             >
               <PixelIcon name="save" size="xs" />
-              {{ configSaving ? '保存中...' : configSaved ? '已保存' : '保存' }}
+              {{
+                configSaving
+                  ? __t('ui.settings', '保存中...')
+                  : configSaved
+                    ? __t('ui.settings', '已保存')
+                    : __t('ui.settings', '保存')
+              }}
             </PButton>
           </div>
           <div class="sp-hint">
-            配置后，Agent 能识别消息是否来自主人，并在 system prompt
-            中注入权限规则。只有主人能执行敏感操作（删好友、改设置等）。
+            {{ __t('ui.settings', '用于识别主人；删除好友、修改设置等操作仅向主人开放。') }}
           </div>
         </div>
       </div>
@@ -578,43 +701,53 @@ onUnmounted(() => {
           <div class="sp-config-block">
             <div class="sp-block-header">
               <PixelIcon name="download" size="xs" />
-              <span>进程管理</span>
+              <span>{{ __t('ui.settings', '进程管理') }}</span>
             </div>
             <div class="sp-block-body">
               <div class="sp-status-line">
-                <span class="sp-label">安装状态</span>
+                <span class="sp-label">{{ __t('ui.settings', '安装状态') }}</span>
                 <span :class="['sp-value', napcatInstalled ? 'sp-ok' : 'sp-na']">
-                  {{ napcatChecking ? '检查中...' : napcatInstalled ? '已安装' : '未安装' }}
-                </span>
-              </div>
-              <div class="sp-status-line">
-                <span class="sp-label">进程状态</span>
-                <span :class="['sp-value', napcatRunning ? 'sp-ok' : 'sp-na']">
-                  {{ napcatRunning ? '运行中' : '已停止' }}
-                </span>
-              </div>
-              <div v-if="napcatInstalled" class="sp-status-line">
-                <span class="sp-label">版本</span>
-                <span class="sp-value">{{ napcatVersion ? `v${napcatVersion}` : '未知' }}</span>
-              </div>
-              <div class="sp-status-line">
-                <span class="sp-label">管理页面</span>
-                <span :class="['sp-value', napcatWebUi === 'ready' ? 'sp-ok' : 'sp-na']">
                   {{
-                    napcatWebUi === 'ready'
-                      ? '已就绪'
-                      : napcatWebUi === 'starting'
-                        ? '准备中'
-                        : napcatWebUi === 'error'
-                          ? '暂不可用'
-                          : '未启动'
+                    napcatChecking
+                      ? __t('ui.settings', '检查中...')
+                      : napcatInstalled
+                        ? __t('ui.settings', '已安装')
+                        : __t('ui.settings', '未安装')
                   }}
                 </span>
               </div>
               <div class="sp-status-line">
-                <span class="sp-label">Bot 连接</span>
+                <span class="sp-label">{{ __t('ui.settings', '进程状态') }}</span>
+                <span :class="['sp-value', napcatRunning ? 'sp-ok' : 'sp-na']">
+                  {{ napcatRunning ? __t('ui.settings', '运行中') : __t('ui.settings', '已停止') }}
+                </span>
+              </div>
+              <div v-if="napcatInstalled" class="sp-status-line">
+                <span class="sp-label">{{ __t('ui.settings', '版本') }}</span>
+                <span class="sp-value">
+                  {{ napcatVersion ? `v${napcatVersion}` : __t('ui.settings', '未知') }}
+                </span>
+              </div>
+              <div class="sp-status-line">
+                <span class="sp-label">{{ __t('ui.settings', '管理页面') }}</span>
+                <span :class="['sp-value', napcatWebUi === 'ready' ? 'sp-ok' : 'sp-na']">
+                  {{
+                    napcatWebUi === 'ready'
+                      ? __t('ui.settings', '已就绪')
+                      : napcatWebUi === 'starting'
+                        ? __t('ui.settings', '准备中')
+                        : napcatWebUi === 'error'
+                          ? __t('ui.settings', '暂不可用')
+                          : __t('ui.settings', '未启动')
+                  }}
+                </span>
+              </div>
+              <div class="sp-status-line">
+                <span class="sp-label">{{ __t('ui.settings', 'Bot 连接') }}</span>
                 <span :class="['sp-value', adapterConnected ? 'sp-ok' : 'sp-na']">
-                  {{ adapterConnected ? '已连接' : '未连接' }}
+                  {{
+                    adapterConnected ? __t('ui.settings', '已连接') : __t('ui.settings', '未连接')
+                  }}
                 </span>
               </div>
               <p v-if="connectionError" role="alert" class="sp-na">{{ connectionError }}</p>
@@ -627,7 +760,11 @@ onUnmounted(() => {
                   @click="installNapCat()"
                 >
                   <PixelIcon name="download" size="xs" />
-                  {{ napcatInstalling ? '安装中...' : '一键安装' }}
+                  {{
+                    napcatInstalling
+                      ? __t('ui.settings', '安装中...')
+                      : __t('ui.settings', '一键安装')
+                  }}
                 </PButton>
                 <template v-else>
                   <PButton
@@ -638,7 +775,7 @@ onUnmounted(() => {
                     @click="startNapCat"
                   >
                     <PixelIcon name="flash" size="xs" />
-                    启动
+                    {{ __t('ui.settings', '启动') }}
                   </PButton>
                   <PButton
                     v-else
@@ -648,7 +785,7 @@ onUnmounted(() => {
                     @click="stopNapCat"
                   >
                     <PixelIcon name="alert" size="xs" />
-                    停止
+                    {{ __t('ui.settings', '停止') }}
                   </PButton>
                   <PButton
                     v-if="napcatRunning"
@@ -658,7 +795,7 @@ onUnmounted(() => {
                     @click="openNapCatDashboard"
                   >
                     <PixelIcon name="desktop" size="xs" />
-                    打开管理页
+                    {{ __t('ui.settings', '打开管理页') }}
                   </PButton>
                 </template>
                 <PButton
@@ -666,11 +803,19 @@ onUnmounted(() => {
                   size="sm"
                   variant="secondary"
                   :disabled="napcatRunning || napcatBusy || napcatInstalling"
-                  :title="napcatRunning ? '停止 NapCat 后更新' : `更新到 v${napcatTargetVersion}`"
+                  :title="
+                    napcatRunning
+                      ? __t('ui.settings', '停止 NapCat 后更新')
+                      : __t('ui.settings', '更新到 v{0}', [napcatTargetVersion])
+                  "
                   @click="installNapCat(true)"
                 >
                   <PixelIcon name="download" size="xs" />
-                  {{ napcatInstalling ? '更新中…' : `更新至 v${napcatTargetVersion}` }}
+                  {{
+                    napcatInstalling
+                      ? __t('ui.settings', '更新中…')
+                      : __t('ui.settings', '更新至 v{0}', [napcatTargetVersion])
+                  }}
                 </PButton>
                 <PButton size="sm" variant="ghost" :disabled="napcatChecking" @click="checkNapCat">
                   <PixelIcon name="refresh" size="xs" />
@@ -683,19 +828,24 @@ onUnmounted(() => {
           <div class="sp-config-block">
             <div class="sp-block-header">
               <PixelIcon name="settings" size="xs" />
-              <span>连接配置</span>
+              <span>{{ __t('ui.settings', '连接配置') }}</span>
             </div>
             <div class="sp-block-body">
               <div class="sp-status-line">
-                <span class="sp-label">WS 端点</span>
+                <span class="sp-label">{{ __t('ui.settings', 'WS 端点') }}</span>
                 <span class="sp-value sp-mono">ws://127.0.0.1:9120/api/social/ws</span>
               </div>
               <div class="sp-status-line">
-                <span class="sp-label">协议</span>
-                <span class="sp-value">OneBot v11 (反向 WS)</span>
+                <span class="sp-label">{{ __t('ui.settings', '协议') }}</span>
+                <span class="sp-value">{{ __t('ui.settings', 'OneBot v11 (反向 WS)') }}</span>
               </div>
               <div class="sp-hint">
-                本机 NapCat 会自动配置连接；QQ 登录与验证在管理标签页中完成。
+                {{
+                  __t(
+                    'ui.settings',
+                    '本机 NapCat 会自动配置连接；QQ 登录与验证在管理标签页中完成。',
+                  )
+                }}
               </div>
             </div>
           </div>
@@ -708,21 +858,30 @@ onUnmounted(() => {
           <div class="sp-config-block sp-full">
             <div class="sp-block-header">
               <PixelIcon name="terminal" size="xs" />
-              <span>Docker 模式</span>
+              <span>{{ __t('ui.settings', 'Docker 模式') }}</span>
             </div>
             <div class="sp-block-body">
               <div class="sp-status-line">
-                <span class="sp-label">WS 端点</span>
+                <span class="sp-label">{{ __t('ui.settings', 'WS 端点') }}</span>
                 <span class="sp-value sp-mono">ws://&lt;host&gt;:9120/api/social/ws</span>
               </div>
               <div class="sp-status-line">
-                <span class="sp-label">连接状态</span>
+                <span class="sp-label">{{ __t('ui.settings', '连接状态') }}</span>
                 <span :class="['sp-value', adapterConnected ? 'sp-ok' : 'sp-na']">
-                  {{ adapterConnected ? '已连接' : '等待外部 NapCat 连接...' }}
+                  {{
+                    adapterConnected
+                      ? __t('ui.settings', '已连接')
+                      : __t('ui.settings', '等待外部 NapCat 连接...')
+                  }}
                 </span>
               </div>
               <div class="sp-hint">
-                Docker 模式下请在外部独立运行 NapCat，并配置反向 WS 连接到后端容器
+                {{
+                  __t(
+                    'ui.settings',
+                    'Docker 模式下请在外部独立运行 NapCat，并配置反向 WS 连接到后端容器',
+                  )
+                }}
               </div>
             </div>
           </div>
@@ -739,7 +898,7 @@ onUnmounted(() => {
           @click="logsOpen = !logsOpen"
         >
           <PixelIcon name="terminal" size="xs" />
-          运行日志与排障
+          {{ __t('ui.settings', '运行日志与排障') }}
         </button>
         <div v-if="logsOpen" id="social-adapter-terminal" class="sp-terminal-content">
           <SocialAdapterTerminal />
@@ -751,53 +910,58 @@ onUnmounted(() => {
       <section class="sp-config-block sp-mode-wide">
         <div class="sp-block-header">
           <PixelIcon name="clock" size="xs" />
-          <span>任务与恢复</span>
+          <span>{{ __t('ui.settings', '任务与恢复') }}</span>
         </div>
         <div class="sp-mode-body sp-number-row">
           <PInputNumber
             v-model="modeConfig.taskTimeoutMinutes"
-            label="整轮上限（分钟）"
+            :label="__t('ui.settings', '整轮上限（分钟）')"
             :min="1"
             :max="360"
           />
           <PInputNumber
             v-model="modeConfig.modelIdleMinutes"
-            label="无数据超时（分钟）"
+            :label="__t('ui.settings', '无数据超时（分钟）')"
             :min="1"
             :max="60"
           />
           <PInputNumber
             v-model="modeConfig.modelRequestMinutes"
-            label="单次请求上限（分钟）"
+            :label="__t('ui.settings', '单次请求上限（分钟）')"
             :min="modeConfig.modelIdleMinutes"
             :max="360"
           />
-          <PInputNumber v-model="modeConfig.maxRetries" label="自动重试次数" :min="0" :max="2" />
+          <PInputNumber
+            v-model="modeConfig.maxRetries"
+            :label="__t('ui.settings', '自动重试次数')"
+            :min="0"
+            :max="2"
+          />
         </div>
       </section>
       <section class="sp-config-block">
         <div class="sp-block-header">
           <PixelIcon name="clock" size="xs" />
-          <span>夜间静音</span>
+          <span>{{ __t('ui.settings', '夜间静音') }}</span>
         </div>
         <div class="sp-mode-body">
           <div class="sp-setting-line">
             <div>
-              <strong>安静时段</strong>
-              <small>静音期间不主动审视群聊</small>
+              <strong>{{ __t('ui.settings', '安静时段') }}</strong>
+              <small>{{ __t('ui.settings', '静音期间不主动审视群聊') }}</small>
             </div>
             <PSwitch v-model="modeConfig.nightSilenceEnabled" />
           </div>
           <div class="sp-number-row">
             <PInputNumber
               v-model="modeConfig.nightSilenceStart"
-              label="开始小时"
+              :label="__t('ui.settings', '开始小时')"
               :min="0"
               :max="23"
             />
             <PInputNumber
               v-model="modeConfig.nightSilenceEnd"
-              label="结束小时"
+              :label="__t('ui.settings', '结束小时')"
               :min="0"
               :max="23"
             />
@@ -807,19 +971,19 @@ onUnmounted(() => {
       <section class="sp-config-block">
         <div class="sp-block-header">
           <PixelIcon name="chat" size="xs" />
-          <span>群聊主动策略</span>
+          <span>{{ __t('ui.settings', '群聊主动策略') }}</span>
         </div>
         <div class="sp-mode-body">
           <div class="sp-setting-line">
             <div>
-              <strong>允许主动参与</strong>
-              <small>未被 @ 时也可审视活跃群聊</small>
+              <strong>{{ __t('ui.settings', '允许主动参与') }}</strong>
+              <small>{{ __t('ui.settings', '未被 @ 时也可审视活跃群聊') }}</small>
             </div>
             <PSwitch v-model="modeConfig.proactiveGroupEnabled" />
           </div>
           <PInputNumber
             v-model="modeConfig.minMessagesForReview"
-            label="最少审视消息数"
+            :label="__t('ui.settings', '最少审视消息数')"
             :min="1"
             :max="20"
           />
@@ -828,39 +992,159 @@ onUnmounted(() => {
       <section class="sp-config-block sp-mode-wide">
         <div class="sp-block-header">
           <PixelIcon name="users" size="xs" />
-          <span>名单策略</span>
+          <span>{{ __t('ui.settings', '名单策略') }}</span>
         </div>
         <div class="sp-mode-body">
           <div class="sp-setting-line">
             <div>
-              <strong>陌生人私聊</strong>
-              <small>忽略时仅主人私聊可进入处理链</small>
+              <strong>{{ __t('ui.settings', '陌生人私聊') }}</strong>
+              <small>{{ __t('ui.settings', '忽略时仅主人私聊可进入处理链') }}</small>
             </div>
             <select v-model="modeConfig.strangerPolicy" class="sp-pixel-select">
-              <option value="allow">允许</option>
-              <option value="ignore">忽略</option>
+              <option value="allow">{{ __t('ui.settings', '允许') }}</option>
+              <option value="ignore">{{ __t('ui.settings', '忽略') }}</option>
             </select>
           </div>
           <div class="sp-list-grid">
             <label>
-              群白名单
-              <textarea v-model="groupWhitelistText" placeholder="每行一个群号；留空表示不限制" />
+              {{ __t('ui.settings', '群白名单') }}
+              <textarea
+                v-model="groupWhitelistText"
+                :placeholder="__t('ui.settings', '每行一个群号；留空表示不限制')"
+              />
             </label>
             <label>
-              群黑名单
-              <textarea v-model="groupBlacklistText" placeholder="每行一个群号" />
+              {{ __t('ui.settings', '群黑名单') }}
+              <textarea
+                v-model="groupBlacklistText"
+                :placeholder="__t('ui.settings', '每行一个群号')"
+              />
             </label>
             <label>
-              用户黑名单
-              <textarea v-model="userBlacklistText" placeholder="每行一个 QQ 号" />
+              {{ __t('ui.settings', '用户黑名单') }}
+              <textarea
+                v-model="userBlacklistText"
+                :placeholder="__t('ui.settings', '每行一个 QQ 号')"
+              />
             </label>
           </div>
+        </div>
+      </section>
+      <section class="sp-config-block sp-mode-wide">
+        <div class="sp-block-header">
+          <PixelIcon name="alert" size="xs" />
+          <span>{{ __t('ui.settings', '连续互聊保护') }}</span>
+        </div>
+        <div class="sp-mode-body">
+          <p>
+            {{
+              __t('ui.settings', '限制与机器人的连续互聊，避免循环回复。达到频率上限时自动等待。')
+            }}
+          </p>
+          <div class="sp-number-row">
+            <PInputNumber
+              v-model="modeConfig.loopGuard.maxBotTurns"
+              :label="__t('ui.settings', '同机器人连续发送回合')"
+              :min="1"
+              :max="20"
+            />
+            <PInputNumber
+              v-model="modeConfig.loopGuard.cooldownSeconds"
+              :label="__t('ui.settings', '机器人冷却／闲置重置（秒）')"
+              :min="30"
+              :max="86400"
+            />
+          </div>
+          <div class="sp-number-row">
+            <PInputNumber
+              v-model="modeConfig.loopGuard.windowSeconds"
+              :label="__t('ui.settings', '滑动窗口（秒）')"
+              :min="10"
+              :max="3600"
+            />
+            <PInputNumber
+              v-model="modeConfig.loopGuard.maxTurnsPerWindow"
+              :label="__t('ui.settings', '窗口内处理批次')"
+              :min="1"
+              :max="200"
+            />
+            <PInputNumber
+              v-model="modeConfig.loopGuard.maxModelRequests"
+              :label="__t('ui.settings', '窗口内模型请求')"
+              :min="1"
+              :max="100"
+            />
+            <PInputNumber
+              v-model="modeConfig.loopGuard.maxSends"
+              :label="__t('ui.settings', '窗口内发送条数')"
+              :min="1"
+              :max="100"
+            />
+          </div>
+          <div class="sp-list-grid">
+            <label>
+              {{ __t('ui.settings', '已知外部机器人') }}
+              <textarea
+                v-model="knownBotText"
+                :placeholder="__t('ui.settings', '每行一个 QQ 号；不按昵称猜测')"
+              />
+            </label>
+            <label>
+              {{ __t('ui.settings', '可信真人') }}
+              <textarea
+                v-model="trustedHumanText"
+                :placeholder="__t('ui.settings', '每行一个确认由真人使用的 QQ 号；主人自动包含')"
+              />
+            </label>
+          </div>
+          <div class="sp-bot-marks">
+            <div class="sp-setting-line">
+              <strong>{{ __t('ui.settings', '模型添加的机器人标记') }}</strong>
+              <PButton size="sm" variant="ghost" :disabled="modeSaving" @click="loadModeConfig">
+                {{ __t('ui.settings', '重新载入配置') }}
+              </PButton>
+            </div>
+            <small>
+              {{
+                __t(
+                  'ui.settings',
+                  '标记按 QQ 标记在所有群聊和私聊中生效。误标可移除，可信真人不会被自动标记。',
+                )
+              }}
+            </small>
+            <div
+              v-for="mark in modeConfig.loopGuard.botMarks"
+              :key="mark.userId"
+              class="sp-bot-mark"
+            >
+              <strong>QQ {{ mark.userId }}</strong>
+              <p>{{ mark.reason }}</p>
+              <small>
+                {{ __t('ui.settings', '由') }} {{ mark.agentId }} {{ __t('ui.settings', '判断 ·') }}
+                {{ mark.messageId ? __t('ui.settings', '佐证来自') : __t('ui.settings', '标记于') }}
+                {{
+                  mark.channelType === 'group'
+                    ? __t('ui.settings', '群聊')
+                    : __t('ui.settings', '私聊')
+                }}
+                {{ mark.channelId }}
+                <template v-if="mark.messageId">
+                  {{ __t('ui.settings', '· 消息') }} {{ mark.messageId }}
+                </template>
+                · {{ new Date(mark.createdAt).toLocaleString() }}
+              </small>
+            </div>
+            <small v-if="!modeConfig.loopGuard.botMarks?.length">
+              {{ __t('ui.settings', '暂无模型添加的标记') }}
+            </small>
+          </div>
+          <small>{{ __t('ui.settings', '可在社交任务中解除互聊限制。') }}</small>
         </div>
       </section>
       <div class="sp-mode-actions">
         <PButton size="sm" :loading="modeSaving" @click="saveModeConfig">
           <PixelIcon name="save" size="xs" />
-          保存社交模式
+          {{ __t('ui.settings', '保存社交模式') }}
         </PButton>
       </div>
     </div>
@@ -868,7 +1152,7 @@ onUnmounted(() => {
       <aside class="sp-contact-sidebar">
         <div class="sp-block-header">
           <PixelIcon name="users" size="xs" />
-          <span>联系人 · {{ contacts.length }}</span>
+          <span>{{ __t('ui.settings', '联系人 ·') }} {{ contacts.length }}</span>
         </div>
         <button
           v-for="contact in contacts"
@@ -884,7 +1168,9 @@ onUnmounted(() => {
             <small>{{ contact.userId }}</small>
           </span>
         </button>
-        <div v-if="!contacts.length" class="sp-empty">还没有保存印象</div>
+        <div v-if="!contacts.length" class="sp-empty">
+          {{ __t('ui.settings', '还没有保存印象') }}
+        </div>
       </aside>
       <section class="sp-contact-detail">
         <template v-if="selectedContact">
@@ -899,29 +1185,31 @@ onUnmounted(() => {
               @click="openClearDialog('contact_impression', selectedContact.userId)"
             >
               <PixelIcon name="trash" size="xs" />
-              清除印象
+              {{ __t('ui.settings', '清除印象') }}
             </button>
           </div>
           <div v-if="selectedContact.identity" class="sp-impression-box">
-            <span>身份信息</span>
+            <span>{{ __t('ui.settings', '身份信息') }}</span>
             <p>{{ selectedContact.identity }}</p>
           </div>
           <div class="sp-impression-box">
-            <span>当前印象</span>
+            <span>{{ __t('ui.settings', '当前印象') }}</span>
             <p>{{ selectedContact.impression }}</p>
           </div>
           <dl class="sp-contact-meta">
             <div>
-              <dt>更新时间</dt>
+              <dt>{{ __t('ui.settings', '更新时间') }}</dt>
               <dd>{{ selectedContact.updatedAt }}</dd>
             </div>
             <div>
-              <dt>来源频道</dt>
-              <dd>{{ selectedContact.sourceChannelId || '未记录' }}</dd>
+              <dt>{{ __t('ui.settings', '来源频道') }}</dt>
+              <dd>{{ selectedContact.sourceChannelId || __t('ui.settings', '未记录') }}</dd>
             </div>
           </dl>
         </template>
-        <div v-else class="sp-empty sp-empty-detail">从左侧选择一位联系人吧</div>
+        <div v-else class="sp-empty sp-empty-detail">
+          {{ __t('ui.settings', '从左侧选择一位联系人吧') }}
+        </div>
       </section>
     </div>
     <div v-else-if="activeSection === 'data'" class="sp-danger-zone">
@@ -930,53 +1218,57 @@ onUnmounted(() => {
       <header class="sp-danger-head">
         <div>
           <span>DATA MAINTENANCE</span>
-          <h3>当前 Agent 的社交数据</h3>
-          <p>每一类数据都有独立边界，不会在没有说明时连带清除。</p>
+          <h3>{{ __t('ui.settings', '当前 Agent 的社交数据') }}</h3>
+          <p>{{ __t('ui.settings', '选择要清理的数据。') }}</p>
         </div>
         <PixelIcon name="alert" size="md" />
       </header>
       <div class="sp-danger-list">
         <article>
           <div>
-            <strong>指定会话记录</strong>
-            <span>删除某位用户的私聊，或某个群的全部聊天记录。</span>
+            <strong>{{ __t('ui.settings', '指定会话记录') }}</strong>
+            <span>{{ __t('ui.settings', '删除某位用户的私聊，或某个群的全部聊天记录。') }}</span>
           </div>
           <div class="sp-inline-target">
             <select v-model="dataChannelType" class="sp-pixel-select">
-              <option value="private">私聊</option>
-              <option value="group">群聊</option>
+              <option value="private">{{ __t('ui.settings', '私聊') }}</option>
+              <option value="group">{{ __t('ui.settings', '群聊') }}</option>
             </select>
-            <input v-model="dataTargetId" class="sp-pixel-input" placeholder="QQ 用户或群号" />
+            <input
+              v-model="dataTargetId"
+              class="sp-pixel-input"
+              :placeholder="__t('ui.settings', 'QQ 用户或群号')"
+            />
             <button class="sp-soft-action" @click="openClearDialog('channel', dataTargetId)">
-              选择清理
+              {{ __t('ui.settings', '选择清理') }}
             </button>
           </div>
         </article>
         <article>
           <div>
-            <strong>全部聊天记录</strong>
-            <span>保留联系人印象和社交长记忆，只删除消息流水。</span>
+            <strong>{{ __t('ui.settings', '全部聊天记录') }}</strong>
+            <span>{{ __t('ui.settings', '保留联系人印象和社交长记忆，只删除消息流水。') }}</span>
           </div>
           <button class="sp-soft-action sp-soft-danger" @click="openClearDialog('all_messages')">
-            清除消息
+            {{ __t('ui.settings', '清除消息') }}
           </button>
         </article>
         <article>
           <div>
-            <strong>全部社交长记忆</strong>
-            <span>清理当前角色的长记忆、索引及关联日记副本，保留聊天和联系人印象。</span>
+            <strong>{{ __t('ui.settings', '全部社交长记忆') }}</strong>
+            <span>{{ __t('ui.settings', '删除社交长记忆，保留聊天和联系人印象。') }}</span>
           </div>
           <button class="sp-soft-action sp-soft-danger" @click="openClearDialog('long_memory')">
-            清空长记忆
+            {{ __t('ui.settings', '清空长记忆') }}
           </button>
         </article>
         <article class="is-critical">
           <div>
-            <strong>彻底清除社交数据</strong>
-            <span>同时删除消息、联系人印象和社交长记忆。</span>
+            <strong>{{ __t('ui.settings', '彻底清除社交数据') }}</strong>
+            <span>{{ __t('ui.settings', '同时删除消息、联系人印象和社交长记忆。') }}</span>
           </div>
           <button class="sp-soft-action sp-soft-danger" @click="openClearDialog('all_social_data')">
-            彻底清除
+            {{ __t('ui.settings', '彻底清除') }}
           </button>
         </article>
       </div>
@@ -984,15 +1276,15 @@ onUnmounted(() => {
 
     <PDialog
       v-model="confirmDialogVisible"
-      title="确认清理社交数据"
+      :title="__t('ui.settings', '确认清理社交数据')"
       :message="
         requiresStrongConfirmation
-          ? `此操作影响社交角色 ${socialAgentName}，请输入角色名后继续。`
-          : '此操作不可撤销，请确认目标无误。'
+          ? __t('ui.settings', '此操作影响社交角色 {0}，请输入角色名后继续。', [socialAgentName])
+          : __t('ui.settings', '此操作不可撤销，请确认目标无误。')
       "
       :mode="requiresStrongConfirmation ? 'prompt' : 'confirm'"
       :placeholder="requiresStrongConfirmation ? socialAgentName : ''"
-      confirm-text="确认清理"
+      :confirm-text="__t('ui.settings', '确认清理')"
       confirm-variant="danger"
       :loading="dataBusy"
       :auto-close="false"
@@ -1014,11 +1306,14 @@ onUnmounted(() => {
   margin: 0 24px 14px;
   border-bottom: 2px solid var(--color-sky-100, #e0f2fe);
   flex-shrink: 0;
+  overflow-x: auto;
 }
 
 .sp-section {
   position: relative;
   display: inline-flex;
+  flex: 0 0 auto;
+  white-space: nowrap;
   align-items: center;
   gap: 7px;
   padding: 8px 13px 10px;
@@ -1057,9 +1352,9 @@ onUnmounted(() => {
 .sp-mode-grid {
   margin: 0 24px 16px;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
-  overflow: auto;
+  overflow: visible;
 }
 .sp-mode-wide,
 .sp-mode-actions {
@@ -1069,6 +1364,24 @@ onUnmounted(() => {
   padding: 14px;
   display: grid;
   gap: 16px;
+}
+.sp-bot-marks {
+  display: grid;
+  gap: 10px;
+}
+.sp-bot-mark {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--sp-border);
+  background: var(--sp-surface-soft);
+  color: var(--sp-text);
+  overflow-wrap: anywhere;
+}
+.sp-bot-mark p {
+  margin: 0;
+  line-height: 1.7;
+  white-space: pre-wrap;
 }
 .sp-setting-line {
   display: flex;
@@ -1364,6 +1677,19 @@ onUnmounted(() => {
   background: linear-gradient(180deg, #f8fafc 0%, #f0f9ff 100%);
 }
 
+/* 页面负责纵向滚动，配置卡片不与消息、日志争抢剩余高度。 */
+.social-panel > * {
+  flex-shrink: 0;
+  min-width: 0;
+}
+.social-panel > .sp-turn-panel {
+  margin: 0 24px 16px;
+  max-height: clamp(200px, 40vh, 420px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+}
+
 /* ── 头部 ── */
 .sp-header {
   padding: 20px 24px 12px;
@@ -1401,11 +1727,13 @@ onUnmounted(() => {
 /* ── 适配器卡片 ── */
 .sp-adapter-cards {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
 .sp-card {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
@@ -1528,6 +1856,7 @@ onUnmounted(() => {
 
 .sp-owner-input {
   flex: 1;
+  min-width: 0;
   height: 32px;
   padding: 0 10px;
   font-size: 12px;
@@ -1555,6 +1884,7 @@ onUnmounted(() => {
 
 .sp-config-block {
   flex: 1;
+  min-width: 0;
   background: white;
   border: 2px solid var(--color-sky-100, #e0f2fe);
   overflow: hidden;
@@ -1594,6 +1924,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   font-size: 11px;
 }
 
@@ -1603,6 +1934,9 @@ onUnmounted(() => {
 }
 
 .sp-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
   font-weight: 700;
   color: var(--text-primary, #1e293b);
 }
@@ -1641,14 +1975,16 @@ onUnmounted(() => {
 .sp-terminal {
   display: flex;
   flex-direction: column;
-  flex: 1;
+  flex: 0 0 auto;
   overflow: hidden;
   margin: 0 24px 16px;
   border: 2px solid var(--color-sky-100, #e0f2fe);
 }
 .sp-terminal:not(.sp-terminal-open) {
-  flex: 0 0 auto;
   min-height: 0;
+}
+.sp-terminal-open {
+  height: clamp(260px, 45vh, 480px);
 }
 .sp-terminal-toggle {
   width: 100%;
@@ -1664,7 +2000,6 @@ onUnmounted(() => {
   min-height: 0;
   overflow: hidden;
 }
-
 /* ── 统一主题与字体覆盖 ── */
 .social-panel {
   --sp-surface: var(--ui-bg-surface);
@@ -1795,8 +2130,7 @@ onUnmounted(() => {
 .sp-mode-grid,
 .sp-contact-master,
 .sp-danger-zone {
-  min-height: 0;
-  flex: 1;
+  flex: 0 0 auto;
 }
 .sp-mode-grid {
   align-content: start;
@@ -1882,7 +2216,6 @@ onUnmounted(() => {
   border-color: var(--sp-danger);
 }
 .sp-terminal {
-  min-height: 180px;
   border-color: var(--sp-border);
   background: var(--sp-surface-soft);
 }

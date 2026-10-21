@@ -3,6 +3,7 @@ import { runScriptTool } from '@infos/backend/tools/runScript'
 import type { ToolContext } from '@infos/backend/services/agent/toolRegistry'
 import type { ToolExecutionResult } from '@infos/backend/services/agent/reactLoop'
 import { trackCancellationCleanup } from '@infos/backend/services/execution/cancellation'
+import { ToolLoopGuard } from '@infos/backend/services/agent/toolLoopGuard'
 
 vi.mock('@infos/backend/tools/workspaceServiceHolder', () => ({ getWorkspaceService: () => null }))
 
@@ -39,6 +40,75 @@ afterEach(() => {
 })
 
 describe('NIT 取消与超时', () => {
+  it('循环切断信号会取消正在等待的 NIT 子工具，且内部共享同一检测器', async () => {
+    const guard = new ToolLoopGuard()
+    for (let index = 0; index < 6; index++)
+      guard.observe('edit_file', { path: 'a' }, '相同失败', true)
+    const started = deferred<void>()
+    let childSignal: AbortSignal | undefined
+    runScriptTool.bindToolExecutor!((_name, _args, _source, ctx) => {
+      expect(ctx?.loopGuard).toBe(guard)
+      childSignal = ctx?.signal
+      started.resolve()
+      return new Promise<ToolExecutionResult>((_resolve, reject) => {
+        ctx!.signal!.addEventListener('abort', () => reject(ctx!.signal!.reason), { once: true })
+      })
+    })
+    const execution = runScriptTool.execute(
+      { code: 'waiting()' },
+      {
+        ...context,
+        loopGuard: guard,
+        signal: guard.signal,
+      },
+    )
+    const rejected = expect(execution).rejects.toThrow('相同的无进展循环')
+    await started.promise
+    expect(guard.before('edit_file', { path: 'a' })).toBeDefined()
+    expect(() => guard.before('edit_file', { path: 'a' })).toThrow('相同的无进展循环')
+    await rejected
+    expect(childSignal?.aborted).toBe(true)
+  })
+
+  it('子调用在执行前报告父调用与唯一 ID，完成观察沿用同一 ID', async () => {
+    const onNestedToolCall = vi.fn()
+    const onToolObserved = vi.fn()
+    const executor = vi.fn(async (name, args, _source, runtimeContext) => {
+      expect(onNestedToolCall).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name,
+          args,
+          parentCallId: 'outer-script',
+          callId: runtimeContext.toolCallId,
+        }),
+      )
+      await runtimeContext.onToolObserved?.({
+        name,
+        args,
+        callId: runtimeContext.toolCallId,
+        output: '已完成',
+        isError: false,
+        durationMs: 1,
+      })
+      return success()
+    })
+    runScriptTool.bindToolExecutor!(executor)
+    await runScriptTool.execute(
+      { code: 'first()\nsecond()' },
+      {
+        ...context,
+        toolCallId: 'outer-script',
+        onNestedToolCall,
+        onToolObserved,
+      },
+    )
+    expect(onNestedToolCall).toHaveBeenCalledTimes(2)
+    expect(onToolObserved).toHaveBeenCalledTimes(2)
+    const ids = onNestedToolCall.mock.calls.map(([call]) => call.callId)
+    expect(new Set(ids).size).toBe(2)
+    expect(ids.every((id: string) => id.startsWith('nit-'))).toBe(true)
+  })
+
   it.each([false, true])(
     '高级菜单 expanded=%s 时，未开放工具在任何副作用前被拒绝',
     async (expanded) => {

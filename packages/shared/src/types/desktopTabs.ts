@@ -1,4 +1,5 @@
 import type { PetConversationTarget } from './petControls'
+import type { MessageResource } from '../resources'
 
 /** Electron 桌面标签只描述界面实例，不接管应用 Host 和后台任务。 */
 export type DesktopTabKind = 'home' | 'new' | 'browser' | 'application' | 'tarot'
@@ -31,7 +32,12 @@ export interface DesktopTabsState {
   activeTabId: string
   tabs: DesktopTab[]
   applications: DesktopApplication[]
-  homeNavigation?: { section: string; revision: number; conversation?: PetConversationTarget }
+  homeNavigation?: {
+    section: string
+    revision: number
+    conversation?: PetConversationTarget
+    resource?: MessageResource
+  }
 }
 
 /** 前端提供 CSS 坐标，主进程转换为原生视图坐标。 */

@@ -1,3 +1,4 @@
+import { t as __t } from '../../i18n/index'
 /**
  * Avatar 模型加载 Composable
  *
@@ -265,7 +266,10 @@ function normalizeYsmModelScale(rootGroup: THREE.Object3D, bodyScaleFactor = 1):
   bounds.getSize(size)
 
   if (!Number.isFinite(size.y) || size.y <= 0) {
-    logger.warn('AvatarModel', '无法计算 YSM 模型实际高度，保持原始尺寸')
+    logger.warn(
+      'AvatarModel',
+      __t('logs.frontend.avatar', '无法计算 YSM 模型实际高度，保持原始尺寸'),
+    )
     return
   }
 
@@ -305,8 +309,15 @@ function normalizeYsmModelScale(rootGroup: THREE.Object3D, bodyScaleFactor = 1):
 
   logger.info(
     'AvatarModel',
-    `YSM 尺度归一化: 总高 ${totalH.toFixed(2)}，主体 ${bodyH.toFixed(2)}，` +
-      `体型系数 ${bodyScaleFactor.toFixed(2)}，最终缩放 ${scale.toFixed(3)}，脚底对齐 y=${TARGET_YSM_FLOOR_Y}`,
+    __t('logs.frontend.avatar', 'YSM 尺度归一化: 总高 {0}，主体 {1}，', [
+      totalH.toFixed(2),
+      bodyH.toFixed(2),
+    ]) +
+      __t('logs.frontend.avatar', '体型系数 {0}，最终缩放 {1}，脚底对齐 y={2}', [
+        bodyScaleFactor.toFixed(2),
+        scale.toFixed(3),
+        TARGET_YSM_FLOOR_Y,
+      ]),
   )
 }
 
@@ -480,14 +491,17 @@ export function useAvatarModel() {
         }
         const controllers = await providerWithCtrl.getAnimationControllers()
         if (controllers.size > 0) {
-          logger.info('AvatarModel', `从 Provider 加载了 ${controllers.size} 个动画控制器`)
+          logger.info(
+            'AvatarModel',
+            __t('logs.frontend.avatar', '从 Provider 加载了 {0} 个动画控制器', [controllers.size]),
+          )
           result.push({
             format_version: '1.10.0',
             animation_controllers: Object.fromEntries(controllers),
           } as ControllerData)
         }
       } catch (e) {
-        logger.warn('AvatarModel', '从 Provider 加载控制器失败', e)
+        logger.warn('AvatarModel', __t('logs.frontend.avatar', '从 Provider 加载控制器失败'), e)
       }
     }
 
@@ -502,7 +516,11 @@ export function useAvatarModel() {
           if (!response.ok) throw new Error(`控制器读取失败: ${response.status}`)
           result.push((await response.json()) as ControllerData)
         } catch (error) {
-          logger.warn('AvatarModel', `控制器加载失败: ${path}`, error)
+          logger.warn(
+            'AvatarModel',
+            __t('logs.frontend.avatar', '控制器加载失败: {0}', [path]),
+            error,
+          )
         }
       }
     }
@@ -589,7 +607,10 @@ export function useAvatarModel() {
       if (effectiveManifest.source === 'ysm') {
         const removedCount = removeDistantSceneryBones(rootGroup)
         if (removedCount > 0) {
-          logger.info('AvatarModel', `几何启发式移除 ${removedCount} 个远处场景组件`)
+          logger.info(
+            'AvatarModel',
+            __t('logs.frontend.avatar', '几何启发式移除 {0} 个远处场景组件', [removedCount]),
+          )
         }
       }
 
@@ -650,7 +671,12 @@ export function useAvatarModel() {
           parsedAnimations.set(name, animationLibrary.get(name))
         }
         collectYsmVisibilityBindings(parsedAnimations)
-        logger.info('AvatarModel', `已识别 ${ysmVisibilityBindings.length} 个 YSM 部件显隐绑定`)
+        logger.info(
+          'AvatarModel',
+          __t('logs.frontend.avatar', '已识别 {0} 个 YSM 部件显隐绑定', [
+            ysmVisibilityBindings.length,
+          ]),
+        )
       } else {
         ysmVisibilityBindings = []
       }
@@ -671,11 +697,17 @@ export function useAvatarModel() {
             if (anim) animationEngine.play(anim, transition, true)
           })
           ysmRunner.init()
-          logger.info('AvatarModel', `已加载 ${scripts.length} 个 YSM molang 控制器脚本`)
+          logger.info(
+            'AvatarModel',
+            __t('logs.frontend.avatar', '已加载 {0} 个 YSM molang 控制器脚本', [scripts.length]),
+          )
         }
         const skipped = scriptResults.length - scripts.length
         if (skipped > 0) {
-          logger.info('AvatarModel', `已跳过 ${skipped} 个不可用的 YSM molang 控制器脚本`)
+          logger.info(
+            'AvatarModel',
+            __t('logs.frontend.avatar', '已跳过 {0} 个不可用的 YSM molang 控制器脚本', [skipped]),
+          )
         }
       }
 
@@ -705,7 +737,10 @@ export function useAvatarModel() {
       }, 100)
 
       loading.value = false
-      logger.info('AvatarModel', `模型 ${manifest.metadata.name} 加载成功`)
+      logger.info(
+        'AvatarModel',
+        __t('logs.frontend.avatar', '模型 {0} 加载成功', [manifest.metadata.name]),
+      )
     } catch (e: unknown) {
       if (preparedModel) disposeAvatarResources(preparedModel)
       if (provider && provider !== currentProvider) provider.dispose?.()
@@ -716,7 +751,7 @@ export function useAvatarModel() {
       )
         throw e
       const msg = e instanceof Error ? e.message : String(e)
-      logger.error('AvatarModel', '加载模型失败', e)
+      logger.error('AvatarModel', __t('logs.frontend.avatar', '加载模型失败'), e)
       errorMsg.value = `加载模型失败: ${msg}`
       loading.value = false
       // 让上层切换逻辑感知失败并执行全局兜底，而不是静默停留在旧模型。
@@ -772,7 +807,11 @@ export function useAvatarModel() {
         return
       } catch (e: unknown) {
         if (disposed || (e instanceof DOMException && e.name === 'AbortError')) throw e
-        logger.warn('AvatarModel', `模型入口加载失败，回退默认模型: ${propManifestPath}`, e)
+        logger.warn(
+          'AvatarModel',
+          __t('logs.frontend.avatar', '模型入口加载失败，回退默认模型: {0}', [propManifestPath]),
+          e,
+        )
       } finally {
         loading.value = false
       }
@@ -785,7 +824,11 @@ export function useAvatarModel() {
       return
     } catch (e) {
       if (disposed || (e instanceof DOMException && e.name === 'AbortError')) throw e
-      logger.warn('AvatarModel', '默认 manifest 加载失败，尝试 YSM 运行时清单', e)
+      logger.warn(
+        'AvatarModel',
+        __t('logs.frontend.avatar', '默认 manifest 加载失败，尝试 YSM 运行时清单'),
+        e,
+      )
     }
 
     try {
@@ -793,7 +836,7 @@ export function useAvatarModel() {
       await loadAvatar(ysmManifest, scene)
     } catch (e2) {
       if (disposed || (e2 instanceof DOMException && e2.name === 'AbortError')) throw e2
-      logger.error('AvatarModel', '默认与兜底模型均加载失败', e2)
+      logger.error('AvatarModel', __t('logs.frontend.avatar', '默认与兜底模型均加载失败'), e2)
       errorMsg.value = '加载模型失败: 蓝色大肥鱼模型文件不可用'
       loading.value = false
     }

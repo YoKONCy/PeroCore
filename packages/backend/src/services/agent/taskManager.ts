@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * Task Manager — 任务暂停/注入/取消/超时
  *
@@ -95,7 +96,7 @@ export class TaskManager {
     }, this.timeoutMs)
 
     this.tasks.set(sessionId, state)
-    logger.debug(`任务注册: ${sessionId}`)
+    logger.debug(__t('logs.agent', '任务注册: {0}', [sessionId]))
 
     // 广播进度
     this.broadcastProgress(sessionId, 'running', '任务已开始')
@@ -113,7 +114,7 @@ export class TaskManager {
       this.broadcastProgress(sessionId, 'completed', '任务完成')
     }
     this.tasks.delete(sessionId)
-    logger.debug(`任务注销: ${sessionId}`)
+    logger.debug(__t('logs.agent', '任务注销: {0}', [sessionId]))
   }
 
   /** 更新当前轮次 */
@@ -128,14 +129,14 @@ export class TaskManager {
     const state = this.tasks.get(sessionId)
     if (!state?.paused) return
 
-    logger.info(`任务暂停中: ${sessionId}`)
+    logger.info(__t('logs.agent', '任务暂停中: {0}', [sessionId]))
     this.broadcastProgress(sessionId, 'paused', '任务已暂停')
 
     // 等待恢复 (轮询, 每 500ms 检查一次)
     while (state.paused && !state.cancelled) {
       await new Promise((r) => setTimeout(r, 500))
     }
-    logger.info(`任务已恢复: ${sessionId}`)
+    logger.info(__t('logs.agent', '任务已恢复: {0}', [sessionId]))
     this.broadcastProgress(sessionId, 'running', '任务已恢复')
   }
 
@@ -153,7 +154,7 @@ export class TaskManager {
     const state = this.tasks.get(sessionId)
     if (!state) return false
     state.paused = true
-    logger.info(`暂停: ${sessionId}`)
+    logger.info(__t('logs.agent', '暂停: {0}', [sessionId]))
     return true
   }
 
@@ -162,7 +163,7 @@ export class TaskManager {
     const state = this.tasks.get(sessionId)
     if (!state) return false
     state.paused = false
-    logger.info(`恢复: ${sessionId}`)
+    logger.info(__t('logs.agent', '恢复: {0}', [sessionId]))
     return true
   }
 
@@ -171,7 +172,9 @@ export class TaskManager {
     const state = this.tasks.get(sessionId)
     if (!state) return false
     state.pendingInstruction = instruction
-    logger.info(`注入指令: ${sessionId} → "${instruction.slice(0, 30)}..."`)
+    logger.info(
+      __t('logs.agent', '注入指令: {0} → "{1}..."', [sessionId, instruction.slice(0, 30)]),
+    )
     return true
   }
 
@@ -181,7 +184,7 @@ export class TaskManager {
     if (!state) return false
     state.cancelled = true
     state.paused = false // 如果在暂停中则释放
-    logger.info(`取消: ${sessionId}`)
+    logger.info(__t('logs.agent', '取消: {0}', [sessionId]))
     this.broadcastProgress(sessionId, 'cancelled', '任务已取消')
     return true
   }
@@ -234,7 +237,7 @@ export class TaskManager {
     const state = this.tasks.get(sessionId)
     if (!state || state.cancelled) return
 
-    logger.warn(`任务超时: ${sessionId} (${this.timeoutMs / 1000}s)`)
+    logger.warn(__t('logs.agent', '任务超时: {0} ({1}s)', [sessionId, this.timeoutMs / 1000]))
     state.cancelled = true
     state.paused = false
     this.broadcastProgress(sessionId, 'error', `任务超时 (${this.timeoutMs / 1000}s)`)
@@ -263,7 +266,7 @@ export class TaskManager {
       state,
       message,
     }).catch((err) => {
-      logger.warn(`进度广播失败: ${err}`)
+      logger.warn(__t('logs.agent', '进度广播失败: {0}', [err]))
     })
   }
 }

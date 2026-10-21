@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * systemInfo — 系统信息 + 应用启动工具
  *
@@ -136,7 +137,7 @@ export const openApplicationTool: BuiltinTool = {
       )
     }
 
-    logger.info(`请求客户端打开应用: ${appName}`)
+    logger.info(__t('logs.tools', '请求客户端打开应用: {0}', [appName]))
     try {
       const result = await _applicationProvider.launch(appName, context)
       return JSON.stringify({
@@ -146,15 +147,15 @@ export const openApplicationTool: BuiltinTool = {
         targetType: result.targetType,
         message:
           result.mode === 'activated'
-            ? `已切换到正在运行的应用: ${result.application}`
-            : `已启动应用: ${result.application}`,
+            ? __t('server.tools', '已切换到正在运行的应用: {0}', [result.application])
+            : __t('server.tools', '已启动应用: {0}', [result.application]),
       })
     } catch (err) {
       const text = err instanceof Error ? err.message : String(err)
       const separator = text.indexOf(':')
       const code = separator > 0 ? text.slice(0, separator) : 'APPLICATION_LAUNCH_FAILED'
       const message = separator > 0 ? text.slice(separator + 1).trim() : text
-      logger.error(`打开应用失败: ${text}`)
+      logger.error(__t('logs.tools', '打开应用失败: {0}', [text]))
       return errorResult(code, message)
     }
   },
@@ -249,13 +250,22 @@ export const activateWindowTool: BuiltinTool = {
           [Microsoft.VisualBasic.Interaction]::AppActivate("${target.replace(/"/g, '`"')}")
         `
         execSync(`powershell -Command "${script}"`, { timeout: 5000 })
-        return JSON.stringify({ success: true, message: `已切换到窗口: ${target}` })
+        return JSON.stringify({
+          success: true,
+          message: __t('server.tools', '已切换到窗口: {0}', [target]),
+        })
       } else if (platform === 'darwin') {
         execSync(`osascript -e 'tell application "${target}" to activate'`, { timeout: 5000 })
-        return JSON.stringify({ success: true, message: `已切换到窗口: ${target}` })
+        return JSON.stringify({
+          success: true,
+          message: __t('server.tools', '已切换到窗口: {0}', [target]),
+        })
       } else {
         execSync(`wmctrl -a "${target}" 2>/dev/null`, { timeout: 5000 })
-        return JSON.stringify({ success: true, message: `已切换到窗口: ${target}` })
+        return JSON.stringify({
+          success: true,
+          message: __t('server.tools', '已切换到窗口: {0}', [target]),
+        })
       }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err)

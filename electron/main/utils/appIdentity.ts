@@ -1,3 +1,4 @@
+import { t as __t } from './i18n'
 import { app, type BrowserWindow } from 'electron'
 import { loadSystemIcon, systemIcoPath } from './appIcon'
 import { logger } from './logger'
@@ -34,7 +35,10 @@ export function applyWindowIdentity(window: BrowserWindow): void {
       relaunchDisplayName: APPLICATION_NAME,
     })
   } catch (error) {
-    logger.warn('AppIdentity', `Windows 任务栏身份设置失败：${String(error)}`)
+    logger.warn(
+      'AppIdentity',
+      __t('electron.logs.utils', 'Windows 任务栏身份设置失败：{0}', [String(error)]),
+    )
   }
   if (iconPath) applyWindowsTaskbarIcon(window, iconPath)
 }

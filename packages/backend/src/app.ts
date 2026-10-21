@@ -1,3 +1,4 @@
+import { t as __t } from './lib/i18n'
 /**
  * Hono 应用入口
  *
@@ -63,6 +64,7 @@ import {
 import { createPictoriaRouter } from './routers/pictoria.router'
 import { createPromptRouter } from './routers/prompt.router'
 import { createTarotRouter } from './routers/tarot.router'
+import { createClientAccessRouter } from './routers/clientAccess.router'
 
 /**
  * 创建并配置 Hono 应用实例
@@ -74,7 +76,7 @@ export function createApp(ctx: AppContext) {
   const app = new Hono()
 
   // ── 全局中间件 ──
-  app.use('*', cors())
+  app.use('*', cors({ origin: (origin) => origin, credentials: true }))
   // metrics 需要包住后续中间件与路由，才能统计包含日志、业务处理和错误响应在内的完整耗时
   app.use('*', metricsMiddleware)
   // request context 必须早于 tracing/logger，确保业务日志和 Span 可共享请求字段
@@ -83,24 +85,92 @@ export function createApp(ctx: AppContext) {
   app.use('*', requestLogger)
   app.use('*', apiContractMiddleware)
 
-  // 第六阶段 #8: Token 鉴权中间件
-  // - 通过 INFOS_API_TOKEN 环境变量配置 token
-  // - 未配置时中间件自动放行（开发环境默认开放）
-  // - 健康检查、Prometheus 指标、登录接口等公共路径跳过鉴权
-  // - 必须在 requestLogger 之后注册，以便 401 响应也能被日志记录
+  // 业务请求统一校验安装实例或设备身份；日志不属于公共健康检查。
   const apiToken = process.env.INFOS_API_TOKEN ?? ''
-  app.use(
-    '*',
-    createAuthMiddleware({
-      token: apiToken,
-      publicPaths: [
-        ...DEFAULT_PUBLIC_PATHS,
-        '/applications/arca',
-        '/applications/pictoria',
-        '/html-previews',
-      ],
-    }),
-  )
+  if (ctx.clientAccess) {
+    app.use('*', async (c, next) => {
+      const path = c.req.path
+      const publicPath =
+        path === '/api/health' ||
+        path === '/api/health/' ||
+        path === '/api/client-access' ||
+        path.startsWith('/api/client-access/') ||
+        (!path.startsWith('/api/') && !path.startsWith('/ws') && path !== '/metrics')
+      const identity = publicPath ? undefined : ctx.clientAccess.authenticate(c.req.raw)
+      if (!publicPath && !identity)
+        return c.json(
+          { code: 'UNAUTHORIZED', message: __t('server.app.ts', '请先配对此设备，或重新登录') },
+          401,
+        )
+      await next()
+      // 撤销设备时同时关闭持续读取的 SSE，不让旧连接继续收取新事件。
+      if (
+        identity &&
+        c.res.body &&
+        c.res.headers.get('content-type')?.includes('text/event-stream')
+      ) {
+        const access = ctx.clientAccess
+        const reader = c.res.body.getReader()
+        let closed = false
+        let timer: ReturnType<typeof setInterval> | undefined
+        let unsubscribe: (() => void) | undefined
+        const cleanup = () => {
+          closed = true
+          clearInterval(timer)
+          unsubscribe?.()
+        }
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            const validate = () => {
+              if (!closed && !access.identify(identity.token)) {
+                cleanup()
+                void reader.cancel().catch(() => {})
+                controller.close()
+              }
+            }
+            unsubscribe = access.onRevoke(validate)
+            timer = setInterval(validate, 30_000)
+            timer.unref()
+            validate()
+          },
+          async pull(controller) {
+            try {
+              const result = await reader.read()
+              if (closed) return
+              if (result.done) {
+                cleanup()
+                controller.close()
+              } else controller.enqueue(result.value)
+            } catch (error) {
+              if (!closed) {
+                cleanup()
+                controller.error(error)
+              }
+            }
+          },
+          cancel(reason) {
+            cleanup()
+            return reader.cancel(reason)
+          },
+        })
+        c.res = new Response(body, { status: c.res.status, headers: c.res.headers })
+      }
+    })
+    app.route('/api/client-access', createClientAccessRouter(ctx.clientAccess))
+  } else {
+    app.use(
+      '*',
+      createAuthMiddleware({
+        token: apiToken,
+        publicPaths: [
+          ...DEFAULT_PUBLIC_PATHS,
+          '/applications/arca',
+          '/applications/pictoria',
+          '/html-previews',
+        ],
+      }),
+    )
+  }
 
   // ── 全局错误处理 ──
   app.onError(errorHandler)
@@ -177,15 +247,19 @@ export function createApp(ctx: AppContext) {
 
   // ── 404 兜底 ──
   const notFoundCode = CLIENT_ERROR_CODES.NOT_FOUND
-  app.notFound((c) =>
-    c.json(
-      {
-        code: notFoundCode,
-        message: CODE_MESSAGES[notFoundCode],
-      },
-      404,
-    ),
-  )
+  app.notFound(async (c) => {
+    const frontend = await ctx.webFrontend?.response(c.req.raw)
+    return (
+      frontend ??
+      c.json(
+        {
+          code: notFoundCode,
+          message: CODE_MESSAGES[notFoundCode],
+        },
+        404,
+      )
+    )
+  })
 
   return app
 }

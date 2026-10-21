@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * GrantRegistry — 资源授权注册表
  *
@@ -152,7 +153,11 @@ export class SqliteGrantRegistry implements GrantRegistry {
     })
 
     logger.debug(
-      `授权已创建: holder=${params.holderId}, kind=${params.resource.kind}, perms=${params.permissions.join(',')}`,
+      __t('logs.applications', '授权已创建: holder={0}, kind={1}, perms={2}', [
+        params.holderId,
+        params.resource.kind,
+        params.permissions.join(','),
+      ]),
     )
     return grantId
   }
@@ -166,7 +171,7 @@ export class SqliteGrantRegistry implements GrantRegistry {
       .returning({ id: appResourceGrants.id })
 
     if (result.length > 0) {
-      logger.debug(`授权已撤销: grantId=${grantId}`)
+      logger.debug(__t('logs.applications', '授权已撤销: grantId={0}', [grantId]))
       return true
     }
     return false
@@ -182,7 +187,9 @@ export class SqliteGrantRegistry implements GrantRegistry {
 
     const count = result.length
     if (count > 0) {
-      logger.info(`批量撤销授权: holder=${holderId}, count=${count}`)
+      logger.info(
+        __t('logs.applications', '批量撤销授权: holder={0}, count={1}', [holderId, count]),
+      )
     }
     return count
   }
@@ -274,7 +281,7 @@ export class SqliteGrantRegistry implements GrantRegistry {
         .where(eq(appResourceGrants.id, id))
     }
 
-    logger.info(`清理过期授权: count=${ids.length}`)
+    logger.info(__t('logs.applications', '清理过期授权: count={0}', [ids.length]))
     return ids.length
   }
 }
@@ -294,7 +301,7 @@ function rowToGrant(row: GrantRow): Grant {
     resource = JSON.parse(row.resourceJson) as ResourceRef
   } catch {
     // JSON 解析失败时构造一个空的 memory 引用作为兜底
-    logger.warn(`资源引用 JSON 解析失败: grantId=${row.id}`)
+    logger.warn(__t('logs.applications', '资源引用 JSON 解析失败: grantId={0}', [row.id]))
     resource = { kind: 'memory', agentId: '' }
   }
 

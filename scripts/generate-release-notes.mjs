@@ -1,3 +1,4 @@
+import { t as __t } from './i18n.mjs'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -43,4 +44,9 @@ const body = [
   '',
 ].join('\n')
 fs.writeFileSync(path.resolve(output), body)
-console.log(`已生成中文发布说明：${tag}（上一版本：${previous || '无'}）`)
+console.log(
+  __t('scripts.generate-release-notes', '已生成中文发布说明：{0}（上一版本：{1}）', [
+    tag,
+    previous || '无',
+  ]),
+)

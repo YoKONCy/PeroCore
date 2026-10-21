@@ -11,13 +11,15 @@ import {
   TRIVIUM_VERSION,
 } from '../../repositories/triviumFiles'
 
-const APP_VERSION = '0.9.4'
+const APP_VERSION = '0.9.5'
 const BUNDLE_VERSION = 2
 const SCHEMA_VERSION = 1
 const MAX_FILE_COUNT = 100_000
 const MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024
 const MAX_TOTAL_BYTES = 20 * 1024 * 1024 * 1024
 const MACHINE_PATHS = new Set([
+  'client-access.json',
+  'client-access.json.tmp',
   'gateway_token.json',
   'jwt_secret.key',
   'kernel/nodes.json',
@@ -398,6 +400,7 @@ export class DistributedSyncService {
     let totalBytes = 0
     for (const descriptor of bundle.manifest.files) {
       const safePath = this.safeRelative(descriptor.path)
+      if (MACHINE_PATHS.has(safePath)) throw new Error('同步快照不能包含本机凭据')
       if (uniquePaths.has(safePath)) throw new Error(`SYNC_FILE_DUPLICATED: ${safePath}`)
       uniquePaths.add(safePath)
       if (descriptor.sizeBytes > MAX_FILE_BYTES)
@@ -540,6 +543,7 @@ export class DistributedSyncService {
     await mkdir(incoming, { recursive: true })
     for (const descriptor of bundle.manifest.files) {
       const normalized = descriptor.path.replaceAll('\\', '/')
+      if (MACHINE_PATHS.has(normalized)) throw new Error('同步快照不能包含本机凭据')
       if (
         !normalized ||
         normalized.startsWith('/') ||

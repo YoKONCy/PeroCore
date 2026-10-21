@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /** 多终端工作视窗：轮询增量输出，支持输入、中断、强杀与关闭。 */
 import { computed, ref, watch, nextTick, onActivated, onDeactivated, onUnmounted } from 'vue'
 import { PixelIcon } from '../pixel'
@@ -106,9 +108,14 @@ async function create(): Promise<void> {
   } catch (error) {
     if (!isCurrent(requestGeneration)) return
     recordError(error, requestGeneration)
-    notification.toast(`新建终端失败：${error instanceof Error ? error.message : '未知错误'}`, {
-      type: 'error',
-    })
+    notification.toast(
+      __t('ui.workspace', '新建终端失败：{0}', [
+        error instanceof Error ? error.message : __t('ui.workspace', '未知错误'),
+      ]),
+      {
+        type: 'error',
+      },
+    )
   }
 }
 
@@ -346,7 +353,7 @@ onUnmounted(() => {
         ref="tabRail"
         class="work-terminal__tabs"
         role="tablist"
-        aria-label="终端"
+        :aria-label="__t('ui.workspace', '终端')"
         @keydown="stepTab"
       >
         <div
@@ -364,13 +371,19 @@ onUnmounted(() => {
           >
             <span :class="['status', item.status]" />
             <span class="terminal-tab__title">{{ item.title }}</span>
-            <span v-if="item.pinned" class="terminal-pin" aria-label="已固定">◆</span>
+            <span
+              v-if="item.pinned"
+              class="terminal-pin"
+              :aria-label="__t('ui.workspace', '已固定')"
+            >
+              ◆
+            </span>
             <i v-if="item.unread" />
           </button>
           <button
             class="terminal-tab__close"
-            :aria-label="`关闭 ${item.title}`"
-            title="关闭并归档"
+            :aria-label="__t('ui.workspace', '关闭 {0}', [item.title])"
+            :title="__t('ui.workspace', '关闭并归档')"
             @click="action(item.id, 'close')"
           >
             ×
@@ -380,20 +393,22 @@ onUnmounted(() => {
       <div class="terminal-controls">
         <button
           class="terminal-create"
-          title="新建系统终端"
-          aria-label="新建终端"
+          :title="__t('ui.workspace', '新建系统终端')"
+          :aria-label="__t('ui.workspace', '新建终端')"
           :disabled="blocked || !agentId || !threadId"
           @click="create"
         >
           <PixelIcon name="plus" size="xs" />
         </button>
         <details class="terminal-menu">
-          <summary title="终端历史">
-            历史
+          <summary :title="__t('ui.workspace', '终端历史')">
+            {{ __t('ui.workspace', '历史') }}
             <small>{{ history.length }}</small>
           </summary>
           <div class="terminal-menu__panel terminal-history">
-            <span v-if="!history.length" class="terminal-menu__empty">暂无历史</span>
+            <span v-if="!history.length" class="terminal-menu__empty">
+              {{ __t('ui.workspace', '暂无历史') }}
+            </span>
             <button
               v-for="item in history"
               :key="item.id"
@@ -404,25 +419,38 @@ onUnmounted(() => {
               <span class="terminal-tab__title">{{ item.title }}</span>
               <small>
                 {{
-                  item.exitReason === 'timeout' ? '超时' : item.exitCode === 0 ? '完成' : '已结束'
+                  item.exitReason === 'timeout'
+                    ? __t('ui.workspace', '超时')
+                    : item.exitCode === 0
+                      ? __t('ui.workspace', '完成')
+                      : __t('ui.workspace', '已结束')
                 }}
               </small>
             </button>
           </div>
         </details>
         <details class="terminal-menu">
-          <summary aria-label="终端管理" title="终端管理">···</summary>
+          <summary
+            :aria-label="__t('ui.workspace', '终端管理')"
+            :title="__t('ui.workspace', '终端管理')"
+          >
+            ···
+          </summary>
           <div class="terminal-menu__panel">
-            <button @click="cleanup('archive_completed')">归档已结束</button>
-            <button @click="cleanup('stop_agent')">停止 Agent 终端</button>
-            <button @click="cleanup('close_all')">关闭全部终端</button>
+            <button @click="cleanup('archive_completed')">
+              {{ __t('ui.workspace', '归档已结束') }}
+            </button>
+            <button @click="cleanup('stop_agent')">
+              {{ __t('ui.workspace', '停止 Agent 终端') }}
+            </button>
+            <button @click="cleanup('close_all')">{{ __t('ui.workspace', '关闭全部终端') }}</button>
           </div>
         </details>
       </div>
     </div>
     <div v-if="connectionError" class="terminal-error" role="alert">
       <span>{{ connectionError }}</span>
-      <button type="button" @click="restart()">重试连接</button>
+      <button type="button" @click="restart()">{{ __t('ui.workspace', '重试连接') }}</button>
     </div>
     <template v-if="activeTerminal">
       <div class="terminal-toolbar">
@@ -431,22 +459,28 @@ onUnmounted(() => {
         <span>
           {{
             activeTerminal.archivedAt
-              ? '已归档'
+              ? __t('ui.workspace', '已归档')
               : activeTerminal.status === 'running'
-                ? '运行中'
-                : '已结束'
+                ? __t('ui.workspace', '运行中')
+                : __t('ui.workspace', '已结束')
           }}
         </span>
         <span class="spacer" />
         <button :aria-pressed="!!activeTerminal.pinned" @click="pin">
-          {{ activeTerminal.pinned ? '取消固定' : '固定' }}
+          {{
+            activeTerminal.pinned ? __t('ui.workspace', '取消固定') : __t('ui.workspace', '固定')
+          }}
         </button>
         <template v-if="activeTerminal.status === 'running'">
-          <button title="中断" @click="action(activeId, 'interrupt')">Ctrl+C</button>
-          <button title="强制终止" @click="action(activeId, 'kill')">停止</button>
+          <button :title="__t('ui.workspace', '中断')" @click="action(activeId, 'interrupt')">
+            Ctrl+C
+          </button>
+          <button :title="__t('ui.workspace', '强制终止')" @click="action(activeId, 'kill')">
+            {{ __t('ui.workspace', '停止') }}
+          </button>
         </template>
         <button v-else-if="!activeTerminal.archivedAt" @click="action(activeId, 'archive')">
-          归档
+          {{ __t('ui.workspace', '归档') }}
         </button>
       </div>
       <WorkspaceTerminalScreen
@@ -468,10 +502,10 @@ onUnmounted(() => {
         @submit.prevent="sendInput"
       >
         <span>›</span>
-        <input v-model="input" placeholder="向终端输入…" />
+        <input v-model="input" :placeholder="__t('ui.workspace', '向终端输入…')" />
       </form>
     </template>
-    <div v-else class="terminal-empty">输入命令创建第一个工作终端</div>
+    <div v-else class="terminal-empty">{{ __t('ui.workspace', '输入命令创建第一个工作终端') }}</div>
   </div>
 </template>
 

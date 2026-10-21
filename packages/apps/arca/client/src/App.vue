@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from './i18n'
+
 /**
  * App.vue — 界面组件
  *
@@ -158,13 +160,17 @@ onBeforeUnmount(() => {
     <ArcaTitleBar />
     <ApplicationBar />
     <div v-if="store.applicationStopped" class="surface-empty stopped-page">
-      <strong>Arca 已停止</strong>
-      <p>可以关闭此标签页。</p>
+      <strong>{{ __t('apps.arca.ui', 'Arca 已停止') }}</strong>
+      <p>{{ __t('apps.arca.ui', '可以关闭此标签页。') }}</p>
     </div>
     <div v-else class="arca-app-content" :inert="store.applicationStopping || openDialogs > 0">
       <div v-if="store.errorMessage" class="workbench-error" role="alert">
         <span>{{ store.errorMessage }}</span>
-        <button class="icon-button" aria-label="关闭提示" @click="store.errorMessage = ''">
+        <button
+          class="icon-button"
+          :aria-label="__t('apps.arca.ui', '关闭提示')"
+          @click="store.errorMessage = ''"
+        >
           ×
         </button>
       </div>

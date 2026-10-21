@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { WorkspacePreviewState } from './workspacePreview'
 import './workspace-file-preview.css'
@@ -41,6 +43,10 @@ const imageStyle = computed(() => ({
 let observer: ResizeObserver | undefined
 let frame: number | undefined
 let drag: { id: number; x: number; y: number; panX: number; panY: number } | undefined
+const pointers = new Map<number, { x: number; y: number }>()
+let pinch:
+  | { distance: number; scale: number; x: number; y: number; panX: number; panY: number }
+  | undefined
 
 watch(
   () => [props.state.zoom, props.state.panX, props.state.panY],
@@ -123,8 +129,26 @@ function reset(actualSize = false) {
 function pan(event: PointerEvent) {
   if (![0, 1].includes(event.button) || !loaded.value || !props.active || !stage.value) return
   event.preventDefault()
-  stopPan()
+  if (!pointers.size) stopPan()
+  pointers.set(event.pointerId, { x: event.clientX, y: event.clientY })
   stage.value.focus({ preventScroll: true })
+  stage.value.setPointerCapture(event.pointerId)
+  if (pointers.size === 2) {
+    const [a, b] = [...pointers.values()]
+    const bounds = stage.value.getBoundingClientRect()
+    pinch = {
+      distance: Math.max(1, Math.hypot(a!.x - b!.x, a!.y - b!.y)),
+      scale: scale.value,
+      x: (a!.x + b!.x) / 2 - bounds.left - areaWidth.value / 2,
+      y: (a!.y + b!.y) / 2 - bounds.top - areaHeight.value / 2,
+      panX: panX.value,
+      panY: panY.value,
+    }
+    drag = undefined
+    dragging.value = true
+    return
+  }
+  if (pointers.size > 2) return
   drag = {
     id: event.pointerId,
     x: event.clientX,
@@ -132,21 +156,46 @@ function pan(event: PointerEvent) {
     panX: panX.value,
     panY: panY.value,
   }
-  stage.value.setPointerCapture(event.pointerId)
   dragging.value = true
 }
 function move(event: PointerEvent) {
+  if (pointers.has(event.pointerId))
+    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY })
+  if (pinch && stage.value && pointers.size >= 2) {
+    const [a, b] = [...pointers.values()]
+    const bounds = stage.value.getBoundingClientRect()
+    const next = Math.min(
+      32,
+      Math.max(0.01, (pinch.scale * Math.hypot(a!.x - b!.x, a!.y - b!.y)) / pinch.distance),
+    )
+    const ratio = next / pinch.scale
+    panX.value =
+      (a!.x + b!.x) / 2 - bounds.left - areaWidth.value / 2 - (pinch.x - pinch.panX) * ratio
+    panY.value =
+      (a!.y + b!.y) / 2 - bounds.top - areaHeight.value / 2 - (pinch.y - pinch.panY) * ratio
+    zoomLevel.value = next
+    publishCamera()
+    return
+  }
   if (!drag || event.pointerId !== drag.id) return
   panX.value = drag.panX + event.clientX - drag.x
   panY.value = drag.panY + event.clientY - drag.y
   publishCamera()
 }
 function stopPan(event?: PointerEvent) {
-  if (event && drag && event.pointerId !== drag.id) return
-  const id = drag?.id
+  if (event && !pointers.has(event.pointerId)) return
+  const ids = event ? [event.pointerId] : [...pointers.keys()]
+  for (const id of ids) pointers.delete(id)
+  pinch = undefined
   drag = undefined
   dragging.value = false
-  if (id !== undefined && stage.value?.hasPointerCapture(id)) stage.value.releasePointerCapture(id)
+  for (const id of ids)
+    if (stage.value?.hasPointerCapture(id)) stage.value.releasePointerCapture(id)
+  const first = [...pointers.entries()][0]
+  if (first) {
+    drag = { id: first[0], x: first[1].x, y: first[1].y, panX: panX.value, panY: panY.value }
+    dragging.value = true
+  }
 }
 function keyboard(event: KeyboardEvent) {
   if (!loaded.value || !props.active) return
@@ -219,8 +268,8 @@ onBeforeUnmount(() => {
         <div class="file-view-control-group">
           <button
             type="button"
-            title="缩小"
-            aria-label="缩小"
+            :title="__t('ui.workspace', '缩小')"
+            :aria-label="__t('ui.workspace', '缩小')"
             :disabled="!loaded"
             @click="zoomAt(scale / 1.2)"
           >
@@ -229,22 +278,26 @@ onBeforeUnmount(() => {
           <span>{{ Math.round(scale * 100) }}%</span>
           <button
             type="button"
-            title="放大"
-            aria-label="放大"
+            :title="__t('ui.workspace', '放大')"
+            :aria-label="__t('ui.workspace', '放大')"
             :disabled="!loaded"
             @click="zoomAt(scale * 1.2)"
           >
             ＋
           </button>
         </div>
-        <button type="button" :class="{ selected: !zoomLevel }" @click="reset()">适应窗口</button>
+        <button type="button" :class="{ selected: !zoomLevel }" @click="reset()">
+          {{ __t('ui.workspace', '适应窗口') }}
+        </button>
         <button type="button" :class="{ selected: zoomLevel === 1 }" @click="reset(true)">
           1:1
         </button>
-        <button type="button" :aria-pressed="checker" @click="checker = !checker">透明底</button>
-        <button type="button" @click="reset()">复位</button>
+        <button type="button" :aria-pressed="checker" @click="checker = !checker">
+          {{ __t('ui.workspace', '透明底') }}
+        </button>
+        <button type="button" @click="reset()">{{ __t('ui.workspace', '复位') }}</button>
         <button type="button" :aria-pressed="expanded" @click="expanded = !expanded">
-          {{ expanded ? '退出全屏' : '全屏观察' }}
+          {{ expanded ? __t('ui.workspace', '退出全屏') : __t('ui.workspace', '全屏观察') }}
         </button>
         <span class="file-view-spacer" />
         <small v-if="loaded">{{ width }} × {{ height }}</small>
@@ -255,7 +308,7 @@ onBeforeUnmount(() => {
         :class="{ checker, dragging }"
         tabindex="0"
         role="region"
-        :aria-label="`${name}，滚轮缩放，拖动平移，双击切换原始尺寸`"
+        :aria-label="__t('ui.workspace', '{0}，双指或滚轮缩放，拖动平移，双击切换原始尺寸', [name])"
         @pointerdown="pan"
         @pointermove="move"
         @pointerup="stopPan"
@@ -272,10 +325,12 @@ onBeforeUnmount(() => {
           draggable="false"
           :style="imageStyle"
           @load="imageLoaded"
-          @error="emit('error', '图片无法显示，请重新载入或用系统应用打开')"
+          @error="emit('error', __t('ui.workspace', '图片无法显示，请重新载入或用系统应用打开'))"
         />
       </div>
-      <div class="workspace-image__hint">滚轮缩放 · 拖动平移 · 双击 1:1 / 适应 · 0 复位</div>
+      <div class="workspace-image__hint">
+        {{ __t('ui.workspace', '双指或滚轮缩放 · 拖动平移 · 双击 1:1 / 适应 · 0 复位') }}
+      </div>
     </div>
   </Teleport>
 </template>

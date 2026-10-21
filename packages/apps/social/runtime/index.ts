@@ -1,3 +1,4 @@
+import { t as __t } from './i18n'
 /**
  * SocialAppRuntime — 社交应用运行时
  *
@@ -41,6 +42,7 @@ import {
   promptFingerprint,
   stableHistoryWindow,
   invalidatePromptReplay,
+  ToolLoopGuard,
 } from '@infos/backend/applicationHostAbi'
 import { SocialAppCompiler, type SocialHistoryMessage } from './compiler'
 import { SocialBridge } from './socialBridge'
@@ -80,7 +82,16 @@ import {
   type SocialContactMemoryProvider,
 } from '../tools'
 import { SocialDataService } from './socialDataService'
-import { currentSocialRecovery } from './socialRecovery'
+import {
+  currentSocialRecovery,
+  currentSocialStep,
+  runSocialStep,
+  socialRateGateOptions,
+} from './socialRecovery'
+import { SocialOrchestration, type SocialActResult } from './socialOrchestration'
+import { NativeEmojiService } from './nativeEmoji'
+import { SocialLoopGuard, DEFAULT_LOOP_POLICY, normalizeLoopPolicy } from './socialLoopGuard'
+import { socialActDefinition } from './socialActDefinition'
 import { createSocialRouter } from './social.router'
 import { SocialStatusCardService } from './statusCardService'
 import { DEFAULT_STATUS_CARD_DESIGN } from '@infos/shared'
@@ -132,6 +143,8 @@ export class SocialAppRuntime implements AgentAppRuntime {
   private socialScorerRunning = new Set<string>()
   /** QQ 账号收藏表情服务，不绑定角色资源。 */
   private stickerService?: StickerService
+  private loopGuard?: SocialLoopGuard
+  private configWriteQueue: Promise<unknown> = Promise.resolve()
   /**
    * 可用工具定义列表（从 manifest.json 解析为 OpenAI function calling 格式）
    * 传给 compiler.generateReply → llmService.chat(tools) 让 LLM 能发起 FC 调用
@@ -173,6 +186,7 @@ export class SocialAppRuntime implements AgentAppRuntime {
     groupBlacklist: [] as string[],
     userBlacklist: [] as string[],
     ownerPrivateOnlyAgentIds: [] as string[],
+    loopGuard: { ...DEFAULT_LOOP_POLICY },
   }
 
   /** 统计信息 */
@@ -277,7 +291,18 @@ export class SocialAppRuntime implements AgentAppRuntime {
       }
 
       // 7. 创建 SocialBridge（内部自动创建 SessionManager + Scheduler）
+      if (!ctx.configRepo) throw new Error('社交互聊保护需要可持久化的配置服务')
+      this.loopGuard = new SocialLoopGuard(
+        ctx.configRepo,
+        () => normalizeLoopPolicy(this.modeConfig.loopGuard),
+        () => this.napcatAdapter?.getConnectedAccountIds() ?? [],
+        () => this.ownerQq,
+        async (change) =>
+          (await this.updateModeConfig((current) => ({ loopGuard: change(current.loopGuard) })))
+            .loopGuard,
+      )
       this.socialBridge = new SocialBridge({
+        loopGuard: this.loopGuard,
         getAgentId: () => this.socialAgentId,
         getOwnerId: () => this.ownerQq,
         socialEvents: ctx.socialEvents,
@@ -285,6 +310,11 @@ export class SocialAppRuntime implements AgentAppRuntime {
         socialMessageRepo: this.socialMessageRepo,
         imageCacheManager,
         stickerService: this.stickerService,
+        resolveNativeEmoji: (scope, reference) =>
+          new NativeEmojiService(this.socialMessageRepo!, ctx.configRepo!).resolve(
+            scope,
+            reference,
+          ),
         inboundRouteRepo: ctx.inboundRouteRepo,
         shouldAcceptInbound: (message) => {
           // 单实例 Social 始终由配置角色处理，频道路由不得跨角色改派。
@@ -367,7 +397,7 @@ export class SocialAppRuntime implements AgentAppRuntime {
               agentId: this.socialAgentId,
             })
           } catch {
-            ctx.logger.warn('创作结果已发送，但社交历史记录未保存')
+            ctx.logger.warn(__t('apps.social.logs', '创作结果已发送，但社交历史记录未保存'))
           }
         },
         ready: async (origin) => {
@@ -400,7 +430,11 @@ export class SocialAppRuntime implements AgentAppRuntime {
         const socialProvider = this.socialBridge.createMessagingProvider()
         if (socialProvider) {
           setSocialMessagingProvider(socialProvider)
-          ctx.logger.info(`社交工具 Provider 已注入 (平台: ${socialProvider.platform})`)
+          ctx.logger.info(
+            __t('apps.social.logs', '社交工具 Provider 已注入 (平台: {0})', [
+              socialProvider.platform,
+            ]),
+          )
         }
       }
       setSocialModeControlProvider({
@@ -411,6 +445,14 @@ export class SocialAppRuntime implements AgentAppRuntime {
         active: (agentId) => this.running && agentId === this.socialAgentId,
         config: ctx.configRepo,
         storage: this.socialMessageRepo,
+        markBot: async (scope, input) => {
+          if (!this.loopGuard) throw new Error('社交互聊保护尚未就绪')
+          return this.loopGuard.markBot(scope, input)
+        },
+        send: async (scope, message) => {
+          if (!this.socialBridge) throw new Error('社交发送服务尚未就绪')
+          return this.socialBridge.sendReply('qq', message, scope.signal)
+        },
         prepareImage: async (source, scope) => {
           if (!ctx.resources) throw new Error('资源服务未就绪')
           const prepared = await ctx.resources.prepare({
@@ -451,62 +493,30 @@ export class SocialAppRuntime implements AgentAppRuntime {
                 parameters: t.parameters ?? { type: 'object', properties: {} },
               },
             }))
-          this.toolDefinitions.push(
-            {
-              type: 'function',
-              function: {
-                name: 'social_wait',
-                description:
-                  '对方可能还没表达完整时调用。当前批次会被保留并等待后续消息；这是终局行为，调用后本轮立即结束。',
-                parameters: {
-                  type: 'object',
-                  properties: {
-                    reason: {
-                      type: 'string',
-                      enum: ['continuation_expected', 'missing_context', 'conversation_unsettled'],
-                    },
-                    duration: { type: 'string', enum: ['short', 'normal', 'long'] },
-                  },
-                  required: ['reason', 'duration'],
-                  additionalProperties: false,
-                },
-              },
-            },
-            {
-              type: 'function',
-              function: {
-                name: 'social_defer',
-                description:
-                  '当前不适合立即回应，但你想稍后在当前会话重新考虑时调用。不会保证未来发送；到期后仍由你根据最新语境决定。',
-                parameters: {
-                  type: 'object',
-                  properties: {
-                    intention: { type: 'string', maxLength: 100 },
-                    timing: { type: 'string', enum: ['soon', 'later', 'much_later'] },
-                    expires: { type: 'string', enum: ['one_hour', 'today', 'one_day'] },
-                    condition: { type: 'string', maxLength: 100 },
-                  },
-                  required: ['intention', 'timing', 'expires'],
-                  additionalProperties: false,
-                },
-              },
-            },
-          )
           const flowTool: ToolDefinition = {
             type: 'function',
             function: {
               name: 'update_flow_state',
-              description: '维护当前社交会话的私有临时心流。仅在跨轮目标或私有事实发生变化时调用。',
+              description: __t(
+                'apps.social.ui',
+                '维护当前社交会话的私有临时心流。仅在跨轮目标或私有事实发生变化时调用。',
+              ),
               parameters: {
                 type: 'object',
                 properties: {
                   current_goal: {
                     type: 'string',
-                    description: '当前持续目标；省略表示保留，空字符串表示清空。',
+                    description: __t(
+                      'apps.social.ui',
+                      '当前持续目标；省略表示保留，空字符串表示清空。',
+                    ),
                   },
                   private_facts: {
                     type: 'string',
-                    description: '不应直接向用户透露的短期关键事实；省略表示保留。',
+                    description: __t(
+                      'apps.social.ui',
+                      '不应直接向用户透露的短期关键事实；省略表示保留。',
+                    ),
                   },
                 },
                 additionalProperties: false,
@@ -518,8 +528,10 @@ export class SocialAppRuntime implements AgentAppRuntime {
             type: 'function',
             function: {
               name: 'communicate_with_host',
-              description:
+              description: __t(
+                'apps.social.ui',
                 '与宿主主 Agent 建立临时通信，用于核验可疑请求、申请审批、请求资源或汇报结果。',
+              ),
               parameters: {
                 type: 'object',
                 properties: {
@@ -543,7 +555,9 @@ export class SocialAppRuntime implements AgentAppRuntime {
             },
           })
           ctx.logger.info(
-            `社交工具已加载: ${this.toolDefinitions.length} 个（含终局与系统协议工具）`,
+            __t('apps.social.logs', '社交能力目录已加载: {0} 个，由统一编排入口调用', [
+              this.toolDefinitions.length,
+            ]),
           )
         }
       } catch {
@@ -597,7 +611,9 @@ export class SocialAppRuntime implements AgentAppRuntime {
             return JSON.stringify({ error: `工具 ${name} 执行失败: ${errMsg}` })
           }
         }
-        ctx.logger.info(`社交工具执行器已构建: ${socialTools.length} 个工具`)
+        ctx.logger.info(
+          __t('apps.social.logs', '社交工具执行器已构建: {0} 个工具', [socialTools.length]),
+        )
 
         // ── 注入图片读取 Provider ──
         // social_read_image 工具通过此 Provider 按 message_id 从 DB 查询消息，
@@ -643,12 +659,12 @@ export class SocialAppRuntime implements AgentAppRuntime {
             },
           }
           setSocialImageReaderProvider(imageReader)
-          ctx.logger.info('社交图片读取 Provider 已注入')
+          ctx.logger.info(__t('apps.social.logs', '社交图片读取 Provider 已注入'))
         }
 
         if (ctx.hostDiaryReader) {
           setSocialDiaryReaderProvider(ctx.hostDiaryReader)
-          ctx.logger.info('宿主Agent日记只读Provider已注入')
+          ctx.logger.info(__t('apps.social.logs', '宿主Agent日记只读Provider已注入'))
         }
 
         if (this.socialMessageRepo) {
@@ -733,7 +749,7 @@ export class SocialAppRuntime implements AgentAppRuntime {
             },
           }
           setSocialContactMemoryProvider(contactMemoryProvider)
-          ctx.logger.info('社交联系人印象与历史 Provider 已注入')
+          ctx.logger.info(__t('apps.social.logs', '社交联系人印象与历史 Provider 已注入'))
         }
       }
 
@@ -763,48 +779,29 @@ export class SocialAppRuntime implements AgentAppRuntime {
           getAgentConfig: () => ({ agentId: this.socialAgentId }),
           updateAgentConfig: (agentId) => this.setSocialAgent(agentId),
           getModeConfig: () => ({ ...this.modeConfig }),
-          updateModeConfig: async (config) => {
-            const next = { ...this.modeConfig, ...config }
-            next.minMessagesForReview = Math.min(Math.max(Number(next.minMessagesForReview), 1), 20)
-            next.nightSilenceStart = Math.min(Math.max(Number(next.nightSilenceStart), 0), 23)
-            next.nightSilenceEnd = Math.min(Math.max(Number(next.nightSilenceEnd), 0), 23)
-            next.groupWhitelist = Array.isArray(next.groupWhitelist)
-              ? next.groupWhitelist.map(String)
-              : []
-            next.groupBlacklist = Array.isArray(next.groupBlacklist)
-              ? next.groupBlacklist.map(String)
-              : []
-            next.userBlacklist = Array.isArray(next.userBlacklist)
-              ? next.userBlacklist.map(String)
-              : []
-            next.ownerPrivateOnlyAgentIds = Array.isArray(next.ownerPrivateOnlyAgentIds)
-              ? [...new Set(next.ownerPrivateOnlyAgentIds.map(String))]
-              : []
-            this.modeConfig = next
-            Object.assign(next, this.socialBridge?.updateSchedulerConfig(next) ?? {})
-            const raw = await ctx.configRepo!.get('social')
-            const current = raw ? (JSON.parse(raw) as Record<string, unknown>) : {}
-            current.mode = next
-            await ctx.configRepo!.set('social', JSON.stringify(current))
-            return { ...next }
-          },
+          updateModeConfig: (config) => this.updateModeConfig(config),
         })
         ctx.mountRouter('/api/social', socialRouter)
       } else {
-        ctx.logger.warn('ctx.mountRouter 未注入，社交 HTTP 路由未挂载（前端 /api/social/* 将 404）')
+        ctx.logger.warn(
+          __t(
+            'apps.social.logs',
+            'ctx.mountRouter 未注入，社交 HTTP 路由未挂载（前端 /api/social/* 将 404）',
+          ),
+        )
       }
 
       // 全部初始化成功后才向宿主发布；使用注入的函数跨越独立 bundle 边界。
       if (this.napcatAdapter)
         this.releaseSocialTransport = ctx.registerSocialTransport(this.napcatAdapter)
       this.running = true
-      ctx.logger.info('社交应用运行时已初始化（已接入真实组件）')
+      ctx.logger.info(__t('apps.social.logs', '社交应用运行时已初始化（已接入真实组件）'))
       return { success: true }
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err)
-      ctx.logger.error(`社交应用初始化失败: ${errMsg}`)
+      ctx.logger.error(__t('apps.social.logs', '社交应用初始化失败: {0}', [errMsg]))
       await this.onStop().catch((error) =>
-        ctx.logger.warn(`清理初始化失败的社交运行时失败: ${error}`),
+        ctx.logger.warn(__t('apps.social.logs', '清理初始化失败的社交运行时失败: {0}', [error])),
       )
       return { success: false, error: errMsg }
     }
@@ -814,7 +811,7 @@ export class SocialAppRuntime implements AgentAppRuntime {
    * 注册资源授权（仅 persona）
    *
    * AIOS 资源隔离原则：
-   * - persona grant：读取主 Agent 的 system_prompt.md 作为人格基础（只读投影）
+   * - persona grant：读取当前社交角色的 system_prompt.md 作为人格基础（只读投影）
    * - **不注册 memory grant**：subagent 不直接读主 Agent 的 RAG/CanonicalMemory
    * - 记忆交换：社交应用产生有价值的记忆时，通过 Checkpoint.memoryCandidates
    *   提交给主 Agent 的 MemoryGate 审核，通过后才并入 CanonicalMemory
@@ -822,25 +819,32 @@ export class SocialAppRuntime implements AgentAppRuntime {
    * 授权为 auto 级别（应用启动自动授予），onStop 时统一撤销。
    */
   private async registerGrants(ctx: AppRuntimeContext): Promise<void> {
-    const { grantRegistry, instanceId, hostAgentId } = ctx
+    const { grantRegistry, instanceId } = ctx
+    const agentId = this.socialAgentId
 
-    // 注册 persona grant（读取主 Agent 人格投影）
+    // 人格跟随当前社交角色；应用最初的宿主不决定切换后的角色身份。
     const personaGrantId = await grantRegistry.grant({
-      ownerAgentId: hostAgentId,
+      ownerAgentId: agentId,
       holderId: instanceId,
       holderType: 'app',
       resource: {
         kind: 'persona',
-        agentId: hostAgentId,
+        agentId,
         allowAppPatch: false,
       },
       permissions: ['read'],
       grantedBy: 'auto',
-      note: '社交应用自动授权：读取主 Agent 人格投影',
+      note: '社交应用自动授权：读取当前社交角色人格投影',
     })
     this.grantIds.push(personaGrantId)
 
-    ctx.logger.info(`资源授权已注册: persona (holder=${instanceId}, host=${hostAgentId})`)
+    ctx.logger.info(
+      __t('apps.social.logs', '人格授权已注册: holder={0}, agent={1}, host={2}', [
+        instanceId,
+        agentId,
+        ctx.hostAgentId,
+      ]),
+    )
   }
 
   /**
@@ -859,12 +863,14 @@ export class SocialAppRuntime implements AgentAppRuntime {
         const ok = await grantRegistry.revoke(grantId)
         if (ok) revokedCount++
       } catch (err) {
-        this.ctx.logger.warn(`撤销授权失败: grantId=${grantId}, ${err}`)
+        this.ctx.logger.warn(
+          __t('apps.social.logs', '撤销授权失败: grantId={0}, {1}', [grantId, err]),
+        )
       }
     }
 
     this.grantIds = []
-    this.ctx.logger.info(`资源授权已撤销: ${revokedCount} 条`)
+    this.ctx.logger.info(__t('apps.social.logs', '资源授权已撤销: {0} 条', [revokedCount]))
   }
 
   async onConfigChanged(keys: readonly string[]): Promise<void> {
@@ -878,7 +884,7 @@ export class SocialAppRuntime implements AgentAppRuntime {
     this.napcatAdapter?.setOwnerQq(ownerQq)
     // 身份边界已变化，取消持有旧身份上下文的回合；新消息使用新配置重新编译。
     this.socialBridge?.closeSessionsExcept(() => false)
-    this.ctx.logger.info('主人 QQ 配置已即时更新，旧身份会话已关闭')
+    this.ctx.logger.info(__t('apps.social.logs', '主人 QQ 配置已即时更新，旧身份会话已关闭'))
   }
 
   private async readSocialConfig(ctx: AppRuntimeContext): Promise<Record<string, unknown>> {
@@ -894,27 +900,98 @@ export class SocialAppRuntime implements AgentAppRuntime {
     }
   }
 
+  /** 模型添加标记与界面保存串行合并，避免并发丢失名单。 */
+  private updateModeConfig(
+    config:
+      | Record<string, unknown>
+      | ((current: typeof this.modeConfig) => Record<string, unknown>),
+  ) {
+    return this.serializeConfigWrite(async () => {
+      if (!this.ctx?.configRepo) throw new Error('社交配置服务尚未就绪')
+      const patch = typeof config === 'function' ? config(this.modeConfig) : config
+      const next = { ...this.modeConfig, ...patch }
+      next.loopGuard = normalizeLoopPolicy({
+        ...this.modeConfig.loopGuard,
+        ...(patch.loopGuard &&
+        typeof patch.loopGuard === 'object' &&
+        !Array.isArray(patch.loopGuard)
+          ? patch.loopGuard
+          : {}),
+      })
+      next.minMessagesForReview = Math.min(Math.max(Number(next.minMessagesForReview), 1), 20)
+      next.nightSilenceStart = Math.min(Math.max(Number(next.nightSilenceStart), 0), 23)
+      next.nightSilenceEnd = Math.min(Math.max(Number(next.nightSilenceEnd), 0), 23)
+      next.groupWhitelist = Array.isArray(next.groupWhitelist)
+        ? next.groupWhitelist.map(String)
+        : []
+      next.groupBlacklist = Array.isArray(next.groupBlacklist)
+        ? next.groupBlacklist.map(String)
+        : []
+      next.userBlacklist = Array.isArray(next.userBlacklist) ? next.userBlacklist.map(String) : []
+      next.ownerPrivateOnlyAgentIds = Array.isArray(next.ownerPrivateOnlyAgentIds)
+        ? [...new Set(next.ownerPrivateOnlyAgentIds.map(String))]
+        : []
+      Object.assign(next, this.socialBridge?.updateSchedulerConfig(next) ?? {})
+      const raw = await this.ctx.configRepo.get('social')
+      const current = raw ? (JSON.parse(raw) as Record<string, unknown>) : {}
+      current.mode = next
+      await this.ctx.configRepo.set('social', JSON.stringify(current))
+      this.modeConfig = next
+      return { ...next }
+    })
+  }
+
+  private serializeConfigWrite<T>(write: () => Promise<T>): Promise<T> {
+    const pending = this.configWriteQueue.catch(() => {}).then(write)
+    this.configWriteQueue = pending
+    return pending
+  }
+
   private async setSocialAgent(agentId: string): Promise<{
     agentId: string
     closedSessions: number
   }> {
     if (!this.ctx?.configRepo || !this.socialBridge) throw new Error('社交应用尚未初始化')
     if (!this.ctx.agentManager.getAgent(agentId)) throw new Error(`角色不存在: ${agentId}`)
-    if (agentId === this.socialAgentId) return { agentId, closedSessions: 0 }
+    if (agentId === this.socialAgentId) {
+      const grants = await this.ctx.grantRegistry.queryGrants({
+        holderId: this.ctx.instanceId,
+        activeOnly: true,
+      })
+      if (
+        grants.some(
+          (grant) =>
+            grant.resource.kind === 'persona' &&
+            grant.resource.agentId === agentId &&
+            grant.permissions.includes('read'),
+        )
+      ) {
+        return { agentId, closedSessions: 0 }
+      }
+      // 同角色再次保存也修复旧版本遗留的宿主人格授权。
+    }
 
-    const current = await this.readSocialConfig(this.ctx)
-    current.agentId = agentId
-    delete current.bindings
-    await this.ctx.configRepo.set('social', JSON.stringify(current))
+    await this.serializeConfigWrite(async () => {
+      const current = await this.readSocialConfig(this.ctx!)
+      current.agentId = agentId
+      delete current.bindings
+      await this.ctx!.configRepo!.set('social', JSON.stringify(current))
+    })
 
     this.lifetime.abort(new Error('社交角色已切换'))
     this.lifetime = new AbortController()
+    invalidatePromptReplay(`social:${this.ctx.instanceId}:`)
     const closedSessions = this.socialBridge.closeSessionsExcept(() => false)
     await this.revokeGrants()
     this.socialAgentId = agentId
     this.napcatAdapter?.setAgentId(agentId)
     await this.registerGrants(this.ctx)
-    this.ctx.logger.info(`[${agentId}] Social 单实例角色已切换，清理会话 ${closedSessions} 个`)
+    this.ctx.logger.info(
+      __t('apps.social.logs', '[{0}] Social 单实例角色已切换，清理会话 {1} 个', [
+        agentId,
+        closedSessions,
+      ]),
+    )
     return { agentId, closedSessions }
   }
 
@@ -926,22 +1003,12 @@ export class SocialAppRuntime implements AgentAppRuntime {
     if (!this.ctx.agentManager.getAgent(agentId)) throw new Error(`角色不存在: ${agentId}`)
     if (enabled && !this.ownerQq) throw new Error('尚未配置主人 QQ，无法启用仅主人私聊模式')
 
-    const ids = new Set(this.modeConfig.ownerPrivateOnlyAgentIds)
-    if (enabled) ids.add(agentId)
-    else ids.delete(agentId)
-    this.modeConfig.ownerPrivateOnlyAgentIds = [...ids]
-
-    const raw = await this.ctx.configRepo.get('social')
-    let current: Record<string, unknown> = {}
-    if (raw) {
-      try {
-        current = JSON.parse(raw) as Record<string, unknown>
-      } catch {
-        current = {}
-      }
-    }
-    current.mode = { ...this.modeConfig }
-    await this.ctx.configRepo.set('social', JSON.stringify(current))
+    await this.updateModeConfig((current) => {
+      const ids = new Set(current.ownerPrivateOnlyAgentIds)
+      if (enabled) ids.add(agentId)
+      else ids.delete(agentId)
+      return { ownerPrivateOnlyAgentIds: [...ids] }
+    })
 
     const closedSessions = enabled
       ? this.socialBridge.closeSessionsExcept(
@@ -951,7 +1018,11 @@ export class SocialAppRuntime implements AgentAppRuntime {
         )
       : 0
     this.ctx.logger.info(
-      `[${agentId}] ${enabled ? '启用' : '关闭'}仅主人私聊激活模式，清理会话 ${closedSessions} 个`,
+      __t('apps.social.logs', '[{0}] {1}仅主人私聊激活模式，清理会话 {2} 个', [
+        agentId,
+        enabled ? '启用' : '关闭',
+        closedSessions,
+      ]),
     )
     return { enabled, closedSessions }
   }
@@ -974,6 +1045,7 @@ export class SocialAppRuntime implements AgentAppRuntime {
         this.modeConfig = {
           ...this.modeConfig,
           ...configured,
+          loopGuard: normalizeLoopPolicy(configured.loopGuard ?? DEFAULT_LOOP_POLICY),
           groupWhitelist: Array.isArray(configured.groupWhitelist)
             ? configured.groupWhitelist.map(String)
             : [],
@@ -1003,8 +1075,8 @@ export class SocialAppRuntime implements AgentAppRuntime {
     this.socialBridge!.registerAdapter(this.napcatAdapter)
 
     ctx.logger.info(
-      `NapCat 适配器已注册, Social Agent: ${this.socialAgentId}, ` +
-        `主人QQ: ${this.ownerQq ?? '(未配置)'} (等待反向 WS 连接)`,
+      __t('apps.social.logs', 'NapCat 适配器已注册, Social Agent: {0}, ', [this.socialAgentId]) +
+        __t('apps.social.logs', '主人QQ: {0} (等待反向 WS 连接)', [this.ownerQq ?? '(未配置)']),
     )
   }
 
@@ -1028,6 +1100,8 @@ export class SocialAppRuntime implements AgentAppRuntime {
     isOwner?: boolean
     triggerSenderId?: string
     triggerSenderName?: string
+    triggerMessageId?: string
+    triggerMessageContent?: string
     flushMsgIds?: string[]
     /** 触发消息中的图片附件（data URL 格式，供多模态 LLM 使用） */
     images?: string[]
@@ -1041,11 +1115,21 @@ export class SocialAppRuntime implements AgentAppRuntime {
       throw new Error('社交应用未初始化，无法唤醒角色 Agent')
     }
 
+    const toolCycleGuard = new ToolLoopGuard()
+    params = {
+      ...params,
+      signal: params.signal
+        ? AbortSignal.any([params.signal, toolCycleGuard.signal])
+        : toolCycleGuard.signal,
+    }
+
     const { agentId, channelType, channelId, combinedMessage } = params
     const triggerSenderId =
       params.triggerSenderId ?? (channelType === 'private' ? channelId : undefined)
     const isOwner = Boolean(this.ownerQq && triggerSenderId === this.ownerQq)
     const stickerAccountId = params.taskOrigin?.accountId || params.botSelfId
+    const triggerMessageId =
+      params.triggerMessageId ?? params.taskOrigin?.messageId ?? params.flushMsgIds?.at(-1)
 
     // ── 从 DB 加载本会话最近 50 条聊天记录 ──
     // 无论是一直在线还是刚启动，都从 social_messages 表读取该频道的历史
@@ -1059,8 +1143,14 @@ export class SocialAppRuntime implements AgentAppRuntime {
         // 过滤掉本次 flush 的消息（handleInbound 已持久化到 DB，但 combinedMessage 会单独追加，
         // 不过滤会导致同一条消息在 messages 中出现两次）
         const excludeIds = new Set(params.flushMsgIds ?? [])
+        // 标记变化只使相关账号的历史续接失效，避免复用未带提醒的旧轨迹。
         const messageKey = (row: (typeof dbRows)[number]) =>
-          promptFingerprint([row.msgId, row.senderId, row.content])
+          promptFingerprint([
+            row.msgId,
+            row.senderId,
+            row.content,
+            ...(this.loopGuard?.isBotAccount(row.senderId) ? ['bot·无需刻意回应@'] : []),
+          ])
         replayCurrentKeys = dbRows
           .filter(
             (row) =>
@@ -1094,10 +1184,11 @@ export class SocialAppRuntime implements AgentAppRuntime {
           content: row.content,
           senderName: row.senderId === 'self' ? undefined : row.senderName || row.senderId,
           senderId: row.senderId,
+          messageId: row.msgId,
           timestamp: row.timestamp ?? new Date().toISOString(),
         }))
       } catch (err) {
-        logger.warn(`从 DB 加载会话历史失败 (非致命): ${err}`)
+        logger.warn(__t('apps.social.logs', '从 DB 加载会话历史失败 (非致命): {0}', [err]))
       }
     }
 
@@ -1122,16 +1213,19 @@ export class SocialAppRuntime implements AgentAppRuntime {
             .filter((message) => !stickerAccountId || message.accountId === stickerAccountId)
             .map((m) => {
               const role = m.senderId === 'self' ? '自己' : m.senderName || m.senderId
-              return `[${JSON.stringify(role)} QQ:${m.senderId}]: ${m.content}`
+              return `[${JSON.stringify(role)} QQ:${m.senderId}]${this.loopGuard?.isBotAccount(m.senderId) ? ' [bot·无需刻意回应@]' : ''}: ${m.content}`
             })
           crossSessionContext = lines.join('\n')
           logger.debug(
-            `跨会话上下文: sender=${params.triggerSenderId}, 私聊记录=${privateMsgs.length} 条`,
+            __t('apps.social.logs', '跨会话上下文: sender={0}, 私聊记录={1} 条', [
+              params.triggerSenderId,
+              privateMsgs.length,
+            ]),
           )
         }
       } catch (err) {
         // 静默，跨会话上下文是可选的
-        logger.debug(`跨会话上下文加载失败 (非致命): ${err}`)
+        logger.debug(__t('apps.social.logs', '跨会话上下文加载失败 (非致命): {0}', [err]))
       }
     }
 
@@ -1158,6 +1252,12 @@ export class SocialAppRuntime implements AgentAppRuntime {
       instanceId: this.ctx.instanceId,
       hostAgentId: this.socialAgentId,
       history,
+      botAccountIds: [
+        ...new Set([
+          ...this.modeConfig.loopGuard.knownBotIds,
+          ...(this.napcatAdapter?.getConnectedAccountIds() ?? []),
+        ]),
+      ].filter((id) => this.loopGuard?.isBotAccount(id)),
       userMessage:
         !model.enableVision && params.images?.length
           ? `${combinedMessage}\n[图片状态：当前角色模型未开启视觉能力，本轮没有读到图片内容，不要假装已经看过。]`
@@ -1182,24 +1282,25 @@ export class SocialAppRuntime implements AgentAppRuntime {
       crossSessionContext,
       triggerSenderId,
       triggerSenderName: params.triggerSenderName,
+      triggerMessageId,
+      triggerMessageContent: params.triggerMessageContent,
       images: model.enableVision ? params.images : undefined,
       imageSources: params.imageSources,
       botSelfId: params.botSelfId,
       botNickname: params.botNickname,
     })
 
+    logger.info(
+      __t('apps.social.logs', '社交回合身份已绑定: agent={0}, account={1}, ', [
+        agentId,
+        stickerAccountId || '未知',
+      ]) +
+        `channel=${channelType}:${channelId}, message=${triggerMessageId || __t('apps.social.logs', '未知')}, ` +
+        `sender=${triggerSenderId || __t('apps.social.logs', '未知')}, isOwner=${isOwner}`,
+    )
+
     // 社交回复属于角色自身表达，使用当前角色指派的模型。
 
-    let terminalOutcome = currentSocialRecovery()?.record.checkpoint.terminalOutcome as
-      | SocialTurnOutcome
-      | undefined
-    const saveTerminalOutcome = async () => {
-      const recovery = currentSocialRecovery()
-      if (recovery) {
-        recovery.record.checkpoint.terminalOutcome = terminalOutcome
-        await recovery.save()
-      }
-    }
     const diaryAllowed = channelType === 'private' && isOwner && channelId === this.ownerQq
     const turnToolDefinitions = diaryAllowed
       ? this.toolDefinitions
@@ -1222,7 +1323,7 @@ export class SocialAppRuntime implements AgentAppRuntime {
       signal: AbortSignal.any([this.lifetime.signal, ...(params.signal ? [params.signal] : [])]),
       callId: currentSocialRecovery()?.record.id ?? crypto.randomUUID(),
     }
-    const scopedDefinitions = [
+    const capabilityDefinitions = [
       ...((await this.operations?.definitions(operationScope)) ?? []),
       ...(taskAllowed
         ? turnToolDefinitions
@@ -1230,7 +1331,6 @@ export class SocialAppRuntime implements AgentAppRuntime {
       ).filter((tool) => stickersAvailable || tool.function.name !== 'social_sticker'),
       ...(creativeDefinition ? [{ type: 'function' as const, function: creativeDefinition }] : []),
     ]
-    const terminalTools = new Set(['social_wait', 'social_defer'])
     let cardSent = false
     let resourceSent = false
     let resourceUnconfirmed = false
@@ -1255,7 +1355,7 @@ export class SocialAppRuntime implements AgentAppRuntime {
       ]
     }
 
-    // 调用同一角色 Agent 的有限 ReAct。终局控制工具只提交行为，不执行外部副作用。
+    // 编排入口复用当前角色的能力、权限和取消现场，不创建嵌套 Agent。
     const executeScopedTool = async (
       name: string,
       args: Record<string, unknown>,
@@ -1318,7 +1418,7 @@ export class SocialAppRuntime implements AgentAppRuntime {
           })
         if (!this.ctx?.resources || !this.socialBridge || !this.running)
           return JSON.stringify({ success: false, error: '资源发送暂不可用' })
-        const key = JSON.stringify([args.source, args.caption])
+        const key = JSON.stringify([currentSocialStep(), args.source, args.caption])
         if (sentResources.has(key)) return sentResources.get(key)!
         const operation = (async () => {
           let deliveryAttempted = false
@@ -1335,7 +1435,7 @@ export class SocialAppRuntime implements AgentAppRuntime {
               threadId,
               source,
               caption,
-              callId: `social:${crypto.randomUUID()}`,
+              callId: currentSocialStep() ?? `social:${crypto.randomUUID()}`,
               allowLocal: channelType === 'private' && isOwner && channelId === this.ownerQq,
             })
             const accountId = params.taskOrigin?.accountId || params.botSelfId
@@ -1347,37 +1447,44 @@ export class SocialAppRuntime implements AgentAppRuntime {
             )
               throw new Error('当前社交账号已断开或角色已变化')
             deliveryAttempted = true
-            await this.socialBridge!.sendReply('qq', {
-              accountId,
-              channelId,
-              channelType,
-              content: caption || '',
-              attachments: [
-                {
-                  type: ['image', 'audio', 'video'].includes(prepared.resource.kind)
-                    ? (prepared.resource.kind as 'image' | 'audio' | 'video')
-                    : 'file',
-                  localPath: prepared.filePath,
-                  name: prepared.resource.name,
-                  mimeType: prepared.resource.mimeType,
-                },
-              ],
-            })
+            await this.socialBridge!.sendReply(
+              'qq',
+              {
+                accountId,
+                channelId,
+                channelType,
+                content: caption || '',
+                attachments: [
+                  {
+                    type: ['image', 'audio', 'video'].includes(prepared.resource.kind)
+                      ? (prepared.resource.kind as 'image' | 'audio' | 'video')
+                      : 'file',
+                    localPath: prepared.filePath,
+                    name: prepared.resource.name,
+                    mimeType: prepared.resource.mimeType,
+                  },
+                ],
+              },
+              params.signal,
+              undefined,
+              `[文件] ${prepared.resource.name} · attachment:${prepared.resource.id}${caption ? `\n${caption}` : ''}`,
+            )
             resourceSent = true
             // 外部投递已经成功，记录失败只能留下诊断，不能让模型重发。
             try {
               await this.ctx!.resources!.markDelivered(prepared.resource.id, agentId)
-              await this.socialMessageRepo?.insert({
-                turnId: currentSocialRecovery()?.record.id,
-                msgId: `resource_${prepared.resource.id}`,
-                platform: 'qq',
-                channelId,
-                channelType,
-                senderId: 'self',
-                senderName: agentId,
-                agentId,
-                content: `[文件] ${prepared.resource.name} · attachment:${prepared.resource.id}${caption ? `\n${caption}` : ''}`,
-              })
+              if (!currentSocialRecovery()?.record.checkpoint.orchestration)
+                await this.socialMessageRepo?.insert({
+                  turnId: currentSocialRecovery()?.record.id,
+                  msgId: `resource_${prepared.resource.id}`,
+                  platform: 'qq',
+                  channelId,
+                  channelType,
+                  senderId: 'self',
+                  senderName: agentId,
+                  agentId,
+                  content: `[文件] ${prepared.resource.name} · attachment:${prepared.resource.id}${caption ? `\n${caption}` : ''}`,
+                })
               await this.ctx!.socialEvents?.publish('social_message', {
                 platform: 'qq',
                 channelId,
@@ -1386,7 +1493,9 @@ export class SocialAppRuntime implements AgentAppRuntime {
               })
             } catch (error) {
               logger.warn(
-                `资源发送记录保存失败: ${error instanceof Error ? error.message : String(error)}`,
+                __t('apps.social.logs', '资源发送记录保存失败: {0}', [
+                  error instanceof Error ? error.message : String(error),
+                ]),
               )
             }
             return JSON.stringify({
@@ -1398,7 +1507,9 @@ export class SocialAppRuntime implements AgentAppRuntime {
           } catch (error) {
             if (
               deliveryAttempted &&
-              (error as { code?: string } | null)?.code !== 'DELIVERY_REJECTED'
+              !['DELIVERY_REJECTED', 'DELIVERY_NOT_SENT'].includes(
+                (error as { code?: string } | null)?.code ?? '',
+              )
             ) {
               resourceUnconfirmed = true
               return JSON.stringify({
@@ -1410,6 +1521,12 @@ export class SocialAppRuntime implements AgentAppRuntime {
             return JSON.stringify({
               success: false,
               error: error instanceof Error ? error.message : String(error),
+              code: (error as { code?: string }).code,
+              rejected:
+                !deliveryAttempted ||
+                ['DELIVERY_REJECTED', 'DELIVERY_NOT_SENT'].includes(
+                  (error as { code?: string }).code ?? '',
+                ),
             })
           }
         })()
@@ -1417,6 +1534,7 @@ export class SocialAppRuntime implements AgentAppRuntime {
         return operation
       }
       if (name === 'social_status_card') {
+        let deliveryAttempted = false
         if (
           !diaryAllowed ||
           params.triggerSenderId !== this.ownerQq ||
@@ -1447,7 +1565,7 @@ export class SocialAppRuntime implements AgentAppRuntime {
           if (!accountId || !this.napcatAdapter?.getConnectedAccountIds().includes(accountId))
             throw new Error('当前社交账号未连接')
           const image = await this.statusCards.render(
-            this.ctx!.hostAgentId,
+            agentId,
             args.design ?? (await this.statusCards.getDesign(agentId)),
           )
           // 发送目标来自本轮可信会话，工具参数不能改写接收人。
@@ -1458,33 +1576,39 @@ export class SocialAppRuntime implements AgentAppRuntime {
             !this.running
           )
             throw new Error('社交会话已停止或主人配置已变化')
-          await this.socialBridge.sendReply('qq', {
-            accountId,
-            channelId,
-            channelType: 'private',
-            content: '',
-            attachments: [
-              { type: 'image', url: `base64://${image.imageBase64}`, mimeType: image.mimeType },
-            ],
-          })
-          cardSent = true
           const s = image.snapshot
           const summary = `[状态卡片] ${s.deviceName} · ${s.capturedAt}；CPU ${s.cpu.percent === null ? '未提供' : `${Math.round(s.cpu.percent)}%`}；内存 ${(s.memory.usedBytes / 1024 ** 3).toFixed(1)} / ${(s.memory.totalBytes / 1024 ** 3).toFixed(1)} GB`
-          terminalOutcome = { type: 'reply', content: summary, delivered: true }
-          await saveTerminalOutcome()
-          // 投递已成功，历史记录或前端广播失败不能导致工具重发图片。
-          try {
-            await this.socialMessageRepo?.insert({
-              turnId: currentSocialRecovery()?.record.id,
-              msgId: `card_${crypto.randomUUID()}`,
-              platform: 'qq',
+          deliveryAttempted = true
+          await this.socialBridge.sendReply(
+            'qq',
+            {
+              accountId,
               channelId,
               channelType: 'private',
-              senderId: 'self',
-              senderName: agentId,
-              content: summary,
-              agentId,
-            })
+              content: '',
+              attachments: [
+                { type: 'image', url: `base64://${image.imageBase64}`, mimeType: image.mimeType },
+              ],
+            },
+            params.signal,
+            undefined,
+            summary,
+          )
+          cardSent = true
+          // 投递已成功，历史记录或前端广播失败不能导致工具重发图片。
+          try {
+            if (!currentSocialRecovery()?.record.checkpoint.orchestration)
+              await this.socialMessageRepo?.insert({
+                turnId: currentSocialRecovery()?.record.id,
+                msgId: `card_${crypto.randomUUID()}`,
+                platform: 'qq',
+                channelId,
+                channelType: 'private',
+                senderId: 'self',
+                senderName: agentId,
+                content: summary,
+                agentId,
+              })
             await this.ctx!.socialEvents?.publish('social_message', {
               platform: 'qq',
               channelId,
@@ -1493,20 +1617,32 @@ export class SocialAppRuntime implements AgentAppRuntime {
             })
           } catch (error) {
             logger.warn(
-              `状态卡片发送记录保存失败: ${error instanceof Error ? error.message : String(error)}`,
+              __t('apps.social.logs', '状态卡片发送记录保存失败: {0}', [
+                error instanceof Error ? error.message : String(error),
+              ]),
             )
           }
           return JSON.stringify({
             success: true,
             sent: true,
-            terminal: true,
             capturedAt: image.snapshot.capturedAt,
-            message: '状态卡片已发送到当前会话',
+            message: __t('apps.social.ui', '状态卡片已发送到当前会话'),
           })
         } catch (error) {
           return JSON.stringify({
             success: false,
             error: error instanceof Error ? error.message : String(error),
+            code: (error as { code?: string }).code,
+            rejected:
+              !deliveryAttempted ||
+              ['DELIVERY_REJECTED', 'DELIVERY_NOT_SENT'].includes(
+                (error as { code?: string }).code ?? '',
+              ),
+            uncertain:
+              deliveryAttempted &&
+              !['DELIVERY_REJECTED', 'DELIVERY_NOT_SENT'].includes(
+                (error as { code?: string }).code ?? '',
+              ),
           })
         }
       }
@@ -1530,49 +1666,6 @@ export class SocialAppRuntime implements AgentAppRuntime {
       if (name === 'social_read_diary' && !diaryAllowed) {
         return JSON.stringify({ success: false, error: '只有主人私聊可以读取当前角色的日记' })
       }
-      if (name === 'social_wait') {
-        const reason = String(args.reason ?? '') as
-          | 'continuation_expected'
-          | 'missing_context'
-          | 'conversation_unsettled'
-        const duration = String(args.duration ?? '') as 'short' | 'normal' | 'long'
-        if (
-          !['continuation_expected', 'missing_context', 'conversation_unsettled'].includes(reason)
-        ) {
-          return JSON.stringify({ success: false, error: '无效的等待原因' })
-        }
-        if (!['short', 'normal', 'long'].includes(duration)) {
-          return JSON.stringify({ success: false, error: '无效的等待时长' })
-        }
-        terminalOutcome = { type: 'wait', wait: { reason, duration } }
-        await saveTerminalOutcome()
-        return JSON.stringify({ success: true, terminal: true })
-      }
-      if (name === 'social_defer') {
-        const intention = String(args.intention ?? '')
-          .trim()
-          .slice(0, 100)
-        const timing = String(args.timing ?? '') as 'soon' | 'later' | 'much_later'
-        const expires = String(args.expires ?? '') as 'one_hour' | 'today' | 'one_day'
-        if (!intention || !['soon', 'later', 'much_later'].includes(timing)) {
-          return JSON.stringify({ success: false, error: '延后意图参数无效' })
-        }
-        if (!['one_hour', 'today', 'one_day'].includes(expires)) {
-          return JSON.stringify({ success: false, error: '延后意图有效期无效' })
-        }
-        terminalOutcome = {
-          type: 'defer',
-          intent: {
-            intention,
-            timing,
-            expires,
-            condition:
-              typeof args.condition === 'string' ? args.condition.trim().slice(0, 100) : undefined,
-          },
-        }
-        await saveTerminalOutcome()
-        return JSON.stringify({ success: true, terminal: true })
-      }
       if (name === 'update_flow_state') {
         const currentGoal = typeof args.current_goal === 'string' ? args.current_goal : undefined
         const privateFacts = typeof args.private_facts === 'string' ? args.private_facts : undefined
@@ -1591,7 +1684,7 @@ export class SocialAppRuntime implements AgentAppRuntime {
         })
         return JSON.stringify({
           success: true,
-          message: '当前社交会话心流已更新',
+          message: __t('apps.social.ui', '当前社交会话心流已更新'),
           revision: updated.revision,
         })
       }
@@ -1620,12 +1713,12 @@ export class SocialAppRuntime implements AgentAppRuntime {
         ? this.toolExecutor(name, args)
         : JSON.stringify({ success: false, error: `工具执行器不可用: ${name}` })
     }
-    const scopedToolExecutor = async (
+    const executeUncheckedScopedTool = async (
       name: string,
       args: Record<string, unknown>,
       callId?: string,
     ) => {
-      if (!scopedDefinitions.some((tool) => tool.function.name === name))
+      if (!capabilityDefinitions.some((tool) => tool.function.name === name))
         return JSON.stringify({ success: false, error: '此工具未向当前会话开放' })
       if (SOCIAL_BUSINESS_TOOLS.includes(name as SocialBusinessTool)) {
         const result = await this.operations!.execute(
@@ -1637,23 +1730,100 @@ export class SocialAppRuntime implements AgentAppRuntime {
           },
           executeScopedTool,
         )
-        if (name === 'social' && args.action === 'status_card_send') {
-          const outcome = JSON.parse(result) as { success?: boolean; terminal?: boolean }
-          if (outcome.success && outcome.terminal) {
-            cardSent = true
-            terminalOutcome ??= { type: 'reply', content: '', delivered: true }
-            await saveTerminalOutcome()
-          }
-        }
         return result
       }
       return executeScopedTool(name, args)
     }
+    const scopedToolExecutor = async (
+      name: string,
+      args: Record<string, unknown>,
+      callId?: string,
+    ) => {
+      params.signal?.throwIfAborted()
+      const warning = toolCycleGuard.before(name, args)
+      if (warning)
+        return JSON.stringify({ success: false, code: 'TOOL_LOOP_WARNING', error: warning })
+      const result = await executeUncheckedScopedTool(name, args, callId)
+      let failed = false
+      try {
+        const value = JSON.parse(result) as { success?: boolean; error?: unknown } | null
+        failed = value?.success === false || (value?.error !== undefined && value.error !== null)
+      } catch {
+        /* 非结构化结果不猜测失败，仅由稳定只读工具参与成功重复检测。 */
+      }
+      toolCycleGuard.observe(name, args, result, failed)
+      return result
+    }
+    const recovery = currentSocialRecovery()
+    if (!recovery || !this.socialBridge || !stickerAccountId)
+      throw new Error('社交编排的持久化现场或发送账号尚未就绪')
+    let actResult: SocialActResult | undefined
+    const orchestration = new SocialOrchestration({
+      assertAllowed: async () => {
+        params.signal?.throwIfAborted()
+        await this.loopGuard?.check(recovery.record)
+      },
+      accountId: stickerAccountId,
+      channelId,
+      channelType,
+      triggerMessageId,
+      triggerSenderId,
+      available: (name, args) => {
+        const definition = capabilityDefinitions.find((tool) => tool.function.name === name)
+        if (!definition) return false
+        if (!SOCIAL_BUSINESS_TOOLS.includes(name as SocialBusinessTool)) return true
+        const properties = definition.function.parameters.properties as Record<
+          string,
+          { enum?: unknown[] }
+        >
+        return properties.action?.enum?.includes(args.action) === true
+      },
+      execute: scopedToolExecutor,
+      send: (message, key) => this.socialBridge!.sendOrchestratedMessage(message, key),
+      sendResource: (source, caption, key) =>
+        runSocialStep(key, () => executeScopedTool('send_file', { source, caption })),
+    })
+    const scopedDefinitions = [socialActDefinition(capabilityDefinitions)]
+    const replayMessages = () =>
+      Object.values(
+        (recovery.record.checkpoint.sentMessages as Record<
+          string,
+          {
+            content: string
+            sentAt: number
+            messageId?: string
+            channelId?: string
+            channelType?: string
+            accountId?: string
+          }
+        >) ?? {},
+      )
+        .filter(
+          (message) =>
+            (!message.channelId || message.channelId === channelId) &&
+            (!message.channelType || message.channelType === channelType) &&
+            (!message.accountId || message.accountId === stickerAccountId),
+        )
+        .sort((a, b) => a.sentAt - b.sentAt)
     params.signal?.throwIfAborted()
-    const reply = await this.compiler.generateReply(compiled.messages, model, {
+    await this.compiler.generateReply(compiled.messages, model, {
       replayScope: `social:${this.ctx.instanceId}:${agentId}:${stickerAccountId}:${channelType}:${channelId}`,
       replayCurrentKeys,
-      replayReply: () => (terminalOutcome?.type === 'reply' ? terminalOutcome.content : ''),
+      replayReply: () =>
+        replayMessages()
+          .map((message) => message.content)
+          .join('\n'),
+      replayDeliveries: () =>
+        replayMessages().flatMap((message) =>
+          message.messageId
+            ? [
+                {
+                  key: promptFingerprint([message.messageId, 'self', message.content]),
+                  reply: message.content,
+                },
+              ]
+            : [],
+        ),
       usageContext: {
         agentId,
         channel: 'social',
@@ -1661,26 +1831,72 @@ export class SocialAppRuntime implements AgentAppRuntime {
         threadId: `social:${stickerAccountId}:${channelType}:${channelId}`,
       },
       signal: params.signal,
+      beforeModelRequest: async (round) => {
+        params.signal?.throwIfAborted()
+        await this.loopGuard?.consume(
+          recovery.record,
+          'requests',
+          `model:${round}`,
+          socialRateGateOptions(recovery),
+        )
+      },
       currentMessageIndex: compiled.currentMessageIndex,
       historyMessageIndices: compiled.historyMessageIndices,
       tools: scopedDefinitions,
-      toolExecutor: scopedToolExecutor,
-      isTerminalTool: (name) => terminalTools.has(name) || (name === 'social' && cardSent),
+      orchestrationTool: 'social_act',
+      toolExecutor: async (name, args, callId, context) => {
+        if (name !== 'social_act')
+          return JSON.stringify({ success: false, error: '请通过 social_act 的 call 步骤调用能力' })
+        actResult = await orchestration.execute(
+          args,
+          callId ?? `act-${crypto.randomUUID()}`,
+          context?.closing,
+        )
+        params.signal?.throwIfAborted()
+        return JSON.stringify(actResult)
+      },
     })
     params.signal?.throwIfAborted()
+    actResult ??= orchestration.currentResult()
     if (compiled.variableCommit) await this.compiler.commitVariables(compiled.variableCommit)
 
-    const outcome: SocialTurnOutcome =
-      resourceSent && terminalOutcome?.type !== 'reply' && (terminalOutcome || isPassReply(reply))
-        ? { type: 'reply', content: '', delivered: true }
-        : terminalOutcome
-          ? terminalOutcome
-          : isPassReply(reply)
-            ? { type: 'pass' }
-            : { type: 'reply', content: reply }
+    const deliveredReply = Object.values(
+      (recovery.record.checkpoint.sentMessages as Record<
+        string,
+        { content: string; sentAt: number }
+      >) ?? {},
+    )
+      .sort((a, b) => a.sentAt - b.sentAt)
+      .map((message) => message.content)
+      .join('\n')
+    let outcome: SocialTurnOutcome
+    if (actResult?.status === 'waiting') {
+      outcome = {
+        type: 'orchestration',
+        wakeAt: actResult.wake_at!,
+        expiresAt: actResult.expires_at!,
+      }
+    } else if (actResult?.status === 'completed') {
+      const delivered =
+        resourceSent ||
+        cardSent ||
+        actResult.delivered_messages.length > 0 ||
+        Object.values(
+          (recovery.record.checkpoint.deliveries ?? {}) as Record<string, string>,
+        ).includes('sent')
+      outcome = delivered
+        ? { type: 'reply', content: deliveredReply, delivered: true }
+        : { type: 'pass' }
+    } else {
+      throw new Error('社交回合尚未通过 social_act 提交参与行为，未发送普通文字')
+    }
 
     this.stats.messagesProcessed++
-    if (cardSent || resourceSent || (outcome.type === 'reply' && outcome.content.trim()))
+    if (
+      cardSent ||
+      resourceSent ||
+      (outcome.type === 'reply' && (outcome.delivered || outcome.content.trim()))
+    )
       this.stats.repliesSent++
 
     this.ctx.emitEvent({
@@ -1689,8 +1905,11 @@ export class SocialAppRuntime implements AgentAppRuntime {
       progress: 0,
       message:
         outcome.type === 'reply'
-          ? `已生成频道 ${channelId} 的回复：${outcome.content.slice(0, 50)}`
-          : `频道 ${channelId} 选择 ${outcome.type.toUpperCase()}`,
+          ? __t('apps.social.ui', '已生成频道 {0} 的回复：{1}', [
+              channelId,
+              outcome.content.slice(0, 50),
+            ])
+          : __t('apps.social.ui', '频道 {0} 选择 {1}', [channelId, outcome.type.toUpperCase()]),
       timestamp: new Date().toISOString(),
     })
 
@@ -1711,7 +1930,7 @@ export class SocialAppRuntime implements AgentAppRuntime {
     if (this.socialBridge) {
       await this.socialBridge.stop()
     }
-    this.ctx?.logger.info('社交应用已暂停')
+    this.ctx?.logger.info(__t('apps.social.logs', '社交应用已暂停'))
   }
 
   async onResume(): Promise<void> {
@@ -1721,7 +1940,7 @@ export class SocialAppRuntime implements AgentAppRuntime {
     if (this.socialBridge) {
       await this.socialBridge.start()
     }
-    this.ctx?.logger.info('社交应用已恢复')
+    this.ctx?.logger.info(__t('apps.social.logs', '社交应用已恢复'))
   }
 
   async onStop(): Promise<AppCheckpoint | undefined> {
@@ -1750,7 +1969,7 @@ export class SocialAppRuntime implements AgentAppRuntime {
     // 撤销资源授权（仅 persona）
     await this.revokeGrants()
 
-    this.ctx?.logger.info('社交应用已停止')
+    this.ctx?.logger.info(__t('apps.social.logs', '社交应用已停止'))
 
     return this.getCheckpoint()
   }
@@ -1789,7 +2008,7 @@ export class SocialAppRuntime implements AgentAppRuntime {
   async listSessions(): Promise<Array<{ id: string; title: string; status: string }>> {
     return (this.socialBridge?.listSessions() ?? []).map((session) => ({
       id: `${session.agentId}:${session.channelType}:${session.channelId}`,
-      title: `${session.channelType === 'private' ? '私聊' : '群聊'} ${session.channelId}`,
+      title: `${session.channelType === 'private' ? __t('apps.social.ui', '私聊') : __t('apps.social.ui', '群聊')} ${session.channelId}`,
       status: `${session.participation}:${session.phase}`,
     }))
   }
@@ -1838,9 +2057,16 @@ export class SocialAppRuntime implements AgentAppRuntime {
       request.correlationId,
       this.socialAgentId,
       groupId,
-      `【主 Agent 委派的单次社交任务】${intent}\n请结合群聊近期记录判断如何自然参与；直接给出准备发送到群里的内容。`,
+      `【主 Agent 委派的单次社交任务】${intent}\n请结合群聊近期记录判断如何自然参与；通过 social_act 提交回复、PASS 或必要的编排。`,
       this.ownerQq || 'host',
     )
+    if (outcome.type === 'orchestration')
+      return {
+        correlationId: request.correlationId,
+        status: 'completed',
+        summary: '社交编排已接收，正在后台等待后续步骤',
+        output: { sent: false, scheduled: true, groupId, wakeAt: outcome.wakeAt },
+      }
     if (outcome.type !== 'reply') {
       return {
         correlationId: request.correlationId,
@@ -1909,7 +2135,7 @@ export class SocialAppRuntime implements AgentAppRuntime {
         }
       }
     } catch (err) {
-      logger.warn(`读取社交当日记忆摘要失败: ${err}`)
+      logger.warn(__t('apps.social.logs', '读取社交当日记忆摘要失败: {0}', [err]))
     }
 
     return summaries
@@ -1932,10 +2158,6 @@ export default function createRuntime(): AgentAppRuntime {
 // ─────────────────────────────────────────────
 // 辅助函数
 // ─────────────────────────────────────────────
-
-function isPassReply(reply: string): boolean {
-  return reply.trim().toUpperCase() === 'PASS'
-}
 
 /**
  * 从 OneBot 原始事件的 JSON 字符串中提取图片 URL

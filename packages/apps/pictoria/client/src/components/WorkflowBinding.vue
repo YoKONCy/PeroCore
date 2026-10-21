@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 import { computed, ref, watch } from 'vue'
 import type { Asset, FieldSchema } from '../types'
 import type { Binding } from '../workflowTypes'
@@ -57,7 +59,9 @@ const path = computed(() =>
 const options = computed(() => [
   ...Object.entries(props.store.doc.inputSchema.properties || {}).map(([name, schema]) => ({
     value: JSON.stringify({ input: name }),
-    label: `输入 · ${schema.title || name}`,
+    get label() {
+      return __t('apps.pictoria.ui', '输入 · {0}', [schema.title || name])
+    },
   })),
   ...props.store.doc.nodes
     .filter((node) => node.id !== props.exclude)
@@ -65,7 +69,7 @@ const options = computed(() => [
       Object.entries(props.store.stepFor(node)?.outputSchema?.properties || {}).map(
         ([name, schema]) => ({
           value: JSON.stringify({ node: node.id, output: name }),
-          label: `${node.label || props.store.stepFor(node)?.name || '节点'} · ${schema.title || name}`,
+          label: `${node.label || props.store.stepFor(node)?.name || __t('apps.pictoria.ui', '节点')} · ${schema.title || name}`,
         }),
       ),
     ),
@@ -133,10 +137,10 @@ function move(index: number, direction: number) {
       <PictoriaSelect
         :model-value="mode"
         :options="[
-          { value: 'literal', label: '固定值' },
-          { value: 'reference', label: '引用' },
+          { value: 'literal', label: __t('apps.pictoria.ui', '固定值') },
+          { value: 'reference', label: __t('apps.pictoria.ui', '引用') },
           ...((schema?.type === 'array' || mode === 'array') && (depth || 0) < 6
-            ? [{ value: 'array', label: '多项' }]
+            ? [{ value: 'array', label: __t('apps.pictoria.ui', '多项') }]
             : []),
         ]"
         @update:model-value="setMode"
@@ -144,7 +148,7 @@ function move(index: number, direction: number) {
       <button
         v-if="modelValue"
         class="icon-button"
-        aria-label="清空"
+        :aria-label="__t('apps.pictoria.ui', '清空')"
         @click="emit('update:modelValue', undefined)"
       >
         <Icon name="close" :size="13" />
@@ -164,14 +168,14 @@ function move(index: number, direction: number) {
       <PictoriaSelect
         :model-value="source"
         :options="options"
-        placeholder="选择来源"
+        :placeholder="__t('apps.pictoria.ui', '选择来源')"
         @update:model-value="pick"
       />
       <input
         v-if="modelValue"
         :value="path"
-        placeholder="路径（可选）"
-        aria-label="选取路径"
+        :placeholder="__t('apps.pictoria.ui', '路径（可选）')"
+        :aria-label="__t('apps.pictoria.ui', '选取路径')"
         @change="setPath(($event.target as HTMLInputElement).value)"
       />
     </template>
@@ -180,18 +184,27 @@ function move(index: number, direction: number) {
         <header>
           <small>{{ index + 1 }}</small>
           <span />
-          <button class="icon-button" :disabled="!index" aria-label="向前" @click="move(index, -1)">
+          <button
+            class="icon-button"
+            :disabled="!index"
+            :aria-label="__t('apps.pictoria.ui', '向前')"
+            @click="move(index, -1)"
+          >
             <Icon class="workflow-left" name="chevron" :size="12" />
           </button>
           <button
             class="icon-button"
             :disabled="index === modelValue.array.length - 1"
-            aria-label="向后"
+            :aria-label="__t('apps.pictoria.ui', '向后')"
             @click="move(index, 1)"
           >
             <Icon name="chevron" :size="12" />
           </button>
-          <button class="icon-button" aria-label="移除" @click="setRow(index)">
+          <button
+            class="icon-button"
+            :aria-label="__t('apps.pictoria.ui', '移除')"
+            @click="setRow(index)"
+          >
             <Icon name="close" :size="12" />
           </button>
         </header>
@@ -218,7 +231,7 @@ function move(index: number, direction: number) {
           "
         >
           <Icon name="plus" :size="13" />
-          添加
+          {{ __t('apps.pictoria.ui', '添加') }}
         </button>
         <label class="workflow-checkbox">
           <input
@@ -231,7 +244,7 @@ function move(index: number, direction: number) {
               })
             "
           />
-          展开数组
+          {{ __t('apps.pictoria.ui', '展开数组') }}
         </label>
       </div>
     </template>

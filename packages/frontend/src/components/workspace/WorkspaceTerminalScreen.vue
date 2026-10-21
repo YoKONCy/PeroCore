@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /** 将 PTY 输出作为终端协议解析，保留光标、清屏、颜色与跨批次控制序列。 */
 import { onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Terminal } from '@xterm/xterm'
@@ -181,7 +183,12 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="host" class="terminal-screen" role="region" aria-label="终端输出" />
+  <div
+    ref="host"
+    class="terminal-screen"
+    role="region"
+    :aria-label="__t('ui.workspace', '终端输出')"
+  />
 </template>
 
 <style scoped>

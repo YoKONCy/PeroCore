@@ -47,6 +47,7 @@ export interface ToolDefinition {
 
 /** 工具调用记录 */
 export interface ToolCallRecord {
+  parentCallId?: string
   fileObservations?: import('../context/fileWorkingContext').FileObservation[]
   automaticApproval?: import('@infos/shared').AutomaticApprovalRecord
   name: string

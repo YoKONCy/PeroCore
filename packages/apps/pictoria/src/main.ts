@@ -2,6 +2,8 @@ import path from 'node:path'
 import { PictoriaHost } from './host'
 import type { HostPort } from './domain'
 import { ProcessLifetime } from './processLifetime'
+import { setLocale } from '@infos/shared/i18n'
+setLocale(process.env.INFOS_LANGUAGE ?? process.env.LANG)
 
 const callback = process.env.INFOS_PICTORIA_CALLBACK
 const callbackKey = process.env.INFOS_PICTORIA_CALLBACK_KEY

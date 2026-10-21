@@ -1,3 +1,4 @@
+import { t as __t } from './i18n'
 import { z } from 'zod'
 import {
   bindingSchema,
@@ -116,12 +117,18 @@ export function compileDraft(
 } {
   const issues: WorkflowIssue[] = []
   if (!draft.nodes.length)
-    issues.push({ code: 'empty', message: '添加一个节点', severity: 'error' })
+    issues.push({
+      code: 'empty',
+      message: __t('apps.pictoria.ui', '添加一个节点'),
+      severity: 'error',
+    })
   for (const node of draft.nodes)
     if (!node.stepId || !node.stepRevision)
       issues.push({
         code: 'step',
-        message: node.example ? '示例步骤未配置，请选择或新建步骤' : '选择步骤',
+        message: node.example
+          ? __t('apps.pictoria.ui', '示例步骤未配置，请选择或新建步骤')
+          : __t('apps.pictoria.ui', '选择步骤'),
         nodeId: node.id,
         severity: 'error',
       })

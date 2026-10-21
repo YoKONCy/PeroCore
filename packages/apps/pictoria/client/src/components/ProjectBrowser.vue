@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { t as __t } from '../i18n'
+
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { CanvasCollection } from '../types'
 import type { CanvasStore } from '../composables/useCanvas'
 import Icon from './PictoriaIcon.vue'
@@ -16,6 +18,107 @@ const canvases = computed(() => [
   props.store.project,
   ...props.store.projects.value.filter((canvas) => canvas.id !== props.store.project.id),
 ])
+const contextMenu = ref<{
+  id: string
+  left: number
+  top: number
+  mode: 'menu' | 'delete' | 'rename'
+} | null>(null)
+const canvasTitle = ref('')
+const menuElement = ref<HTMLElement | null>(null)
+const menuCanvas = computed(() =>
+  canvases.value.find((canvas) => canvas.id === contextMenu.value?.id),
+)
+let menuTrigger: HTMLElement | null = null
+function closeMenu(restoreFocus = false) {
+  contextMenu.value = null
+  if (restoreFocus) menuTrigger?.focus({ preventScroll: true })
+}
+async function placeMenu() {
+  await nextTick()
+  const box = menuElement.value?.getBoundingClientRect()
+  if (!box || !contextMenu.value) return
+  contextMenu.value.left = Math.max(
+    8,
+    Math.min(contextMenu.value.left, window.innerWidth - box.width - 8),
+  )
+  contextMenu.value.top = Math.max(
+    8,
+    Math.min(contextMenu.value.top, window.innerHeight - box.height - 8),
+  )
+  const input = menuElement.value?.querySelector<HTMLInputElement>('input')
+  if (input) {
+    input.focus({ preventScroll: true })
+    input.select()
+  } else {
+    menuElement.value
+      ?.querySelector<HTMLButtonElement>('button:not(:disabled)')
+      ?.focus({ preventScroll: true })
+  }
+}
+function openMenu(event: MouseEvent, id: string) {
+  if (busy.value) return
+  const row = event.currentTarget as HTMLElement
+  menuTrigger = row.querySelector<HTMLButtonElement>('.project-canvas-open')
+  const box = row.getBoundingClientRect()
+  contextMenu.value = {
+    id,
+    left: event.clientX || box.left,
+    top: event.clientY || box.bottom,
+    mode: 'menu',
+  }
+  void placeMenu()
+}
+function confirmRemoval() {
+  if (!contextMenu.value || busy.value) return
+  contextMenu.value.mode = 'delete'
+  void placeMenu()
+}
+function editCanvasName() {
+  if (!contextMenu.value || !menuCanvas.value || busy.value) return
+  canvasTitle.value = menuCanvas.value.title
+  contextMenu.value.mode = 'rename'
+  void placeMenu()
+}
+async function renameCanvas() {
+  const id = contextMenu.value?.id
+  if (!id || busy.value || !canvasTitle.value.trim()) return
+  if (await props.store.renameProject(id, canvasTitle.value)) closeMenu(true)
+}
+async function removeCanvas() {
+  const id = contextMenu.value?.id
+  if (!id || busy.value) return
+  if (await props.store.removeProject(id)) closeMenu()
+}
+function outside(event: PointerEvent) {
+  if (!menuElement.value?.contains(event.target as Node)) closeMenu()
+}
+function menuKey(event: KeyboardEvent) {
+  if (!contextMenu.value) return
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    closeMenu(true)
+  } else if (event.key === 'Tab' && contextMenu.value.mode === 'menu') closeMenu()
+}
+function dismissMenu(event?: Event) {
+  if (event?.target instanceof Node && menuElement.value?.contains(event.target)) return
+  closeMenu()
+}
+onMounted(() => {
+  window.addEventListener('pointerdown', outside, true)
+  window.addEventListener('keydown', menuKey, true)
+  window.addEventListener('scroll', dismissMenu, true)
+  window.addEventListener('resize', dismissMenu)
+  window.addEventListener('blur', dismissMenu)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('pointerdown', outside, true)
+  window.removeEventListener('keydown', menuKey, true)
+  window.removeEventListener('scroll', dismissMenu, true)
+  window.removeEventListener('resize', dismissMenu)
+  window.removeEventListener('blur', dismissMenu)
+})
 function groupId(id: string | null | undefined) {
   return props.store.collections.value.some((group) => group.id === id) ? id : ''
 }
@@ -26,7 +129,13 @@ const groups = computed(() =>
       title: group.title,
       definition: group,
     })),
-    { id: '', title: '独立画布', definition: undefined },
+    {
+      id: '',
+      get title() {
+        return __t('apps.pictoria.ui', '独立画布')
+      },
+      definition: undefined,
+    },
   ]
     .map((group) => ({
       ...group,
@@ -47,7 +156,12 @@ const groups = computed(() =>
     ),
 )
 const options = computed(() => [
-  { value: '', label: '独立画布' },
+  {
+    value: '',
+    get label() {
+      return __t('apps.pictoria.ui', '独立画布')
+    },
+  },
   ...props.store.collections.value.map((group) => ({ value: group.id, label: group.title })),
 ])
 const busy = computed(
@@ -82,6 +196,7 @@ async function remove(group: CanvasCollection) {
 watch(
   () => props.store.agentId.value,
   () => {
+    closeMenu()
     editing.value = undefined
     removing.value = ''
     collapsed.value = []
@@ -93,15 +208,19 @@ watch(
 <template>
   <section class="canvas-panel panel-projects project-browser floating-panel" data-ui>
     <header>
-      <strong>项目与画布</strong>
-      <button class="icon-button" aria-label="关闭项目列表" @click="emit('close')">
+      <strong>{{ __t('apps.pictoria.ui', '项目与画布') }}</strong>
+      <button
+        class="icon-button"
+        :aria-label="__t('apps.pictoria.ui', '关闭项目列表')"
+        @click="emit('close')"
+      >
         <Icon name="close" :size="17" />
       </button>
     </header>
     <div class="project-browser-actions">
       <button class="quiet-button outlined" :disabled="busy || !store.online.value" @click="edit()">
         <Icon name="folder" :size="15" />
-        新建项目
+        {{ __t('apps.pictoria.ui', '新建项目') }}
       </button>
       <button
         class="quiet-button outlined"
@@ -109,26 +228,32 @@ watch(
         @click="emit('create', store.project.collectionId ?? null)"
       >
         <Icon name="plus" :size="15" />
-        新建画布
+        {{ __t('apps.pictoria.ui', '新建画布') }}
       </button>
     </div>
     <label class="project-search">
       <Icon name="search" :size="14" />
-      <input v-model="query" placeholder="搜索…" aria-label="搜索项目与画布" />
+      <input
+        v-model="query"
+        :placeholder="__t('apps.pictoria.ui', '搜索…')"
+        :aria-label="__t('apps.pictoria.ui', '搜索项目与画布')"
+      />
     </label>
     <Transition name="float">
       <form v-if="editing !== undefined" class="project-edit" @submit.prevent="save">
         <input
           v-model="title"
-          :placeholder="editing ? '项目名称' : '新项目名称'"
-          aria-label="项目名称"
+          :placeholder="
+            editing ? __t('apps.pictoria.ui', '项目名称') : __t('apps.pictoria.ui', '新项目名称')
+          "
+          :aria-label="__t('apps.pictoria.ui', '项目名称')"
           maxlength="120"
         />
         <button
           class="icon-button"
           :disabled="busy || !title.trim()"
-          aria-label="保存项目"
-          title="保存"
+          :aria-label="__t('apps.pictoria.ui', '保存项目')"
+          :title="__t('apps.pictoria.ui', '保存')"
           type="submit"
         >
           <Icon name="check" :size="15" />
@@ -136,7 +261,7 @@ watch(
         <button
           class="icon-button"
           type="button"
-          aria-label="取消编辑"
+          :aria-label="__t('apps.pictoria.ui', '取消编辑')"
           @click="editing = undefined"
         >
           <Icon name="close" :size="14" />
@@ -164,8 +289,8 @@ watch(
           <button
             class="icon-button"
             :disabled="busy"
-            :aria-label="`在${group.title}中新建画布`"
-            title="新建画布"
+            :aria-label="__t('apps.pictoria.ui', '在{0}中新建画布', [group.title])"
+            :title="__t('apps.pictoria.ui', '新建画布')"
             @click="emit('create', group.id || null)"
           >
             <Icon name="plus" :size="14" />
@@ -174,8 +299,8 @@ watch(
             v-if="group.definition"
             class="icon-button"
             :disabled="busy || !store.online.value"
-            aria-label="重命名项目"
-            title="重命名"
+            :aria-label="__t('apps.pictoria.ui', '重命名项目')"
+            :title="__t('apps.pictoria.ui', '重命名')"
             @click="edit(group.definition)"
           >
             <Icon name="edit" :size="13" />
@@ -184,8 +309,8 @@ watch(
             v-if="group.definition"
             class="icon-button"
             :disabled="busy || !store.online.value"
-            aria-label="移除项目"
-            title="移除项目"
+            :aria-label="__t('apps.pictoria.ui', '移除项目')"
+            :title="__t('apps.pictoria.ui', '移除项目')"
             @click="removing = removing === group.id ? '' : group.id"
           >
             <Icon name="trash" :size="13" />
@@ -193,15 +318,17 @@ watch(
         </div>
         <Transition name="float">
           <div v-if="removing === group.id && group.definition" class="inline-confirm">
-            <span>移除项目？画布会保留。</span>
+            <span>{{ __t('apps.pictoria.ui', '移除项目？画布会保留。') }}</span>
             <button
               class="text-button danger-button"
               :disabled="busy"
               @click="remove(group.definition)"
             >
-              移除
+              {{ __t('apps.pictoria.ui', '移除') }}
             </button>
-            <button class="text-button" @click="removing = ''">取消</button>
+            <button class="text-button" @click="removing = ''">
+              {{ __t('apps.pictoria.ui', '取消') }}
+            </button>
           </div>
         </Transition>
         <div
@@ -214,6 +341,7 @@ watch(
               :key="canvas.id"
               class="project-canvas-row"
               :class="{ current: canvas.id === store.project.id }"
+              @contextmenu.prevent.stop="openMenu($event, canvas.id)"
             >
               <button class="project-canvas-open" :disabled="busy" @click="emit('open', canvas.id)">
                 <Icon name="grid" :size="14" />
@@ -225,7 +353,7 @@ watch(
                 :options="options"
                 :disabled="busy || (!store.online.value && canvas.id !== store.project.id)"
                 icon-only
-                :label="`移动画布：${canvas.title}`"
+                :label="__t('apps.pictoria.ui', '移动画布：{0}', [canvas.title])"
                 @update:model-value="store.moveToCollection(canvas.id, $event || null)"
               />
             </div>
@@ -236,12 +364,102 @@ watch(
               @click="emit('create', group.id || null)"
             >
               <Icon name="plus" :size="13" />
-              新建画布
+              {{ __t('apps.pictoria.ui', '新建画布') }}
             </button>
           </div>
         </div>
       </section>
-      <p v-if="!groups.length" class="panel-empty">没有匹配项</p>
+      <p v-if="!groups.length" class="panel-empty">{{ __t('apps.pictoria.ui', '没有匹配项') }}</p>
     </div>
+    <Teleport to="body">
+      <div
+        v-if="contextMenu && menuCanvas"
+        ref="menuElement"
+        class="project-context-menu floating-panel"
+        :style="{ left: `${contextMenu.left}px`, top: `${contextMenu.top}px` }"
+        :role="
+          contextMenu.mode === 'menu'
+            ? 'menu'
+            : contextMenu.mode === 'delete'
+              ? 'alertdialog'
+              : 'dialog'
+        "
+        :aria-label="
+          contextMenu.mode === 'rename'
+            ? __t('apps.pictoria.ui', '重命名画布')
+            : contextMenu.mode === 'delete'
+              ? __t('apps.pictoria.ui', '确认删除画布')
+              : __t('apps.pictoria.ui', '画布操作')
+        "
+        data-ui
+        @contextmenu.prevent
+        @keydown.stop
+      >
+        <form
+          v-if="contextMenu.mode === 'rename'"
+          class="project-rename-form"
+          @submit.prevent="renameCanvas"
+        >
+          <label>
+            {{ __t('apps.pictoria.ui', '重命名画布') }}
+            <input
+              v-model="canvasTitle"
+              :aria-label="__t('apps.pictoria.ui', '画布名称')"
+              maxlength="120"
+              :disabled="busy"
+            />
+          </label>
+          <footer>
+            <button type="button" class="text-button" :disabled="busy" @click="closeMenu(true)">
+              {{ __t('apps.pictoria.ui', '取消') }}
+            </button>
+            <button type="submit" class="text-button" :disabled="busy || !canvasTitle.trim()">
+              {{ busy ? __t('apps.pictoria.ui', '正在保存…') : __t('apps.pictoria.ui', '保存') }}
+            </button>
+          </footer>
+        </form>
+        <template v-else-if="contextMenu.mode === 'delete'">
+          <strong>{{ __t('apps.pictoria.ui', '删除「') }}{{ menuCanvas.title }}」？</strong>
+          <p>
+            {{
+              __t(
+                'apps.pictoria.ui',
+                '画布及未保存的修改将被删除，无法恢复。素材库中的素材会保留。',
+              )
+            }}
+          </p>
+          <footer>
+            <button class="text-button" :disabled="busy" @click="closeMenu(true)">
+              {{ __t('apps.pictoria.ui', '取消') }}
+            </button>
+            <button class="text-button danger-button" :disabled="busy" @click="removeCanvas">
+              {{
+                busy ? __t('apps.pictoria.ui', '正在删除…') : __t('apps.pictoria.ui', '确认删除')
+              }}
+            </button>
+          </footer>
+        </template>
+        <template v-else>
+          <button
+            class="project-context-action"
+            role="menuitem"
+            :disabled="busy || (!store.online.value && menuCanvas.id !== store.project.id)"
+            @click="editCanvasName"
+          >
+            <Icon name="edit" :size="15" />
+            {{ __t('apps.pictoria.ui', '重命名') }}
+          </button>
+          <button
+            class="project-context-action project-context-delete"
+            role="menuitem"
+            :disabled="busy || (!store.online.value && menuCanvas.revision > 0)"
+            @click="confirmRemoval"
+          >
+            <Icon name="trash" :size="15" />
+            {{ __t('apps.pictoria.ui', '删除画布') }}
+          </button>
+        </template>
+      </div>
+    </Teleport>
   </section>
 </template>

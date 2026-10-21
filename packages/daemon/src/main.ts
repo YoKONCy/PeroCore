@@ -1,3 +1,4 @@
+import { t as __t } from '../../backend/src/lib/i18n'
 /**
  * infOS Daemon — 独立进程入口
  *
@@ -26,10 +27,13 @@ startServer({
   printBanner: printBanner,
   onHttpReady: (address, port) => {
     // Daemon 入口保留 info 日志（与历史行为一致）
-    logger.info(`业务 HTTP 已就绪 → http://${address}:${port}`)
+    logger.info(
+      '[infOS:ready:http] ' +
+        __t('logs.daemon', '业务 HTTP 已就绪 → http://{0}:{1}', [address, port]),
+    )
   },
 }).catch((err) => {
-  logger.error(`Daemon 启动失败: ${err}`)
+  logger.error(__t('logs.daemon', 'Daemon 启动失败: {0}', [err]))
   if (err instanceof Error) {
     console.error(err.stack)
   }
@@ -62,13 +66,27 @@ function printBanner(): void {
 
   console.log(banner)
   console.log(separator)
-  console.log(`\x1b[38;5;219m🚀 infOS Daemon (独立进程模式)\x1b[0m`)
-  console.log(`\x1b[38;5;183m📅 时间: ${now}\x1b[0m`)
-  console.log(`\x1b[38;5;147m📂 数据目录: ${getDataDir()}\x1b[0m`)
-  console.log(`\x1b[38;5;117m💻 平台: ${process.platform} / Node ${process.version}\x1b[0m`)
-  console.log(`\x1b[38;5;87m🔌 业务端口: ${process.env.PERO_PORT ?? '9120'}\x1b[0m`)
   console.log(
-    `\x1b[38;5;123m🛠  能力通道端口: ${process.env.PERO_CAPABILITY_PORT ?? '9121'}\x1b[0m`,
+    '\u001b[38;5;219m' + __t('logs.daemon', '🚀 infOS Daemon (独立进程模式)') + '\u001b[0m',
+  )
+  console.log('\u001b[38;5;183m' + __t('logs.daemon', '📅 时间: {0}', [now]) + '\u001b[0m')
+  console.log(
+    '\u001b[38;5;147m' + __t('logs.daemon', '📂 数据目录: {0}', [getDataDir()]) + '\u001b[0m',
+  )
+  console.log(
+    '\u001b[38;5;117m' +
+      __t('logs.daemon', '💻 平台: {0} / Node {1}', [process.platform, process.version]) +
+      '\u001b[0m',
+  )
+  console.log(
+    '\u001b[38;5;87m' +
+      __t('logs.daemon', '🔌 业务端口: {0}', [process.env.PERO_PORT ?? '9120']) +
+      '\u001b[0m',
+  )
+  console.log(
+    '\u001b[38;5;123m' +
+      __t('logs.daemon', '🛠  能力通道端口: {0}', [process.env.PERO_CAPABILITY_PORT ?? '9121']) +
+      '\u001b[0m',
   )
   console.log(separator)
 }

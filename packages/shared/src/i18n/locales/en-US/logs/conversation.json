@@ -1,0 +1,13 @@
+{
+  "释放离线完成提醒连接失败": "release offline completion reminder connection failed",
+  "释放完成提醒连接失败": "Release completion reminder connection failed",
+  "完成提醒投递失败，任务结果不受影响": "completion reminder delivery failed, the task results are not affected",
+  "读取持久队列失败，暂停自动派发": "Failed to read the persistent queue, suspending automatic dispatch",
+  "当前回合结束，队列已暂停": "The current round is over and the queue has been paused.",
+  "消息队列派发失败，已保留持久记录": "Message queue dispatch failed, persistent records have been retained",
+  "队列暂停状态写入失败，停止自动派发以避免重复执行": "Failed to write queue pause status, stop automatic dispatch to avoid repeated execution",
+  "开始派发队列消息": "starts dispatching queue messages",
+  "回复就绪提示发送失败，完整回复已保存": "Reply ready prompt failed to send, complete reply has been saved",
+  "检索反馈提交失败，不影响已完成回复": "Retrieval feedback submission failed, which does not affect the completed reply",
+  "工具结果短期缓存失败，不影响当前回复": "The short-term caching of tool results failed, which does not affect the current reply."
+}

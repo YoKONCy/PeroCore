@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { getDisplayLocale } from '../../i18n/index'
+
+import { t as __t } from '../../i18n/index'
+
 import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import type {
   KnowledgeDocumentDetail,
@@ -46,13 +50,36 @@ const pages = computed(() => Math.max(1, Math.ceil(archive.value.total / archive
 const hasPending = computed(
   () => archive.value.stats.pendingCount > 0 || archive.value.stats.indexingCount > 0,
 )
-const statusLabels = { queued: '待整理', processing: '整理中', ready: '可检索', failed: '整理失败' }
+const statusLabels = {
+  get queued() {
+    return __t('ui.knowledge', '待整理')
+  },
+  get processing() {
+    return __t('ui.knowledge', '整理中')
+  },
+  get ready() {
+    return __t('ui.knowledge', '可检索')
+  },
+  get failed() {
+    return __t('ui.knowledge', '整理失败')
+  },
+}
 const vectorLabels = {
-  skipped: '仅文本检索',
-  pending: '向量索引中',
-  ready: '语义检索已就绪',
-  failed: '向量索引失败',
-  stale: '向量待重建',
+  get skipped() {
+    return __t('ui.knowledge', '仅文本检索')
+  },
+  get pending() {
+    return __t('ui.knowledge', '向量索引中')
+  },
+  get ready() {
+    return __t('ui.knowledge', '语义检索已就绪')
+  },
+  get failed() {
+    return __t('ui.knowledge', '向量索引失败')
+  },
+  get stale() {
+    return __t('ui.knowledge', '向量待重建')
+  },
 }
 let active = true
 let listRequest = 0
@@ -120,8 +147,9 @@ async function imported(item: KnowledgeDocumentInfo): Promise<void> {
   await load(false)
   selectedId.value = item.id
   view.value = 'document'
-  if (item.status === 'failed') notif.toast(item.error || '资料已保存，整理未能开始', 'error')
-  else notif.toast('资料已加入整理队列', 'success')
+  if (item.status === 'failed')
+    notif.toast(item.error || __t('ui.knowledge', '资料已保存，整理未能开始'), 'error')
+  else notif.toast(__t('ui.knowledge', '资料已加入整理队列'), 'success')
 }
 async function retry(item: KnowledgeDocumentInfo): Promise<void> {
   try {
@@ -139,7 +167,7 @@ async function remove(): Promise<void> {
     deleteTarget.value = null
     results.value = null
     await load(false)
-    notif.toast('资料已删除', 'success')
+    notif.toast(__t('ui.knowledge', '资料已删除'), 'success')
   } catch (cause) {
     notif.toast((cause as Error).message, 'error')
     deleteTarget.value = null
@@ -154,7 +182,7 @@ async function reindex(): Promise<void> {
   try {
     await knowledgeApi.reindex()
     await load(false)
-    notif.toast('索引重建已安排', 'success')
+    notif.toast(__t('ui.knowledge', '索引重建已安排'), 'success')
   } catch (cause) {
     notif.toast((cause as Error).message, 'error')
   } finally {
@@ -184,7 +212,7 @@ async function search(): Promise<void> {
   }
 }
 function date(value: string): string {
-  return new Date(value).toLocaleString('zh-CN', {
+  return new Date(value).toLocaleString(getDisplayLocale(), {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
@@ -227,8 +255,10 @@ onUnmounted(stop)
     <div class="document-toolbar">
       <span>
         <PixelIcon name="file" size="sm" />
-        {{ archive.stats.readyCount }} 份可检索
-        <span v-if="archive.stats.pendingCount">· {{ archive.stats.pendingCount }} 份整理中</span>
+        {{ archive.stats.readyCount }} {{ __t('ui.knowledge', '份可检索') }}
+        <span v-if="archive.stats.pendingCount">
+          · {{ archive.stats.pendingCount }} {{ __t('ui.knowledge', '份整理中') }}
+        </span>
       </span>
       <div>
         <PButton
@@ -239,11 +269,11 @@ onUnmounted(stop)
           @click="reindex"
         >
           <PixelIcon name="refresh" size="xs" />
-          重建索引
+          {{ __t('ui.knowledge', '重建索引') }}
         </PButton>
         <PButton size="sm" @click="openImport()">
           <PixelIcon name="plus" size="xs" />
-          导入资料
+          {{ __t('ui.knowledge', '导入资料') }}
         </PButton>
       </div>
     </div>
@@ -251,20 +281,34 @@ onUnmounted(stop)
       <aside class="document-panel">
         <label class="document-filter">
           <PixelIcon name="search" size="sm" />
-          <input v-model="query" placeholder="搜索资料名称或来源……" aria-label="搜索资料" />
+          <input
+            v-model="query"
+            :placeholder="__t('ui.knowledge', '搜索资料名称或来源……')"
+            :aria-label="__t('ui.knowledge', '搜索资料')"
+          />
         </label>
         <div v-if="loading && !archive.items.length" class="document-state">
           <PixelIcon name="refresh" animation="spin" />
-          正在读取…
+          {{ __t('ui.knowledge', '正在读取…') }}
         </div>
         <div v-else-if="error" class="document-state document-error" role="alert">
           {{ error }}
-          <PButton size="sm" @click="load()">重新加载</PButton>
+          <PButton size="sm" @click="load()">{{ __t('ui.knowledge', '重新加载') }}</PButton>
         </div>
         <div v-else-if="!archive.items.length" class="document-state">
           <PixelIcon name="file" size="xl" />
-          <b>{{ query ? '没有找到资料' : '文档库还是空的' }}</b>
-          <span>{{ query ? '换个名称或来源试试' : '导入文本或网页，让 Agent 随时查阅' }}</span>
+          <b>
+            {{
+              query ? __t('ui.knowledge', '没有找到资料') : __t('ui.knowledge', '文档库还是空的')
+            }}
+          </b>
+          <span>
+            {{
+              query
+                ? __t('ui.knowledge', '换个名称或来源试试')
+                : __t('ui.knowledge', '导入文本或网页，让 Agent 随时查阅')
+            }}
+          </span>
         </div>
         <div v-else class="document-list" :aria-busy="loading">
           <button
@@ -277,47 +321,61 @@ onUnmounted(stop)
               <PixelIcon :name="item.sourceKind === 'url' ? 'globe' : 'file'" size="sm" />
               <b>{{ item.title }}</b>
             </span>
-            <small class="document-row-source">{{ item.source || '粘贴文本' }}</small>
+            <small class="document-row-source">
+              {{ item.source || __t('ui.knowledge', '粘贴文本') }}
+            </small>
             <span class="document-row-meta">
               <i :class="['document-status', item.status]">{{ statusLabels[item.status] }}</i>
               <small>
                 {{ item.tokenCount.toLocaleString() }} Token
-                <span v-if="item.status === 'ready'">· {{ item.partCount }} 部分</span>
+                <span v-if="item.status === 'ready'">
+                  · {{ item.partCount }} {{ __t('ui.knowledge', '部分') }}
+                </span>
               </small>
             </span>
           </button>
         </div>
         <footer class="document-pagination">
-          <button :disabled="page <= 1" aria-label="上一页" @click="page--">‹</button>
-          <span>{{ archive.total }} 份 · {{ page }}/{{ pages }}</span>
-          <button :disabled="page >= pages" aria-label="下一页" @click="page++">›</button>
+          <button :disabled="page <= 1" :aria-label="__t('ui.knowledge', '上一页')" @click="page--">
+            ‹
+          </button>
+          <span>{{ archive.total }} {{ __t('ui.knowledge', '份 ·') }} {{ page }}/{{ pages }}</span>
+          <button
+            :disabled="page >= pages"
+            :aria-label="__t('ui.knowledge', '下一页')"
+            @click="page++"
+          >
+            ›
+          </button>
         </footer>
       </aside>
 
       <main class="document-inspector">
-        <nav class="inspector-tabs" aria-label="资料查看方式">
+        <nav class="inspector-tabs" :aria-label="__t('ui.knowledge', '资料查看方式')">
           <button :class="{ active: view === 'document' }" @click="view = 'document'">
             <PixelIcon name="file" size="xs" />
-            资料
+            {{ __t('ui.knowledge', '资料') }}
           </button>
           <button :class="{ active: view === 'search' }" @click="view = 'search'">
             <PixelIcon name="search" size="xs" />
-            检索
+            {{ __t('ui.knowledge', '检索') }}
           </button>
         </nav>
         <div v-if="view === 'document'" class="inspector-scroll">
           <div v-if="detailLoading" class="document-state">
             <PixelIcon name="refresh" animation="spin" />
-            正在读取…
+            {{ __t('ui.knowledge', '正在读取…') }}
           </div>
           <div v-else-if="detailError" class="document-state document-error" role="alert">
             {{ detailError }}
-            <PButton v-if="selectedId" size="sm" @click="loadDetail(selectedId)">重新加载</PButton>
+            <PButton v-if="selectedId" size="sm" @click="loadDetail(selectedId)">
+              {{ __t('ui.knowledge', '重新加载') }}
+            </PButton>
           </div>
           <div v-else-if="!selected" class="document-state">
             <PixelIcon name="file" size="xl" />
-            <b>选择一份资料</b>
-            <span>查看摘要、关键词和原文</span>
+            <b>{{ __t('ui.knowledge', '选择一份资料') }}</b>
+            <span>{{ __t('ui.knowledge', '查看摘要、关键词和原文') }}</span>
           </div>
           <template v-else>
             <header class="document-head">
@@ -326,16 +384,20 @@ onUnmounted(stop)
               </span>
               <div>
                 <h3>{{ selected.title }}</h3>
-                <p>{{ selected.source || '粘贴文本' }}</p>
+                <p>{{ selected.source || __t('ui.knowledge', '粘贴文本') }}</p>
               </div>
               <div class="document-actions">
-                <button title="更新资料" aria-label="更新资料" @click="openImport(selected)">
+                <button
+                  :title="__t('ui.knowledge', '更新资料')"
+                  :aria-label="__t('ui.knowledge', '更新资料')"
+                  @click="openImport(selected)"
+                >
                   <PixelIcon name="edit" size="sm" />
                 </button>
                 <button
                   class="danger"
-                  title="删除资料"
-                  aria-label="删除资料"
+                  :title="__t('ui.knowledge', '删除资料')"
+                  :aria-label="__t('ui.knowledge', '删除资料')"
                   @click="deleteTarget = selected"
                 >
                   <PixelIcon name="trash" size="sm" />
@@ -347,7 +409,7 @@ onUnmounted(stop)
                 {{ statusLabels[selected.status] }}
               </i>
               <span>{{ selected.tokenCount.toLocaleString() }} Token</span>
-              <span>版本 {{ selected.revision }}</span>
+              <span>{{ __t('ui.knowledge', '版本') }} {{ selected.revision }}</span>
               <span>{{ date(selected.updatedAt) }}</span>
             </div>
             <div
@@ -356,23 +418,33 @@ onUnmounted(stop)
             >
               <PixelIcon name="refresh" size="sm" animation="spin" />
               <div>
-                <b>{{ selected.status === 'queued' ? '等待整理' : '正在整理摘要与关键词' }}</b>
-                <p>完成后即可检索，原文会完整保留。</p>
+                <b>
+                  {{
+                    selected.status === 'queued'
+                      ? __t('ui.knowledge', '等待整理')
+                      : __t('ui.knowledge', '正在整理摘要与关键词')
+                  }}
+                </b>
+                <p>{{ __t('ui.knowledge', '完成后即可检索，原文会完整保留。') }}</p>
               </div>
             </div>
             <div v-else-if="selected.status === 'failed'" class="document-notice failed">
               <PixelIcon name="alert" size="sm" />
               <div>
-                <b>整理失败</b>
+                <b>{{ __t('ui.knowledge', '整理失败') }}</b>
                 <p>{{ selected.error }}</p>
               </div>
-              <PButton size="sm" variant="secondary" @click="retry(selected)">重试</PButton>
+              <PButton size="sm" variant="secondary" @click="retry(selected)">
+                {{ __t('ui.knowledge', '重试') }}
+              </PButton>
             </div>
             <template v-else>
               <div class="document-index-note">
                 <PixelIcon :name="selected.vectorStatus === 'ready' ? 'check' : 'info'" size="xs" />
                 <span>{{ vectorLabels[selected.vectorStatus] }}</span>
-                <small v-if="selected.modelName">整理模型：{{ selected.modelName }}</small>
+                <small v-if="selected.modelName">
+                  {{ __t('ui.knowledge', '整理模型：') }}{{ selected.modelName }}
+                </small>
               </div>
               <p v-if="selected.error" class="document-error">{{ selected.error }}</p>
               <div class="document-parts">
@@ -387,24 +459,31 @@ onUnmounted(stop)
         </div>
         <div v-else class="inspector-scroll">
           <form class="knowledge-search" @submit.prevent="search">
-            <h3>检索资料</h3>
-            <p>与 Agent 使用同一套检索，默认返回摘要和命中原文。</p>
+            <h3>{{ __t('ui.knowledge', '检索资料') }}</h3>
+            <p>{{ __t('ui.knowledge', '与 Agent 使用同一套检索，默认返回摘要和命中原文。') }}</p>
             <label>
-              关键词
-              <input v-model="keywords" placeholder="用逗号分隔，支持自然语言短语" />
+              {{ __t('ui.knowledge', '关键词') }}
+              <input
+                v-model="keywords"
+                :placeholder="__t('ui.knowledge', '用逗号分隔，支持自然语言短语')"
+              />
             </label>
             <label>
-              正则（可选）
-              <input v-model="regex" placeholder="匹配原文的 ripgrep 表达式" spellcheck="false" />
+              {{ __t('ui.knowledge', '正则（可选）') }}
+              <input
+                v-model="regex"
+                :placeholder="__t('ui.knowledge', '原文正则表达式')"
+                spellcheck="false"
+              />
             </label>
             <div class="search-options">
               <label>
-                条数
+                {{ __t('ui.knowledge', '条数') }}
                 <input v-model.number="limit" type="number" min="1" max="20" />
               </label>
               <label class="scope-check">
                 <input v-model="currentOnly" type="checkbox" :disabled="!selectedId" />
-                仅当前资料
+                {{ __t('ui.knowledge', '仅当前资料') }}
               </label>
               <PButton
                 size="sm"
@@ -413,20 +492,26 @@ onUnmounted(stop)
                 type="submit"
               >
                 <PixelIcon name="search" size="xs" />
-                检索
+                {{ __t('ui.knowledge', '检索') }}
               </PButton>
             </div>
           </form>
           <p v-if="searchError" class="document-error" role="alert">{{ searchError }}</p>
           <template v-if="results">
             <div class="search-count">
-              找到 {{ results.total }} 项，返回 {{ results.items.length }} 项
-              <span v-if="results.truncated">· 结果已按预算截断，可展开继续查看</span>
+              {{ __t('ui.knowledge', '找到') }} {{ results.total }}
+              {{ __t('ui.knowledge', '项，返回') }} {{ results.items.length }}
+              {{ __t('ui.knowledge', '项') }}
+              <span v-if="results.truncated">
+                {{ __t('ui.knowledge', '· 结果已按预算截断，可展开继续查看') }}
+              </span>
             </div>
             <p v-for="warning in results.warnings" :key="warning" class="search-warning">
               {{ warning }}
             </p>
-            <div v-if="!results.items.length" class="document-state">没有找到相关资料</div>
+            <div v-if="!results.items.length" class="document-state">
+              {{ __t('ui.knowledge', '没有找到相关资料') }}
+            </div>
             <div v-else class="document-parts">
               <KnowledgePartCard
                 v-for="hit in results.items"
@@ -442,16 +527,22 @@ onUnmounted(stop)
     <KnowledgeImportDialog v-model="importOpen" :target="importTarget" @imported="imported" />
     <PDialog
       :model-value="Boolean(deleteTarget)"
-      title="永久删除资料？"
-      :message="`清理“${deleteTarget?.title ?? ''}”的原文、摘要、向量和文本索引，无法恢复。导入时的原始文件保留。`"
+      :title="__t('ui.knowledge', '永久删除资料？')"
+      :message="
+        __t('ui.knowledge', '删除“{0}”及其检索数据？无法恢复，原始文件保留。', [
+          deleteTarget?.title ?? '',
+        ])
+      "
       :loading="deleting"
       @update:model-value="!deleting && !$event && (deleteTarget = null)"
     >
       <template #footer>
         <PButton variant="secondary" :disabled="deleting" @click="deleteTarget = null">
-          取消
+          {{ __t('ui.knowledge', '取消') }}
         </PButton>
-        <PButton variant="danger" :loading="deleting" @click="remove">删除</PButton>
+        <PButton variant="danger" :loading="deleting" @click="remove">
+          {{ __t('ui.knowledge', '删除') }}
+        </PButton>
       </template>
     </PDialog>
   </section>

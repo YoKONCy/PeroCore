@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * Reset Router — 危险区域重置 API
  *
@@ -38,7 +39,7 @@ export function createResetRouter(ctx: AppContext) {
       throw new AppError('INVALID_PARAMETER', { message: '确认短语不匹配，操作已取消' })
     }
     const result = await ctx.resetService.clearLogs()
-    return c.json({ code: 'OK', message: '对话记录已清空', data: result })
+    return c.json({ code: 'OK', message: __t('server.routers', '对话记录已清空'), data: result })
   })
 
   router.post('/memories', zValidator('json', confirmSchema), async (c) => {
@@ -48,7 +49,7 @@ export function createResetRouter(ctx: AppContext) {
     }
     await ctx.privacyDeletionService.resetMemories(c.req.valid('json').includeSocial)
     const result = { operation: 'reset_memories', cleared: {} }
-    return c.json({ code: 'OK', message: '记忆已重置', data: result })
+    return c.json({ code: 'OK', message: __t('server.routers', '记忆已重置'), data: result })
   })
 
   router.post('/factory', zValidator('json', confirmSchema), async (c) => {
@@ -61,7 +62,7 @@ export function createResetRouter(ctx: AppContext) {
     const result = await ctx.resetService.factoryReset()
     result.cleared.knowledge_documents = knowledge.documentCount
     result.cleared.knowledge_parts = knowledge.partCount
-    return c.json({ code: 'OK', message: '已恢复出厂设置', data: result })
+    return c.json({ code: 'OK', message: __t('server.routers', '已恢复出厂设置'), data: result })
   })
 
   return router

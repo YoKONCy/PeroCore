@@ -1,0 +1,4 @@
+{
+  "Vue 模板语法检查失败：{0} 个组件，{1} 个错误": "Vue template syntax check failed: {0} components, {1} errors",
+  "Vue 模板语法检查通过：{0} 个组件": "Vue template syntax check passed: {0} components"
+}

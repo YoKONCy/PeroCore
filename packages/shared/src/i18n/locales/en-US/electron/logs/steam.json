@@ -1,0 +1,14 @@
+{
+  "steam_api64.dll 未找到，跳过 Steamworks 加载 (非 Steam 版本)": "steam_api64.dll not found, skipping Steamworks loading (non-Steam version)",
+  "无法加载 steamworks.js (可能缺少 steam_api64.dll): {0}": "Unable to load steamworks.js (steam_api64.dll may be missing): {0}",
+  "Steam 已被环境变量禁用": "Steam has been disabled by environment variables",
+  "应用未通过 Steam 启动，正在请求 Steam 重启...": "app did not launch via Steam, requesting Steam to restart...",
+  "restartAppIfNecessary 失败: {0}": "restartAppIfNecessary failed: {0}",
+  "检测为非 Steam 环境启动，跳过强制重启逻辑": "is detected as starting in a non-Steam environment and skips the forced restart logic.",
+  "开发模式，跳过 Overlay 注入": "development mode, skip Overlay injection",
+  "初始化成功": "initialization successful",
+  "当前用户: {0}": "Current user: {0}",
+  "初始化失败: {0}": "initialization failed: {0}\nIs",
+  "Steam 是否正在运行？或当前用户未拥有此 AppID": "Steam running? Or the current user does not own this AppID",
+  "获取 Workshop 安装目录失败: {0}": "Failed to obtain Workshop installation directory: {0}"
+}

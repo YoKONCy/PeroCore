@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * MCP Router — MCP 服务器管理 API
  *
@@ -19,7 +20,7 @@ export function createMcpRouter(ctx: AppContext) {
   // ── GET /api/mcp/configs — 获取所有 MCP 配置 ──
   router.get('/configs', async (c) => {
     const configs = await service.list()
-    return c.json({ code: 'OK', message: '获取成功', data: configs })
+    return c.json({ code: 'OK', message: __t('server.routers', '获取成功'), data: configs })
   })
 
   // ── POST /api/mcp/configs — 创建 MCP 配置 ──
@@ -33,7 +34,10 @@ export function createMcpRouter(ctx: AppContext) {
     const config = await service.create(body)
     await ctx.mcpManager.connectAll()
     ctx.mcpRegistrySynchronizer.sync()
-    return c.json({ code: 'CREATED', message: 'MCP 配置已创建', data: config }, 201)
+    return c.json(
+      { code: 'CREATED', message: __t('server.routers', 'MCP 配置已创建'), data: config },
+      201,
+    )
   })
 
   // ── PUT /api/mcp/configs/:id — 更新 MCP 配置 ──
@@ -45,7 +49,7 @@ export function createMcpRouter(ctx: AppContext) {
     await ctx.mcpManager.connectAll()
     ctx.mcpRegistrySynchronizer.sync()
 
-    return c.json({ code: 'OK', message: 'MCP 配置已更新', data: updated })
+    return c.json({ code: 'OK', message: __t('server.routers', 'MCP 配置已更新'), data: updated })
   })
 
   // ── DELETE /api/mcp/configs/:id — 删除 MCP 配置 ──
@@ -56,7 +60,11 @@ export function createMcpRouter(ctx: AppContext) {
     await ctx.mcpManager.connectAll()
     ctx.mcpRegistrySynchronizer.sync()
 
-    return c.json({ code: 'OK', message: 'MCP 配置已删除', data: { deleted: true } })
+    return c.json({
+      code: 'OK',
+      message: __t('server.routers', 'MCP 配置已删除'),
+      data: { deleted: true },
+    })
   })
 
   // ── POST /api/mcp/configs/:id/toggle — 切换启用状态 ──
@@ -65,7 +73,7 @@ export function createMcpRouter(ctx: AppContext) {
     const updated = await service.toggle(id)
     await ctx.mcpManager.connectAll()
     ctx.mcpRegistrySynchronizer.sync()
-    return c.json({ code: 'OK', message: '启用状态已切换', data: updated })
+    return c.json({ code: 'OK', message: __t('server.routers', '启用状态已切换'), data: updated })
   })
 
   // ── POST /api/mcp/connect — 连接所有已启用的 MCP 服务器 ──
@@ -75,7 +83,11 @@ export function createMcpRouter(ctx: AppContext) {
     }
     await ctx.mcpManager.connectAll()
     ctx.mcpRegistrySynchronizer.sync()
-    return c.json({ code: 'OK', message: 'MCP 连接已完成', data: ctx.mcpManager.getStatus() })
+    return c.json({
+      code: 'OK',
+      message: __t('server.routers', 'MCP 连接已完成'),
+      data: ctx.mcpManager.getStatus(),
+    })
   })
 
   // ── POST /api/mcp/:name/reconnect — 重新连接单个 Server ──
@@ -91,7 +103,7 @@ export function createMcpRouter(ctx: AppContext) {
     }
     return c.json({
       code: 'OK',
-      message: `MCP 服务器 "${name}" 已重新连接`,
+      message: __t('server.routers', 'MCP 服务器 "{0}" 已重新连接', [name]),
       data: {
         name: conn.name,
         status: conn.status,
@@ -106,26 +118,30 @@ export function createMcpRouter(ctx: AppContext) {
     if (!ctx.mcpManager) {
       return c.json({
         code: 'OK',
-        message: 'MCP 未初始化',
+        message: __t('server.routers', 'MCP 未初始化'),
         data: { totalServers: 0, connectedServers: 0, totalTools: 0, connections: [] },
       })
     }
-    return c.json({ code: 'OK', message: '获取成功', data: ctx.mcpManager.getStatus() })
+    return c.json({
+      code: 'OK',
+      message: __t('server.routers', '获取成功'),
+      data: ctx.mcpManager.getStatus(),
+    })
   })
 
   // ── GET /api/mcp/tools — 获取所有已发现的 MCP 工具 ──
   router.get('/tools', async (c) => {
     if (!ctx.mcpManager) {
-      return c.json({ code: 'OK', message: '获取成功', data: [] })
+      return c.json({ code: 'OK', message: __t('server.routers', '获取成功'), data: [] })
     }
     const tools = ctx.mcpManager.getAllTools()
-    return c.json({ code: 'OK', message: '获取成功', data: tools })
+    return c.json({ code: 'OK', message: __t('server.routers', '获取成功'), data: tools })
   })
 
   // ── GET /api/mcp/skills — 获取所有已加载的 Skill 清单 ──
   router.get('/skills', async (c) => {
     const manifests = ctx.skillLoader.getAllManifests()
-    return c.json({ code: 'OK', message: '获取成功', data: manifests })
+    return c.json({ code: 'OK', message: __t('server.routers', '获取成功'), data: manifests })
   })
 
   router.get('/skills/:id/compatibility', async (c) => {
@@ -133,7 +149,7 @@ export function createMcpRouter(ctx: AppContext) {
     const availableTools = new Set(ctx.toolRegistry.getAllDefinitions().map((tool) => tool.name))
     const report = ctx.skillLoader.getCompatibilityReport(skillId, availableTools)
     if (!report) throw new AppError('NOT_FOUND', { message: `Skill "${skillId}" 不存在` })
-    return c.json({ code: 'OK', message: '获取成功', data: report })
+    return c.json({ code: 'OK', message: __t('server.routers', '获取成功'), data: report })
   })
 
   // ── GET /api/mcp/skills/:id/content — 获取 Skill 的完整内容 (L2) ──
@@ -143,7 +159,11 @@ export function createMcpRouter(ctx: AppContext) {
     if (!content) {
       throw new AppError('NOT_FOUND', { message: `Skill "${skillId}" 不存在` })
     }
-    return c.json({ code: 'OK', message: '获取成功', data: { id: skillId, content } })
+    return c.json({
+      code: 'OK',
+      message: __t('server.routers', '获取成功'),
+      data: { id: skillId, content },
+    })
   })
 
   // ── POST /api/mcp/skills/reload — 重新扫描所有 Skill 目录 ──
@@ -152,7 +172,7 @@ export function createMcpRouter(ctx: AppContext) {
     const manifests = ctx.skillLoader.getAllManifests()
     return c.json({
       code: 'OK',
-      message: `已重新加载 ${manifests.length} 个 Skill`,
+      message: __t('server.routers', '已重新加载 {0} 个 Skill', [manifests.length]),
       data: manifests,
     })
   })
@@ -172,7 +192,7 @@ export function createMcpRouter(ctx: AppContext) {
 
     return c.json({
       code: 'OK',
-      message: `Skill "${folderName}" 已成功导入`,
+      message: __t('server.routers', 'Skill "{0}" 已成功导入', [folderName]),
       data: manifests,
     })
   })
@@ -187,7 +207,7 @@ export function createMcpRouter(ctx: AppContext) {
 
     return c.json({
       code: 'OK',
-      message: `Skill "${skillId}" 已删除`,
+      message: __t('server.routers', 'Skill "{0}" 已删除', [skillId]),
       data: manifests,
     })
   })

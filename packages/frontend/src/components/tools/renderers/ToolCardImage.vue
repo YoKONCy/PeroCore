@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../../i18n/index'
+
 import { computed } from 'vue'
 import { imagePreviewsFromToolResult } from '@infos/shared'
 import ToolImagePreview from './ToolImagePreview.vue'
@@ -28,9 +30,9 @@ const errors = computed(() => {
     if (typeof value.error === 'string') items.unshift(value.error)
     for (const [index, screenshot] of (value.screenshots ?? []).entries()) {
       if (typeof screenshot.previewError === 'string')
-        items.push(`截图 ${index + 1}：${screenshot.previewError}`)
+        items.push(__t('ui.tools', '截图 {0}：{1}', [index + 1, screenshot.previewError]))
     }
-    if (props.isError && !items.length) items.push('图片读取失败')
+    if (props.isError && !items.length) items.push(__t('ui.tools', '图片读取失败'))
     return items
   } catch {
     return props.isError ? [props.result] : []
@@ -41,7 +43,7 @@ const errors = computed(() => {
 <template>
   <div class="tool-image-gallery" :class="{ 'tool-image-gallery--batch': previews.length > 1 }">
     <p v-if="previews.length > 1" class="tool-image-gallery__note">
-      {{ previews.length }} 张图片 · 按获取顺序排列 · 点击图片放大观察
+      {{ previews.length }} {{ __t('ui.tools', '张图片 · 按获取顺序排列 · 点击图片放大观察') }}
     </p>
     <p v-for="(error, index) in errors" :key="index" class="tool-image-gallery__error">
       {{ error }}
@@ -54,7 +56,9 @@ const errors = computed(() => {
       @interact="emit('interact')"
     />
     <p v-if="!previews.length && !errors.length" class="tool-image-gallery__note">
-      {{ result === undefined ? '正在读取图片…' : '未保存图片预览' }}
+      {{
+        result === undefined ? __t('ui.tools', '正在读取图片…') : __t('ui.tools', '未保存图片预览')
+      }}
     </p>
   </div>
 </template>

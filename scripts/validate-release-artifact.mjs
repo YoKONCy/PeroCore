@@ -1,3 +1,4 @@
+import { t as __t } from './i18n.mjs'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import http from 'node:http'
@@ -290,4 +291,4 @@ try {
 }
 
 if (summary.error) throw new Error(summary.error)
-console.log(`${mode} 最终产物黑盒验收通过`)
+console.log(__t('scripts.validate-release-artifact', '{0} 最终产物黑盒验收通过', [mode]))

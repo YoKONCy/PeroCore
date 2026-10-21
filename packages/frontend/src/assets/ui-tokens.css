@@ -93,8 +93,9 @@
 
   /* ── 对话区纸面 + 气流（浅色） ── */
   --convo-paper-tint: var(--ui-bg-surface-soft);
-  --convo-air-top: rgba(236, 72, 153, 0.028);
-  --convo-air-bottom: rgba(14, 165, 233, 0.018);
+  --convo-air-top: rgba(236, 72, 153, 0.055);
+  --convo-air-bottom: rgba(14, 165, 233, 0.045);
+  --convo-texture-line: rgba(15, 23, 42, 0.018);
   --convo-edge-glow: rgba(15, 23, 42, 0.05);
 
   /* ── 据点量子点阵 + 流场线（浅色） ── */
@@ -185,6 +186,13 @@
   --canvas-dot-spacing: 24px;
   --canvas-grad-top: rgba(0, 0, 0, 0.08);
   --canvas-grad-bottom: rgba(0, 0, 0, 0);
+
+  /* ── 对话区底板：暗色粉紫柔光与细纹理 ── */
+  --convo-paper-tint: var(--ui-bg-canvas);
+  --convo-air-top: rgba(244, 114, 182, 0.075);
+  --convo-air-bottom: rgba(139, 92, 246, 0.085);
+  --convo-texture-line: rgba(255, 255, 255, 0.012);
+  --convo-edge-glow: rgba(167, 139, 250, 0.08);
 }
 
 /* ── 字体 ── */

@@ -1,3 +1,4 @@
+import { t as __t } from '../i18n/index'
 export interface ToolSearchRow {
   file: string
   kind: 'file' | 'directory'
@@ -97,5 +98,8 @@ export function toolSearchSummary(result: ToolSearchResult): string {
   const counts = [`${result.fileCount} 个文件`]
   if (result.directoryCount) counts.push(`${result.directoryCount} 个目录`)
   if (result.matchCount !== undefined) counts.push(`${result.matchCount} 处匹配`)
-  return `找到${result.truncated ? '至少 ' : ' '}${counts.join(' · ')}`
+  return __t('ui.toolSearchResult', '找到{0}{1}', [
+    result.truncated ? __t('ui.toolSearchResult', '至少 ') : ' ',
+    counts.join(' · '),
+  ])
 }

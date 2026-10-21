@@ -6,10 +6,9 @@
  * @module packages/frontend/src/api/transportUtils
  */
 
-import { ELECTRON_BACKEND_ORIGIN } from './transport'
+import { getWebServerOrigin } from './transport'
 
 /** 获取当前环境的 API 基址 */
 export function getBaseUrl(): string {
-  if ((window as any).electron) return ELECTRON_BACKEND_ORIGIN
-  return window.location.origin
+  return getWebServerOrigin()
 }

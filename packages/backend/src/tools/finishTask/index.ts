@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * finish_task — 任务完成 + 角色状态更新工具
  *
@@ -165,7 +166,7 @@ export async function applyCharacterStateUpdate(
       text_expires_at: saved.textExpiresAt ?? null,
     })
   if (_gatewayBroadcast) await _gatewayBroadcast('state_update', payload)
-  logger.info(`角色状态已更新: agent=${agentId}`)
+  logger.info(__t('logs.tools', '角色状态已更新: agent={0}', [agentId]))
   return { updated: true, textExpiresAt }
 }
 
@@ -177,7 +178,7 @@ export const finishTaskTool: BuiltinTool = {
     // 缺失时返回失败并提示模型补全，ReAct 会把它作为工具错误反馈给模型重试。
     const reply = typeof args.reply === 'string' ? args.reply.trim() : ''
     if (!reply) {
-      logger.warn(`finish_task 缺少必填参数 reply (agent=${ctx.agentId})`)
+      logger.warn(__t('logs.tools', 'finish_task 缺少必填参数 reply (agent={0})', [ctx.agentId]))
       return toolFailure(
         'FINISH_TASK_NO_REPLY',
         'finish_task 必须携带 reply 参数：即完成任务后要交给用户的最终回复正文。' +
@@ -202,7 +203,11 @@ export const finishTaskTool: BuiltinTool = {
     try {
       await applyCharacterStateUpdate(args, ctx.agentId, ctx)
     } catch (err) {
-      logger.error(`角色状态更新失败: ${err instanceof Error ? err.stack || err.message : err}`)
+      logger.error(
+        __t('logs.tools', '角色状态更新失败: {0}', [
+          err instanceof Error ? err.stack || err.message : err,
+        ]),
+      )
     }
 
     // finish_task 的实际终止效果由 ReAct Loop 层处理 (检测到此工具调用后停止循环)

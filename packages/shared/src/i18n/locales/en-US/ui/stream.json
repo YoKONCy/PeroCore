@@ -1,0 +1,5 @@
+{
+  "对话连接暂时中断，正在同步后台执行结果": "The conversation connection is temporarily interrupted and the background execution results are being synchronized.",
+  "网络已断开，恢复后将自动同步后台结果": "The network has been disconnected. The background results will be automatically synchronized after recovery.",
+  "流式响应被截断：未收到 done 事件": "Streaming response truncated: done event not received"
+}

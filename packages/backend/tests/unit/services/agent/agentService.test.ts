@@ -531,14 +531,23 @@ describe('AgentService', () => {
     const {
       onExecutionStatus: streamStatus,
       onToolObserved: streamObserved,
+      onNestedToolCall: streamNested,
+      loopGuard: streamLoopGuard,
       ...streamContext
     } = streamExecution![3]!
     const {
       onExecutionStatus: nonStreamStatus,
       onToolObserved: nonStreamObserved,
+      onNestedToolCall: nonStreamNested,
+      loopGuard: nonStreamLoopGuard,
       ...nonStreamContext
     } = nonStreamExecution![3]!
     expect(streamContext).toEqual(nonStreamContext)
+    expect(streamNested).toEqual(expect.any(Function))
+    expect(nonStreamNested).toEqual(expect.any(Function))
+    expect(streamLoopGuard).not.toBe(nonStreamLoopGuard)
+    expect(streamLoopGuard?.signal.aborted).toBe(false)
+    expect(nonStreamLoopGuard?.signal.aborted).toBe(false)
     expect(streamStatus).toEqual(expect.any(Function))
     expect(nonStreamStatus).toEqual(expect.any(Function))
     expect(streamObserved).toEqual(expect.any(Function))

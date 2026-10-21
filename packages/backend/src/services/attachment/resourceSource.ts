@@ -1,4 +1,5 @@
 import { lookup } from 'node:dns/promises'
+import { createReadStream } from 'node:fs'
 import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 import { isIP } from 'node:net'
@@ -8,25 +9,41 @@ import type { ResourceKind } from '@infos/shared'
 
 export const MAX_RESOURCE_BYTES = 100 * 1024 * 1024
 
+/** 已校验的本地资源通过统一的流读取边界限制大小，并响应取消。 */
+export function readBoundedResourceFile(
+  filePath: string,
+  signal?: AbortSignal,
+  maxBytes = MAX_RESOURCE_BYTES,
+): Promise<Buffer> {
+  return boundedResourceBytes(createReadStream(filePath), signal, maxBytes)
+}
+
 const MIME_BY_EXTENSION: Record<string, string> = {
   png: 'image/png',
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',
   gif: 'image/gif',
   webp: 'image/webp',
+  avif: 'image/avif',
+  bmp: 'image/bmp',
   mp4: 'video/mp4',
   webm: 'video/webm',
   mov: 'video/quicktime',
   m4v: 'video/mp4',
+  ogv: 'video/ogg',
+  mkv: 'video/x-matroska',
   mp3: 'audio/mpeg',
   wav: 'audio/wav',
   ogg: 'audio/ogg',
+  oga: 'audio/ogg',
+  aac: 'audio/aac',
   opus: 'audio/ogg',
   m4a: 'audio/mp4',
   flac: 'audio/flac',
   pdf: 'application/pdf',
   txt: 'text/plain',
   md: 'text/markdown',
+  markdown: 'text/markdown',
   csv: 'text/csv',
   json: 'application/json',
   yaml: 'text/yaml',
@@ -59,6 +76,14 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   ini: 'text/plain',
   zip: 'application/zip',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  doc: 'application/msword',
+  rtf: 'application/rtf',
+  xls: 'application/vnd.ms-excel',
+  ppt: 'application/vnd.ms-powerpoint',
+  odt: 'application/vnd.oasis.opendocument.text',
+  ods: 'application/vnd.oasis.opendocument.spreadsheet',
+  odp: 'application/vnd.oasis.opendocument.presentation',
+  epub: 'application/epub+zip',
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 }
@@ -89,7 +114,17 @@ export function resourceMime(name: string, declared = '', bytes?: Buffer): strin
 }
 
 export function resourceKind(mime: string): ResourceKind {
-  if (['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif'].includes(mime))
+  if (
+    [
+      'image/png',
+      'image/jpeg',
+      'image/gif',
+      'image/webp',
+      'image/avif',
+      'image/bmp',
+      'image/x-icon',
+    ].includes(mime)
+  )
     return 'image'
   if (mime.startsWith('video/')) return 'video'
   if (mime.startsWith('audio/')) return 'audio'
@@ -200,8 +235,11 @@ function responseName(response: import('node:http').IncomingMessage, url: URL): 
 }
 
 /** 引用只读取响应头，按实际类型识别没有扩展名的下载地址。 */
-export async function inspectResource(source: string) {
-  const signal = AbortSignal.timeout(15_000)
+export async function inspectResource(source: string, cancellation?: AbortSignal) {
+  const signal = AbortSignal.any([
+    ...(cancellation ? [cancellation] : []),
+    AbortSignal.timeout(15_000),
+  ])
   let target = source
   let method: 'HEAD' | 'GET' = 'HEAD'
   for (let redirects = 0; redirects <= 4; redirects++) {

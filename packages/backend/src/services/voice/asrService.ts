@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * ASR 服务 — 语音识别
  *
@@ -70,7 +71,12 @@ export class AsrService {
 
   constructor(config?: Partial<AsrConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config }
-    logger.info(`初始化完成 (API Base: ${this.config.apiBase}, 模型: ${this.config.model})`)
+    logger.info(
+      __t('logs.voice', '初始化完成 (API Base: {0}, 模型: {1})', [
+        this.config.apiBase,
+        this.config.model,
+      ]),
+    )
   }
 
   /** 返回当前 ASR 配置是否有效可用 */
@@ -81,7 +87,12 @@ export class AsrService {
   /** 更新配置 */
   updateConfig(partial: Partial<AsrConfig>): void {
     this.config = { ...this.config, ...partial }
-    logger.info(`配置已更新 (API Base: ${this.config.apiBase}, 模型: ${this.config.model})`)
+    logger.info(
+      __t('logs.voice', '配置已更新 (API Base: {0}, 模型: {1})', [
+        this.config.apiBase,
+        this.config.model,
+      ]),
+    )
   }
 
   /**
@@ -115,8 +126,8 @@ export class AsrService {
     const ext = extMap[mimeType.split(';')[0]!.trim().toLowerCase()] ?? 'webm'
 
     logger.info(
-      `开始语音识别 (${(request.audio.byteLength / 1024).toFixed(1)}KB, ` +
-        `模型: ${this.config.model}, 语言: ${language})`,
+      __t('logs.voice', '开始语音识别 ({0}KB, ', [(request.audio.byteLength / 1024).toFixed(1)]) +
+        __t('logs.voice', '模型: {0}, 语言: {1})', [this.config.model, language]),
     )
 
     const startTime = Date.now()
@@ -139,7 +150,7 @@ export class AsrService {
 
     if (!response.ok) {
       const body = await response.text()
-      logger.error(`ASR API 失败: ${response.status} — ${body}`)
+      logger.error(__t('logs.voice', 'ASR API 失败: {0} — {1}', [response.status, body]))
       throw new AppError('EXTERNAL_ERROR', {
         message: `ASR API调用失败: ${response.status}`,
         data: { status: response.status },
@@ -149,7 +160,12 @@ export class AsrService {
     const result = (await response.json()) as { text: string }
     const durationMs = Date.now() - startTime
 
-    logger.info(`语音识别完成: "${result.text.slice(0, 50)}..." (耗时 ${durationMs}ms)`)
+    logger.info(
+      __t('logs.voice', '语音识别完成: "{0}..." (耗时 {1}ms)', [
+        result.text.slice(0, 50),
+        durationMs,
+      ]),
+    )
 
     return {
       text: result.text,

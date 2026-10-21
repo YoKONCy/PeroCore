@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * ModelRoleResolver — 统一模型任务槽解析
  *
@@ -37,6 +38,8 @@ import type { ConfigRepository } from '../../repositories/config.repo'
 import type { ModelRepository } from '../../repositories/model.repo'
 import type { ModelConfig } from './llmService'
 import { createLogger } from '../../lib/logger'
+import { modelFallbackIds, modelFallbackKey } from './modelFallbacks'
+import { resolveModelConnection } from './modelConnection'
 
 const logger = createLogger('ModelRoleResolver')
 
@@ -98,7 +101,7 @@ export class ModelRoleResolver {
     if (task !== 'main') {
       const taskConfig = await this.loadFromDb(TASK_CONFIG_KEYS[task])
       if (taskConfig) {
-        logger.debug(`使用 ${task} 任务模型: ${taskConfig.modelId}`)
+        logger.debug(__t('logs.llm', '使用 {0} 任务模型: {1}', [task, taskConfig.modelId]))
         return { ...taskConfig, usagePurpose: purpose }
       }
     }
@@ -107,7 +110,9 @@ export class ModelRoleResolver {
     const mainConfig = await this.loadFromDb(TASK_CONFIG_KEYS.main)
     if (mainConfig) {
       if (task !== 'main') {
-        logger.debug(`${task} 未配置专用模型, 回退到主模型: ${mainConfig.modelId}`)
+        logger.debug(
+          __t('logs.llm', '{0} 未配置专用模型, 回退到主模型: {1}', [task, mainConfig.modelId]),
+        )
       }
       return { ...mainConfig, usagePurpose: purpose }
     }
@@ -115,11 +120,11 @@ export class ModelRoleResolver {
     // 3. 环境变量兜底
     const envConfig = this.loadFromEnv()
     if (envConfig) {
-      logger.debug(`${task} 从环境变量加载: ${envConfig.modelId}`)
+      logger.debug(__t('logs.llm', '{0} 从环境变量加载: {1}', [task, envConfig.modelId]))
       return { ...envConfig, usagePurpose: purpose }
     }
 
-    logger.warn(`${task} 无可用模型配置`)
+    logger.warn(__t('logs.llm', '{0} 无可用模型配置', [task]))
     return null
   }
 
@@ -133,7 +138,9 @@ export class ModelRoleResolver {
     if (normalizedAgentId) {
       const agentConfig = await this.loadFromDb(`model.agent.${normalizedAgentId}`)
       if (agentConfig) {
-        logger.debug(`角色 ${normalizedAgentId} 使用专用模型: ${agentConfig.modelId}`)
+        logger.debug(
+          __t('logs.llm', '角色 {0} 使用专用模型: {1}', [normalizedAgentId, agentConfig.modelId]),
+        )
         return { ...agentConfig, usageAgentId: normalizedAgentId }
       }
     }
@@ -151,7 +158,7 @@ export class ModelRoleResolver {
       const row = await this.modelRepo.findById(modelConfigId)
       return row ? this.resolveRow(row) : null
     } catch (err) {
-      logger.warn(`按ID加载模型配置失败 (id=${modelConfigId}): ${err}`)
+      logger.warn(__t('logs.llm', '按ID加载模型配置失败 (id={0}): {1}', [modelConfigId, err]))
       return null
     }
   }
@@ -177,7 +184,7 @@ export class ModelRoleResolver {
    *
    * 流程: config KV (model.main / model.task.{slot}) → 获取 instanceId
    *       → ModelRepository 查 ai_model_configs 表获取完整信息
-   *       → 如果模型自身没有 apiKey，从全局供应商配置 fallback
+   *       → 通过统一连接解析器获得实际地址、协议和认证配置
    */
   private async loadFromDb(configKey: string): Promise<ModelConfig | null> {
     try {
@@ -189,39 +196,63 @@ export class ModelRoleResolver {
 
       const row = await this.modelRepo.findById(modelId)
       if (!row) {
-        logger.warn(`模型 ID ${modelId} 在数据库中不存在 (configKey=${configKey})`)
+        logger.warn(
+          __t('logs.llm', '模型 ID {0} 在数据库中不存在 (configKey={1})', [modelId, configKey]),
+        )
         return null
       }
 
       return this.resolveRow(row)
     } catch (err) {
-      logger.warn(`加载模型配置失败 (key=${configKey}): ${err}`)
+      logger.warn(__t('logs.llm', '加载模型配置失败 (key={0}): {1}', [configKey, err]))
       return null
     }
   }
 
   private async resolveRow(
     row: NonNullable<Awaited<ReturnType<ModelRepository['findById']>>>,
+    withFallbacks = true,
   ): Promise<ModelConfig | null> {
+    const provider = row.provider ?? 'openai'
     let apiKey: string | undefined = row.apiKey ?? undefined
     let apiBase: string | undefined = row.apiBase ?? undefined
-    if (!apiKey) {
-      const globalApiKey = await this.configRepo.get(`global.${row.provider}.apiKey`)
-      const globalApiBase = await this.configRepo.get(`global.${row.provider}.apiBase`)
-      if (globalApiKey) {
-        apiKey = globalApiKey
-        if (!apiBase && globalApiBase) apiBase = globalApiBase
+    const connection = this.modelRepo.connections
+      ? await resolveModelConnection(
+          row,
+          (id) => this.modelRepo.connections.findById(id),
+          (key) => this.configRepo.get(key),
+        )
+      : undefined
+    if (!connection) {
+      if (!apiKey) apiKey = await this.configRepo.get(`global.${provider}.apiKey`)
+      if (!apiBase) apiBase = await this.configRepo.get(`global.${provider}.apiBase`)
+    }
+    const fallbackModels: ModelConfig[] = []
+    if (withFallbacks) {
+      for (const id of modelFallbackIds(
+        await this.configRepo.get(modelFallbackKey(row.id)),
+        row.id,
+      )) {
+        const candidate = await this.modelRepo.findById(id)
+        const resolved = candidate ? await this.resolveRow(candidate, false) : null
+        if (resolved) fallbackModels.push(resolved)
       }
     }
-    if (!apiKey) {
-      logger.warn(`模型${row.name}无API Key（自身和全局供应商${row.provider}均未配置）`)
+    const noAuth = connection ? connection.authMode === 'none' : provider === 'ollama'
+    if (!(connection?.apiKey ?? apiKey) && !noAuth && withFallbacks && !fallbackModels.length) {
+      logger.warn(
+        __t('logs.llm', '模型「{0}」的连接尚未配置 API Key，请配置密钥或选择无需认证', [row.name]),
+      )
       return null
     }
     return {
-      provider: row.provider ?? 'openai',
+      configId: row.id,
+      fallbackModels,
+      provider,
       modelId: row.modelId,
-      apiKey,
+      apiKey: apiKey ?? '',
       apiBase,
+      ...connection,
       temperature: row.temperature ?? undefined,
       topP: row.topP ?? undefined,
       maxTokens: row.maxTokens ?? undefined,
@@ -233,6 +264,7 @@ export class ModelRoleResolver {
       reasoningDialect: (row.reasoningDialect as ModelConfig['reasoningDialect']) ?? 'auto',
       enableVision: row.enableVision ?? false,
       enableAudioInput: row.enableAudioInput ?? false,
+      stream: row.stream ?? true,
     }
   }
 

@@ -1,181 +1,348 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
-const props = defineProps<{ src: string }>()
-const audio = ref<HTMLAudioElement | null>(null)
-const playing = ref(false)
-const position = ref(0)
-const duration = ref(0)
-const failed = ref(false)
-const progress = computed(() => (duration.value ? (position.value / duration.value) * 100 : 0))
-function time(seconds: number) {
-  return `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`
-}
-function metadata() {
-  const value = audio.value?.duration || 0
-  duration.value = Number.isFinite(value) ? value : 0
-}
-async function toggle() {
-  if (!audio.value) return
-  try {
-    if (playing.value) audio.value.pause()
-    else await audio.value.play()
-  } catch {
-    failed.value = true
-  }
-}
-function seek(event: Event) {
-  if (audio.value) audio.value.currentTime = Number((event.target as HTMLInputElement).value)
-}
-watch(
-  () => props.src,
-  () => {
-    audio.value?.pause()
-    position.value = 0
-    duration.value = 0
-    failed.value = false
-    playing.value = false
+import { computed, ref } from 'vue'
+import '@infos/shared/i18n/catalogs/mediaPlayer'
+import { t } from '../../i18n'
+import { PixelIcon } from '../pixel'
+import { useMediaPlayer } from '../../composables/resources/useMediaPlayer'
+import ResourceMediaControls from './ResourceMediaControls.vue'
+
+const props = withDefaults(
+  defineProps<{ src: string; name?: string; active?: boolean; compact?: boolean }>(),
+  {
+    name: '',
+    active: true,
   },
 )
-onBeforeUnmount(() => audio.value?.pause())
+const audio = ref<HTMLAudioElement | null>(null)
+const controller = useMediaPlayer(
+  audio,
+  () => props.src,
+  () => props.active,
+)
+const { state } = controller
+const tr = (source: string) => t('ui.media-player', source)
+const title = computed(() => props.name.replace(/\.[a-z0-9]{1,7}$/i, '') || tr('音频'))
+const format = computed(() => props.name.match(/\.([a-z0-9]{1,7})$/i)?.[1]?.toUpperCase())
+const status = computed(() =>
+  tr(
+    state.error
+      ? '暂时无法播放'
+      : state.waiting
+        ? '缓冲中…'
+        : state.playing
+          ? '播放中'
+          : state.position
+            ? '已暂停'
+            : '待播放',
+  ),
+)
 </script>
 <template>
-  <div class="resource-audio">
-    <audio
-      ref="audio"
-      :src="src"
-      preload="metadata"
-      @loadedmetadata="metadata"
-      @timeupdate="position = audio?.currentTime || 0"
-      @play="playing = true"
-      @pause="playing = false"
-      @ended="playing = false"
-      @error="failed = true"
-    />
-    <button
-      type="button"
-      class="resource-audio__button"
-      :disabled="failed"
-      :aria-label="playing ? '暂停' : '播放'"
-      @click="toggle"
-    >
-      <svg viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true">
-        <path
-          :d="playing ? 'M3 3h3v10H3z M9 3h3v10H9z' : 'M4 2h2v2h2v2h2v2h-2v2H6v2H4z'"
-          fill="currentColor"
-        />
-      </svg>
-    </button>
-    <div class="resource-audio__track" :class="{ playing }">
-      <i
-        v-for="index in 24"
-        :key="index"
-        aria-hidden="true"
-        :style="{ '--bar': `${8 + ((index * 7) % 15)}px`, '--delay': `${index * 37}ms` }"
-      />
-      <input
-        type="range"
-        min="0"
-        :max="duration || 1"
-        step="0.1"
-        :value="position"
-        :disabled="!duration"
-        aria-label="播放进度"
-        @input="seek"
-      />
-      <span :style="{ width: `${progress}%` }" />
+  <section
+    class="resource-audio resource-media"
+    :class="{
+      'is-playing': state.playing && !state.waiting,
+      'has-error': state.error,
+      'is-compact': compact,
+    }"
+    tabindex="0"
+    :aria-label="name || tr('音频')"
+    :aria-description="tr('播放快捷键：空格播放或暂停，方向键快进或后退，M静音')"
+    @keydown="controller.keyboard"
+  >
+    <audio ref="audio" :src="src" preload="metadata" v-on="controller.events" />
+    <div class="resource-audio__head">
+      <div class="resource-audio__art" aria-hidden="true">
+        <span class="resource-audio__spark resource-audio__spark--one">✦</span>
+        <span class="resource-audio__spark resource-audio__spark--two">✧</span>
+        <div class="resource-audio__record">
+          <span><PixelIcon name="heart" size="sm" /></span>
+        </div>
+        <span class="resource-audio__arm" />
+        <span class="resource-audio__art-corner" />
+      </div>
+      <div class="resource-audio__info">
+        <div class="resource-audio__eyebrow">
+          <PixelIcon name="headphones" size="xs" />
+          <span>{{ tr('音频') }}</span>
+          <small v-if="format">{{ format }}</small>
+        </div>
+        <strong class="resource-audio__title" :title="name">{{ title }}</strong>
+        <div class="resource-audio__status">
+          <span class="resource-audio__equalizer" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+            <i />
+          </span>
+          <span>{{ status }}</span>
+        </div>
+      </div>
     </div>
-    <time>{{ failed ? '不可播放' : time(duration || position) }}</time>
-  </div>
+    <ResourceMediaControls :controller="controller" :active="active" />
+  </section>
 </template>
 <style scoped>
+.resource-audio.is-compact {
+  padding: 8px 10px 6px;
+}
+.is-compact .resource-audio__head {
+  gap: 9px;
+}
+.is-compact .resource-audio__art {
+  flex-basis: 58px;
+  height: 58px;
+}
+.is-compact .resource-audio__record {
+  width: 42px;
+  height: 42px;
+}
+.is-compact .resource-audio__record > span {
+  width: 17px;
+  height: 17px;
+}
+.is-compact .resource-audio__arm {
+  top: 6px;
+  right: 5px;
+  height: 25px;
+}
+.is-compact .resource-audio__title {
+  font-size: 12px;
+}
 .resource-audio {
-  --player-accent: var(--resource-accent, var(--ui-accent-primary));
+  position: relative;
+  padding: 17px 16px 14px;
+  background:
+    radial-gradient(
+      ellipse at 0 0,
+      color-mix(in srgb, var(--media-accent) 11%, transparent),
+      transparent 70%
+    ),
+    linear-gradient(
+      145deg,
+      transparent 55%,
+      color-mix(in srgb, var(--ui-accent-purple) 5%, transparent)
+    );
+}
+.resource-audio__head {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 16px;
   min-width: 0;
-  width: 100%;
+  margin-bottom: 9px;
 }
-.resource-audio__button {
+.resource-audio__art {
+  position: relative;
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
-  flex-shrink: 0;
-  padding: 4px;
-  border: 1px solid color-mix(in srgb, var(--player-accent) 35%, var(--ui-border-default));
-  color: var(--player-accent);
-  background: color-mix(in srgb, var(--player-accent) 9%, var(--ui-bg-surface));
-  box-shadow:
-    inset 1px 1px color-mix(in srgb, white 14%, transparent),
-    1px 2px 0 var(--ui-border-subtle);
-  cursor: pointer;
+  flex: 0 0 84px;
+  height: 84px;
+  border: 1px solid color-mix(in srgb, var(--media-accent) 25%, var(--ui-border-subtle));
+  border-radius: 10px 10px 3px 10px;
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--media-accent) 14%, var(--ui-bg-surface)),
+    color-mix(in srgb, var(--ui-accent-purple) 12%, var(--ui-bg-surface))
+  );
+  box-shadow: 2px 3px 0 color-mix(in srgb, var(--media-accent) 8%, transparent);
 }
-.resource-audio__button:active {
-  transform: translate(1px, 1px);
-  box-shadow: none;
+.resource-audio__record {
+  display: grid;
+  place-items: center;
+  width: 60px;
+  height: 60px;
+  border: 1px solid color-mix(in srgb, var(--media-accent) 28%, var(--ui-border-strong));
+  border-radius: 50%;
+  background:
+    repeating-radial-gradient(
+      circle,
+      transparent 0 3px,
+      color-mix(in srgb, var(--media-accent) 12%, transparent) 4px 5px
+    ),
+    conic-gradient(
+      from 35deg,
+      var(--ui-bg-surface-soft),
+      color-mix(in srgb, var(--media-accent) 23%, var(--ui-bg-surface)),
+      var(--ui-bg-surface-soft),
+      color-mix(in srgb, var(--ui-accent-purple) 17%, var(--ui-bg-surface)),
+      var(--ui-bg-surface-soft)
+    );
+  animation: audio-record 12s linear infinite;
+  animation-play-state: paused;
 }
-.resource-audio__button:disabled {
-  opacity: 0.5;
-  cursor: default;
+.resource-audio__record > span {
+  display: grid;
+  place-items: center;
+  width: 23px;
+  height: 23px;
+  border: 1px solid color-mix(in srgb, var(--media-accent) 40%, transparent);
+  border-radius: 50%;
+  color: var(--media-accent);
+  background: var(--ui-bg-surface);
 }
-.resource-audio__button svg {
-  width: 15px;
-  height: 15px;
+.resource-audio__arm {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 14px;
+  height: 34px;
+  border-top: 3px solid var(--ui-text-tertiary);
+  border-right: 3px solid var(--ui-text-tertiary);
+  border-radius: 0 4px 0 0;
+  transform: rotate(-18deg);
+  transform-origin: top right;
+  transition: transform 300ms ease;
 }
-.resource-audio time {
-  color: var(--ui-text-tertiary);
-  font: 10px var(--ui-font-mono);
-  white-space: nowrap;
+.resource-audio__arm::after {
+  position: absolute;
+  right: -5px;
+  bottom: -2px;
+  width: 6px;
+  height: 9px;
+  border-radius: 2px;
+  background: var(--media-accent);
+  content: '';
 }
-.resource-audio__track {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 3px;
-  height: 26px;
+.resource-audio__art-corner {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  width: 4px;
+  height: 4px;
+  background: var(--media-accent);
+  box-shadow: -6px 0 color-mix(in srgb, var(--media-accent) 40%, transparent);
+}
+.resource-audio__spark {
+  position: absolute;
+  color: var(--media-accent);
+  pointer-events: none;
+}
+.resource-audio__spark--one {
+  top: -8px;
+  left: -5px;
+  font-size: 18px;
+}
+.resource-audio__spark--two {
+  bottom: -7px;
+  right: -5px;
+  font-size: 15px;
+  color: var(--ui-accent-purple);
+}
+.resource-audio__info {
+  display: grid;
+  gap: 7px;
   flex: 1;
   min-width: 0;
 }
-.resource-audio__track i {
-  flex: 1;
-  height: var(--bar);
-  background: color-mix(in srgb, var(--player-accent) 28%, var(--ui-border-subtle));
+.resource-audio__eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--media-accent);
+  font-size: 10px;
 }
-.resource-audio__track.playing i {
-  animation: resource-wave 850ms steps(4, end) var(--delay) infinite alternate;
+.resource-audio__eyebrow small {
+  margin-left: auto;
+  padding: 2px 5px;
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: 3px;
+  color: var(--ui-text-tertiary);
+  font: 9px var(--ui-font-mono);
+  letter-spacing: 0.04em;
 }
-.resource-audio__track input {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  opacity: 0;
-  cursor: pointer;
-  margin: 0;
-  z-index: 2;
+.resource-audio__title {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.5;
+  font-weight: 600;
 }
-.resource-audio__track span {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  height: 2px;
-  background: var(--player-accent);
-  pointer-events: none;
+.resource-audio__status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ui-text-tertiary);
+  font-size: 10px;
 }
-.resource-audio__track:focus-within {
-  outline: 1px solid var(--player-accent);
-  outline-offset: 3px;
+.resource-audio__equalizer {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 12px;
+  color: var(--media-accent);
 }
-@keyframes resource-wave {
+.resource-audio__equalizer i {
+  width: 2px;
+  height: 4px;
+  border-radius: 1px;
+  background: currentColor;
+  animation: audio-level 700ms ease-in-out infinite alternate;
+  animation-play-state: paused;
+}
+.resource-audio__equalizer i:nth-child(2) {
+  height: 10px;
+  animation-delay: -350ms;
+}
+.resource-audio__equalizer i:nth-child(3) {
+  height: 7px;
+  animation-delay: -150ms;
+}
+.resource-audio__equalizer i:nth-child(4) {
+  height: 5px;
+  animation-delay: -500ms;
+}
+.is-playing .resource-audio__record,
+.is-playing .resource-audio__equalizer i {
+  animation-play-state: running;
+}
+.is-playing .resource-audio__arm {
+  transform: rotate(7deg);
+}
+.is-playing .resource-audio__status {
+  color: var(--media-accent);
+}
+.has-error .resource-audio__status {
+  color: var(--ui-danger);
+}
+@keyframes audio-record {
   to {
-    transform: scaleY(0.48);
-    opacity: 0.65;
+    transform: rotate(360deg);
+  }
+}
+@keyframes audio-level {
+  to {
+    transform: scaleY(0.45);
+    opacity: 0.6;
+  }
+}
+@container resource-player (max-width: 280px) {
+  .resource-audio__head {
+    gap: 12px;
+  }
+  .resource-audio__art {
+    flex-basis: 68px;
+    height: 68px;
+  }
+  .resource-audio__record {
+    width: 48px;
+    height: 48px;
+  }
+  .resource-audio__arm {
+    top: 9px;
+    right: 9px;
+    height: 28px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .resource-audio__track.playing i {
+  .resource-audio__record,
+  .resource-audio__equalizer i {
     animation: none;
+  }
+  .resource-audio__arm {
+    transition: none;
   }
 }
 </style>

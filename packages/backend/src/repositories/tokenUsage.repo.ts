@@ -1,7 +1,7 @@
-import { and, eq, gte, lt, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, lt, sql } from 'drizzle-orm'
 import type { DrizzleDb } from '../database'
-import { llmUsageRecords as records } from '../database/schema'
-import type { TokenUsageTotals } from '@infos/shared'
+import { llmUsageRecords as records, threads } from '../database/schema'
+import type { TokenUsageFilters, TokenUsageTotals } from '@infos/shared'
 import type { LlmUsageAttempt } from '../services/llm/usage'
 import { tokenCount } from '../services/llm/usage'
 
@@ -28,7 +28,7 @@ export class TokenUsageRepository {
   }
 
   /** 先在数据库聚合到分钟，保留非整点时区和夏令时的正确归属。 */
-  aggregate(from: number, to: number, agentId?: string) {
+  aggregate(from: number, to: number, agentId?: string, filters: TokenUsageFilters = {}) {
     const minute = sql<number>`cast(${records.startedAt} / 60000 as integer) * 60000`
     // 未上报不能当作零命中；异常缓存计数也不进入命中率分子、分母。
     const cacheReported = sql`${records.inputTokens} is not null
@@ -66,18 +66,53 @@ export class TokenUsageRepository {
           gte(records.startedAt, from),
           lt(records.startedAt, to),
           agentId ? eq(records.agentId, agentId) : undefined,
+          this.filter(filters),
         ),
       )
       .groupBy(minute, records.provider, records.modelId, records.purpose, records.channel)
       .all()
   }
 
-  firstRecordedAt(agentId?: string): number | null {
+  private filter(filters: TokenUsageFilters) {
+    return and(
+      filters.threadId ? eq(records.threadId, filters.threadId) : undefined,
+      filters.provider ? eq(records.provider, filters.provider) : undefined,
+      filters.modelId ? eq(records.modelId, filters.modelId) : undefined,
+    )
+  }
+
+  filterOptions(agentId?: string) {
+    return {
+      threads: this.db
+        .select({ id: records.threadId, title: threads.title })
+        .from(records)
+        .leftJoin(threads, eq(records.threadId, threads.id))
+        .where(
+          and(
+            sql`${records.threadId} is not null`,
+            agentId ? eq(records.agentId, agentId) : undefined,
+          ),
+        )
+        .groupBy(records.threadId, threads.title)
+        .orderBy(desc(sql`max(${records.startedAt})`))
+        .all()
+        .filter((row): row is { id: string; title: string | null } => row.id !== null),
+      models: this.db
+        .select({ provider: records.provider, modelId: records.modelId })
+        .from(records)
+        .where(agentId ? eq(records.agentId, agentId) : undefined)
+        .groupBy(records.provider, records.modelId)
+        .orderBy(records.provider, records.modelId)
+        .all(),
+    }
+  }
+
+  firstRecordedAt(agentId?: string, filters: TokenUsageFilters = {}): number | null {
     return (
       this.db
         .select({ at: sql<number | null>`min(${records.startedAt})` })
         .from(records)
-        .where(agentId ? eq(records.agentId, agentId) : undefined)
+        .where(and(agentId ? eq(records.agentId, agentId) : undefined, this.filter(filters)))
         .get()?.at ?? null
     )
   }

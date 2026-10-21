@@ -1,3 +1,4 @@
+import { t as __t } from '../../../lib/i18n'
 /**
  * Anthropic 原生 Provider
  *
@@ -14,6 +15,7 @@
  * @module packages/backend/src/services/llm/providers/anthropicProvider
  */
 
+import { providerApiUrl } from './providerUrl'
 import { normalizeTokenUsage, tokenCount } from '../usage'
 import { fetchLlmResponse } from '../requestPolicy'
 import type {
@@ -124,7 +126,7 @@ export class AnthropicProvider implements LlmProvider {
    */
   async chat(messages: ChatMessage[], opts: ChatOptions): Promise<ChatCompletion> {
     const { systemPrompt, anthropicMessages } = this.convertMessages(messages)
-    const url = `${this.getBase()}/v1/messages`
+    const url = providerApiUrl(this.getBase(), '/messages')
     const body = this.buildBody(systemPrompt, anthropicMessages, opts, false)
 
     const response = await this.fetchWithTimeout(url, body, opts.timeout ?? 600_000, opts.signal)
@@ -150,7 +152,7 @@ export class AnthropicProvider implements LlmProvider {
    */
   async *chatStream(messages: ChatMessage[], opts: ChatOptions): AsyncIterable<ChatDelta> {
     const { systemPrompt, anthropicMessages } = this.convertMessages(messages)
-    const url = `${this.getBase()}/v1/messages`
+    const url = providerApiUrl(this.getBase(), '/messages')
     const body = this.buildBody(systemPrompt, anthropicMessages, opts, true)
 
     const response = await this.fetchWithTimeout(url, body, opts.timeout ?? 600_000, opts.signal)
@@ -263,19 +265,15 @@ export class AnthropicProvider implements LlmProvider {
 
   /** 列出可用模型 */
   async listModels(): Promise<string[]> {
-    try {
-      const url = `${this.getBase()}/v1/models`
-      const response = await fetch(url, {
-        headers: this.buildHeaders(),
-        signal: AbortSignal.timeout(10_000),
-      })
-      if (!response.ok) return this.fallbackModels()
+    const url = providerApiUrl(this.getBase(), '/models')
+    const response = await fetch(url, {
+      headers: this.buildHeaders(),
+      signal: AbortSignal.timeout(10_000),
+    })
+    if (!response.ok) await this.handleError(response, '获取模型列表')
 
-      const data = (await response.json()) as { data?: Array<{ id: string }> }
-      return (data.data ?? []).map((m) => m.id).sort()
-    } catch {
-      return this.fallbackModels()
-    }
+    const data = (await response.json()) as { data?: Array<{ id: string }> }
+    return (data.data ?? []).map((m) => m.id).sort()
   }
 
   // ── 内部方法: 请求构建 ──
@@ -293,7 +291,7 @@ export class AnthropicProvider implements LlmProvider {
   private buildHeaders(): Record<string, string> {
     return {
       'Content-Type': 'application/json',
-      'x-api-key': this.config.apiKey,
+      ...(this.config.apiKey ? { 'x-api-key': this.config.apiKey } : {}),
       'anthropic-version': '2023-06-01',
     }
   }
@@ -587,7 +585,7 @@ export class AnthropicProvider implements LlmProvider {
     // 尝试解析 retry-after
     const retryMs = parseRetryAfterMs(response.headers.get('retry-after'))
 
-    logger.error(`Anthropic ${method} 失败`, {
+    logger.error(__t('logs.llm', 'Anthropic {0} 失败', [method]), {
       status: response.status,
       body: text.slice(0, 300),
       model: this.config.modelId,
@@ -603,10 +601,5 @@ export class AnthropicProvider implements LlmProvider {
         retryAfter: retryMs,
       },
     })
-  }
-
-  /** 回退模型列表 */
-  private fallbackModels(): string[] {
-    return ['claude-sonnet-4-20250514', 'claude-3-5-sonnet-20241022', 'claude-3-opus-20240229']
   }
 }

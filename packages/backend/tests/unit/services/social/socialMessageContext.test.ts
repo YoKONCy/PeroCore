@@ -28,6 +28,17 @@ function message(patch: Partial<InboundMessage> = {}): InboundMessage {
 }
 
 describe('社交消息身份与附件上下文', () => {
+  it('bot 提醒紧邻账号，当前标记优先于旧消息；主人永远不被标作机器人', () => {
+    const bot = message({ senderKind: 'unknown', isMentioned: true })
+    expect(formatSocialMessage(bot, '654321', () => true)).toContain(
+      '身份:普通联系人] [bot·无需刻意回应@]',
+    )
+    expect(formatSocialMessage({ ...bot, senderKind: 'bot' }, '654321', () => false)).not.toContain(
+      'bot·',
+    )
+    expect(formatSocialMessage(bot, bot.senderId, () => true)).not.toContain('bot·')
+    expect(formatSocialMessage(bot, bot.senderId, () => true)).toContain('身份:主人')
+  })
   it('主要对话对象取最后一个实际提及者，不继承同批主人的身份或冒充主人的昵称', () => {
     const owner = message({ senderId: '654321', isOwner: true, isMentioned: true })
     const visitor = message({
@@ -98,8 +109,19 @@ describe('社交消息身份与附件上下文', () => {
 
   it('编译器按 QQ 独立核验身份，并给多模态图片标明原消息来源', async () => {
     const compiler = new SocialAppCompiler(
-      { queryGrants: vi.fn(async () => []) } as never,
-      {} as never,
+      {
+        queryGrants: vi.fn(async () => [
+          { resource: { kind: 'persona', agentId: 'pero' }, permissions: ['read'] },
+        ]),
+      } as never,
+      {
+        getAgent: () => ({
+          name: 'Pero',
+          promptPath: fileURLToPath(
+            new URL('../../../../src/assets/agents/pero/system_prompt.md', import.meta.url),
+          ),
+        }),
+      } as never,
       new MdpEngine(
         fileURLToPath(new URL('../../../../src/services/mdp/prompts/', import.meta.url)),
       ),
@@ -112,6 +134,7 @@ describe('社交消息身份与附件上下文', () => {
       channelType: 'group',
       ownerQq: '654321',
       ownerAppellation: '主人',
+      botAccountIds: ['123456', '654321'],
       triggerSenderId: '123456',
       triggerSenderName: '主人',
       isOwner: true,
@@ -134,10 +157,20 @@ describe('社交消息身份与附件上下文', () => {
     expect(compiled.messages.map((message) => message.content).join('\n')).toContain(
       'QQ:123456 身份:普通联系人',
     )
+    const prompt = compiled.messages
+      .flatMap((entry) =>
+        typeof entry.content === 'string'
+          ? [entry.content]
+          : (entry.content?.flatMap((part) => (part.type === 'text' ? [part.text] : [])) ?? []),
+      )
+      .join('\n')
+    expect(prompt).toContain('bot_hint="无需刻意回应@"')
+    expect(prompt).toContain('身份:普通联系人] [bot·无需刻意回应@]')
     expect(compiled.messages.at(-1)?.content).toEqual([
       { type: 'text', text: '看看这张图' },
       { type: 'text', text: '图片 1 来源：消息 22，发送者群友' },
       { type: 'image_url', image_url: { url: 'data:image/png;base64,aW1hZ2U=' } },
+      { type: 'text', text: expect.stringContaining('sender_qq="123456" identity="普通联系人"') },
     ])
   })
 })

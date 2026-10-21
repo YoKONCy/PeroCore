@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * 内置工具注册入口
  *
@@ -52,6 +53,8 @@ import webFetchManifest from './webFetch/manifest.json'
 import workspaceProductivityManifest from './workspaceProductivity/manifest.json'
 import sendFileManifest from './sendFile/manifest.json'
 import { sendFileTool } from './sendFile'
+import documentManifest from './document/manifest.json'
+import { documentTool } from './document'
 
 const logger = createLogger('BuiltinTools')
 
@@ -195,6 +198,7 @@ const ALL_BUILTIN_TOOLS: BuiltinTool[] = [
 
   // ── 文件系统 ──
   sendFileTool,
+  documentTool,
   readFileTool,
   readImageTool,
   writeFileTool,
@@ -455,6 +459,7 @@ for (const manifest of [
   webFetchManifest,
   workspaceProductivityManifest,
   sendFileManifest,
+  documentManifest,
 ] satisfies ToolManifest[]) {
   for (const definition of collectManifestDefinitions(manifest)) {
     MANIFEST_DEFINITIONS.set(definition.name, definition)
@@ -482,7 +487,7 @@ export async function registerBuiltinTools(registry: ToolRegistry): Promise<void
       tool.allowedSources,
     )
   }
-  logger.info(`内置工具已注册: ${ALL_BUILTIN_TOOLS.length} 个`)
+  logger.info(__t('logs.tools', '内置工具已注册: {0} 个', [ALL_BUILTIN_TOOLS.length]))
 }
 
 /** 获取所有内置工具定义 (调试用) */

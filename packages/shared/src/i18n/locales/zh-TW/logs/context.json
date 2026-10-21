@@ -1,0 +1,7 @@
+{
+  "发送 RAG 失败轨迹失败: {0}": "發送 RAG 失敗軌跡失敗: {0}",
+  "上下文已编译: thread={0}, agent={1}, channel={2}, ": "上下文已編譯: thread={0}, agent={1}, channel={2}, ",
+  "Agent 未找到: {0}，使用空人格": "Agent 未找到: {0}，使用空人格",
+  "人格文件读取失败: {0}": "人格文件讀取失敗: {0}",
+  "Thread ContextPolicy JSON 解析失败，回退到默认策略: {0}": "Thread ContextPolicy JSON 解析失敗，回退到默認策略: {0}"
+}

@@ -1,3 +1,4 @@
+import { t as __t } from './i18n'
 /**
  * SocialScheduler — 纯 TypeScript 社交调度器。
  *
@@ -79,7 +80,7 @@ export class SocialScheduler {
     this.running = true
     this.nextGroupReviewAt = Date.now() + (5 + Math.floor(Math.random() * 6)) * 60_000
     this.schedulePoll()
-    logger.info('社交调度器已启动（单 Agent 确定性门控）')
+    logger.info(__t('apps.social.logs', '社交调度器已启动（单 Agent 确定性门控）'))
   }
 
   stop(): void {
@@ -92,7 +93,9 @@ export class SocialScheduler {
     if (!this.running) return
     this.timer = setTimeout(() => {
       this.scan()
-        .catch((error) => logger.error(`社交调度扫描失败: ${String(error)}`))
+        .catch((error) =>
+          logger.error(__t('apps.social.logs', '社交调度扫描失败: {0}', [String(error)])),
+        )
         .finally(() => this.schedulePoll())
     }, 10_000)
   }
@@ -101,18 +104,21 @@ export class SocialScheduler {
     await this.deps.maintain?.()
     const now = Date.now()
     const sessions = this.deps.sessionManager.listSessions()
+    for (const session of sessions) this.deps.sessionManager.checkActiveExpiry(session)
 
     // 延后意图拥有最高调度优先级，到期时重新唤醒同一个角色 Agent 核验语境。
     for (const session of sessions) {
       if (session.phase === 'retrying' && now >= session.nextScanTime) {
         void this.deps.sessionManager
           .retry(session)
-          .catch((error) => logger.warn(`社交恢复失败: ${String(error)}`))
+          .catch((error) =>
+            logger.warn(__t('apps.social.logs', '社交恢复失败: {0}', [String(error)])),
+          )
         continue
       }
       if (!this.deps.sessionManager.dueDeferredIntent(session, now)) continue
       void this.runReview(session, 'intent_due').catch((error) =>
-        logger.warn(`延后任务唤醒失败: ${String(error)}`),
+        logger.warn(__t('apps.social.logs', '延后任务唤醒失败: {0}', [String(error)])),
       )
     }
 
@@ -124,6 +130,7 @@ export class SocialScheduler {
           session.channelType === 'group' &&
           session.phase !== 'running' &&
           session.phase !== 'retrying' &&
+          !session.orchestrationTurnId &&
           session.pendingMessages.length >= this.config.minMessagesForReview &&
           now >= session.nextScanTime,
       )
@@ -136,7 +143,7 @@ export class SocialScheduler {
     }
 
     void this.runReview(target, 'proactive_review').catch((error) =>
-      logger.warn(`自主观察失败: ${String(error)}`),
+      logger.warn(__t('apps.social.logs', '自主观察失败: {0}', [String(error)])),
     )
     // 一次只给角色一个自主观察机会，避免在多个群之间连续轰炸主模型。
     this.nextGroupReviewAt = now + (20 + Math.floor(Math.random() * 21)) * 60_000

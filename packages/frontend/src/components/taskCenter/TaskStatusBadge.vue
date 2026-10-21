@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import './task-pixel.css'
 /**
  * TaskStatusBadge — 任务状态方块
@@ -28,19 +30,39 @@ const props = defineProps<{
 
 /** 状态文案表（与后端状态机对齐） */
 const STATUS_LABELS: Record<string, string> = {
-  queued: '排队中',
-  running: '运行中',
-  paused: '已暂停',
-  waiting_input: '等待输入',
-  waiting: '等待条件',
-  blocked: '需要处理',
-  completed: '已完成',
-  failed: '失败',
-  cancelled: '已取消',
+  get queued() {
+    return __t('ui.taskCenter', '排队中')
+  },
+  get running() {
+    return __t('ui.taskCenter', '运行中')
+  },
+  get paused() {
+    return __t('ui.taskCenter', '已暂停')
+  },
+  get waiting_input() {
+    return __t('ui.taskCenter', '等待输入')
+  },
+  get waiting() {
+    return __t('ui.taskCenter', '等待条件')
+  },
+  get blocked() {
+    return __t('ui.taskCenter', '需要处理')
+  },
+  get completed() {
+    return __t('ui.taskCenter', '已完成')
+  },
+  get failed() {
+    return __t('ui.taskCenter', '失败')
+  },
+  get cancelled() {
+    return __t('ui.taskCenter', '已取消')
+  },
 }
 
 /** 展示文案（未知状态下回退为原文） */
-const label = computed(() => (props.read ? '已读' : (STATUS_LABELS[props.status] ?? props.status)))
+const label = computed(() =>
+  props.read ? __t('ui.taskCenter', '已读') : (STATUS_LABELS[props.status] ?? props.status),
+)
 
 /** 是否运行中（方块带离散脉冲） */
 const isRunning = computed(() => props.status === 'running')

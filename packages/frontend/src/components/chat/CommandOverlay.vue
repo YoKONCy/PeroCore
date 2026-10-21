@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /**
  * CommandOverlay — 指令执行遮罩
  *
@@ -35,8 +37,8 @@ const emit = defineEmits<{ skip: [] }>()
             <PixelIcon name="terminal" size="sm" animation="spin" />
           </div>
           <div>
-            <h3 class="command-title">正在执行指令...</h3>
-            <p class="command-subtitle">请稍候，任务正在后台运行</p>
+            <h3 class="command-title">{{ __t('ui.chat', '正在执行指令...') }}</h3>
+            <p class="command-subtitle">{{ __t('ui.chat', '请稍候，任务正在后台运行') }}</p>
           </div>
         </div>
 
@@ -52,7 +54,9 @@ const emit = defineEmits<{ skip: [] }>()
           </div>
           <div class="command-footer">
             <span v-if="command.pid" class="command-pid">PID: {{ command.pid }}</span>
-            <button class="command-skip" @click="emit('skip')">跳过等待 (后台继续)</button>
+            <button class="command-skip" @click="emit('skip')">
+              {{ __t('ui.chat', '跳过等待 (后台继续)') }}
+            </button>
           </div>
         </div>
       </div>

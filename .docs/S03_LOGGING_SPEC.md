@@ -80,20 +80,19 @@ export const logger = {
 
 ## 3. 请求日志中间件
 
-```typescript
-app.use('*', async (c, next) => {
-  const start = Date.now()
-  await next()
-  const duration = Date.now() - start
-  const status = c.res.status
+统一使用 `packages/backend/src/middleware/requestLogger.ts`。HTTP 状态码 ≥400 时保留 `warn`；成功请求只有耗时严格超过分类阈值才使用 `warn`，其余使用 `trace`，默认不打印。阈值只控制日志告警，不改变请求超时、取消或重试行为。
 
-  if (status >= 400) {
-    logger.warn('HTTP', `${c.req.method} ${c.req.path} → ${status} (${duration}ms)`)
-  } else {
-    logger.info('HTTP', `${c.req.method} ${c.req.path} → ${status} (${duration}ms)`)
-  }
-})
-```
+| 操作分类 | 标黄阈值 | 典型请求 |
+| --- | --- | --- |
+| 普通读取 | 10 秒 | 状态、配置、历史记录、目录列表 |
+| 普通写入 | 15 秒 | 保存配置、删除记忆、修改记录 |
+| 远端调用 | 60 秒 | 服务商探测、远端模型列表、天气、知识检索、Token 预算预览、MCP 连接、子应用启停 |
+| 文件处理 | 120 秒 | 上传、内容读取、文档预览、附件解析、SQLite 快照 |
+| 模型生成 | 300 秒 | 非流式聊天、模型测试、TTS/ASR、据点对话、塔罗解读 |
+| 批量维护 | 300 秒 | 索引重建、数据同步、重置 |
+| SSE 响应建立 | 60 秒 | 只衡量返回流响应前的处理，不累计连接存活时间 |
+
+分类按方法和具体操作路径匹配，不对 `/api/chat`、`/api/voice` 等整个模块统一放宽。流式响应优先按 SSE 响应建立分类；新增长耗时接口时同步维护分类规则。
 
 ---
 

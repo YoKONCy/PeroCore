@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * Runtime Router — 运行时状态管理 API
  *
@@ -65,7 +66,7 @@ export function createRuntimeRouter(ctx: AppContext) {
 
     return c.json({
       code: 'OK',
-      message: `窗口 ${windowId} 已绑定 Agent ${agentId}`,
+      message: __t('server.routers', '窗口 {0} 已绑定 Agent {1}', [windowId, agentId]),
       data: { windowId, agentId, agentName: agent.name },
     })
   })
@@ -94,7 +95,7 @@ export function createRuntimeRouter(ctx: AppContext) {
 
     return c.json({
       code: 'OK',
-      message: '获取成功',
+      message: __t('server.routers', '获取成功'),
       data: {
         windowId,
         agentId: resolvedAgentId,
@@ -113,7 +114,7 @@ export function createRuntimeRouter(ctx: AppContext) {
   router.delete('/window-agent/:wid', (c) => {
     const windowId = c.req.param('wid')
     ctx.runtimeStateService.removeWindow(windowId)
-    return c.json({ code: 'OK', message: `窗口 ${windowId} 已注销` })
+    return c.json({ code: 'OK', message: __t('server.routers', '窗口 {0} 已注销', [windowId]) })
   })
 
   /**
@@ -129,7 +130,7 @@ export function createRuntimeRouter(ctx: AppContext) {
     }))
     return c.json({
       code: 'OK',
-      message: '获取成功',
+      message: __t('server.routers', '获取成功'),
       data: {
         windows: entries,
         total: entries.length,
@@ -146,7 +147,7 @@ export function createRuntimeRouter(ctx: AppContext) {
     const tasks = ctx.runtimeStateService.listActiveTasks()
     return c.json({
       code: 'OK',
-      message: '获取成功',
+      message: __t('server.routers', '获取成功'),
       data: { tasks, total: tasks.length },
     })
   })

@@ -1,4 +1,10 @@
 <script setup lang="ts">
+import { getDisplayLocale } from '../../../i18n/index'
+
+import { t as __t } from '../../../i18n/index'
+
+import { copyClientText } from '../../../lib/clientPlatform'
+
 /**
  * LogsTab — 对话日志 Tab (F1-3)
  *
@@ -33,7 +39,7 @@ function handleRewindVisibility(visible: boolean): void {
 
 // ── 当前激活角色 ──
 const activeAgentName = computed(() => {
-  return agentStore.currentAgent?.name || ctx.activeAgentId.value || '未知'
+  return agentStore.currentAgent?.name || ctx.activeAgentId.value || __t('ui.settings', '未知')
 })
 
 // ── 类型 ──
@@ -94,7 +100,12 @@ const currentPage = ref(1)
 const totalCount = ref(0)
 
 const agentOptions = computed(() => [
-  { label: '全部角色', value: 'all' },
+  {
+    get label() {
+      return __t('ui.settings', '全部角色')
+    },
+    value: 'all',
+  },
   ...agentStore.agents.map((agent) => ({
     label: agent.name || agent.id,
     value: agent.id,
@@ -102,7 +113,12 @@ const agentOptions = computed(() => [
 ])
 
 const channelOptions = [
-  { label: '全部频道', value: 'all' },
+  {
+    get label() {
+      return __t('ui.settings', '全部频道')
+    },
+    value: 'all',
+  },
   { label: 'Desktop', value: 'desktop' },
   { label: 'Group', value: 'group' },
 ]
@@ -150,8 +166,18 @@ function groupLogsByRoom(threads: ThreadInfo[]): LogEntry[] {
 }
 
 const sortOptions = [
-  { label: '最新在前', value: 'desc' },
-  { label: '最早在前', value: 'asc' },
+  {
+    get label() {
+      return __t('ui.settings', '最新在前')
+    },
+    value: 'desc',
+  },
+  {
+    get label() {
+      return __t('ui.settings', '最早在前')
+    },
+    value: 'asc',
+  },
 ]
 
 const filteredLogs = computed(() => {
@@ -212,7 +238,11 @@ async function fetchSessions(): Promise<void> {
               if (entry.roomId === roomId) entry.messageCount = res.data?.count ?? 0
             })
           } catch (err) {
-            logger.error('LogsTab', `加载据点房间消息数失败: ${roomId}`, err)
+            logger.error(
+              'LogsTab',
+              __t('logs.frontend.settings', '加载据点房间消息数失败: {0}', [roomId]),
+              err,
+            )
           }
         }),
       )
@@ -231,7 +261,7 @@ async function fetchSessions(): Promise<void> {
       totalCount.value = data.total
     }
   } catch (e) {
-    logger.error('LogsTab', '加载 Thread 列表失败', e)
+    logger.error('LogsTab', __t('logs.frontend.settings', '加载 Thread 列表失败'), e)
   } finally {
     isLoading.value = false
   }
@@ -307,7 +337,7 @@ async function toggleExpand(id: string): Promise<void> {
         )
       }
     } catch (e) {
-      logger.error('LogsTab', '加载 Thread 详情失败', e)
+      logger.error('LogsTab', __t('logs.frontend.settings', '加载 Thread 详情失败'), e)
     } finally {
       if (!logs.value.find((item) => item.id === id)?.messagesLoaded) {
         logs.value = logs.value.map((item) =>
@@ -328,7 +358,7 @@ function toLogEntry(t: ThreadInfo): LogEntry {
     threadId: t.id,
     agentId: t.agentId,
     agentName: getAgentName(t.agentId),
-    summary: t.title || '未命名会话',
+    summary: t.title || __t('ui.settings', '未命名会话'),
     // 后端列表已返回真实计数，无需展开即可展示
     messageCount: t.messageCount ?? 0,
     channel: t.channel || 'desktop',
@@ -340,7 +370,7 @@ function toLogEntry(t: ThreadInfo): LogEntry {
 }
 
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('zh-CN', {
+  return new Date(iso).toLocaleDateString(getDisplayLocale(), {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
@@ -350,7 +380,7 @@ function formatDate(iso: string): string {
 
 function formatMsgTime(ts?: string): string {
   if (!ts) return ''
-  return new Date(ts).toLocaleTimeString('zh-CN', {
+  return new Date(ts).toLocaleTimeString(getDisplayLocale(), {
     hour: '2-digit',
     minute: '2-digit',
   })
@@ -373,12 +403,12 @@ function getMessageAgentName(log: LogEntry, message: LogMessage): string {
 /** 复制记录到剪贴板 */
 async function handleCopy(content: string) {
   try {
-    await navigator.clipboard.writeText(content)
-    logger.info('LogsTab', '已复制日志内容')
-    notif.toast('已复制', { type: 'success' })
+    await copyClientText(content)
+    logger.info('LogsTab', __t('logs.frontend.settings', '已复制日志内容'))
+    notif.toast(__t('ui.settings', '已复制'), { type: 'success' })
   } catch (err) {
-    logger.error('LogsTab', '复制失败', err)
-    notif.toast('复制失败', { type: 'error' })
+    logger.error('LogsTab', __t('logs.frontend.settings', '复制失败'), err)
+    notif.toast(__t('ui.settings', '复制失败'), { type: 'error' })
   }
 }
 
@@ -392,12 +422,19 @@ async function confirmRenameThread(value?: string) {
     logs.value = logs.value.map((log) =>
       log.id === target.id ? { ...log, summary: title || '未命名会话' } : log,
     )
-    notif.toast('会话标题已更新', { type: 'success', title: '对话日志' })
+    notif.toast(__t('ui.settings', '会话标题已更新'), {
+      type: 'success',
+      get title() {
+        return __t('ui.settings', '对话日志')
+      },
+    })
   } catch (err) {
-    logger.error('LogsTab', '会话改名失败', err)
-    notif.toast(err instanceof Error ? err.message : '会话改名失败', {
+    logger.error('LogsTab', __t('logs.frontend.settings', '会话改名失败'), err)
+    notif.toast(err instanceof Error ? err.message : __t('ui.settings', '会话改名失败'), {
       type: 'error',
-      title: '对话日志',
+      get title() {
+        return __t('ui.settings', '对话日志')
+      },
     })
   } finally {
     threadPendingRename.value = null
@@ -411,19 +448,26 @@ async function requestDeleteThread(log: LogEntry) {
     await rewind.open({
       threadId: log.threadId,
       wholeThread: true,
-      title: log.summary || '未命名会话',
+      title: log.summary || __t('ui.settings', '未命名会话'),
       onSuccess: () => {
         logs.value = logs.value.filter((item) => item.id !== log.id)
         totalCount.value = Math.max(0, totalCount.value - 1)
         if (expandedId.value === log.id) expandedId.value = null
-        notif.toast('会话已删除，文件保持原样', { type: 'success', title: '对话日志' })
+        notif.toast(__t('ui.settings', '会话已删除，文件保持原样'), {
+          type: 'success',
+          get title() {
+            return __t('ui.settings', '对话日志')
+          },
+        })
       },
     })
   } catch (err) {
     threadPendingDelete.value = null
-    notif.toast(err instanceof Error ? err.message : '回滚预检失败', {
+    notif.toast(err instanceof Error ? err.message : __t('ui.settings', '回滚预检失败'), {
       type: 'error',
-      title: '对话日志',
+      get title() {
+        return __t('ui.settings', '对话日志')
+      },
     })
   }
 }
@@ -454,17 +498,21 @@ async function handleDeletePair(log: LogEntry, id: string) {
             },
           }),
         )
-        notif.toast(`已回滚 ${result.preview.pairCount} 轮对话`, {
+        notif.toast(__t('ui.settings', '已回滚 {0} 轮对话', [result.preview.pairCount]), {
           type: 'success',
-          title: '对话日志',
+          get title() {
+            return __t('ui.settings', '对话日志')
+          },
         })
       },
     })
   } catch (err) {
-    logger.error('LogsTab', '回滚预检失败', err)
-    notif.toast(err instanceof Error ? err.message : '回滚预检失败', {
+    logger.error('LogsTab', __t('logs.frontend.settings', '回滚预检失败'), err)
+    notif.toast(err instanceof Error ? err.message : __t('ui.settings', '回滚预检失败'), {
       type: 'error',
-      title: '对话日志',
+      get title() {
+        return __t('ui.settings', '对话日志')
+      },
     })
   }
 }
@@ -572,7 +620,7 @@ onUnmounted(() => {
               >
                 <PixelIcon name="chat" size="md" />
               </span>
-              对话日志
+              {{ __t('ui.settings', '对话日志') }}
               <span
                 class="opacity-0 group-hover/toolbar:opacity-100 transition-opacity duration-500"
               >
@@ -610,10 +658,14 @@ onUnmounted(() => {
               class="text-[10px] font-bold text-ui-text-secondary flex items-center gap-1.5 ml-1 uppercase tracking-wider"
             >
               <span class="w-1.5 h-1.5 rounded-full bg-ui-accent-sky" />
-              搜索
+              {{ __t('ui.settings', '搜索') }}
               <span class="opacity-50 font-normal">Search</span>
             </label>
-            <PInput v-model="searchQuery" placeholder="搜索对话摘要..." class="!text-sm" />
+            <PInput
+              v-model="searchQuery"
+              :placeholder="__t('ui.settings', '搜索对话摘要...')"
+              class="!text-sm"
+            />
           </div>
 
           <!-- Agent -->
@@ -622,7 +674,7 @@ onUnmounted(() => {
               class="text-[10px] font-bold text-ui-text-secondary flex items-center gap-1.5 ml-1 uppercase tracking-wider"
             >
               <span class="w-1.5 h-1.5 rounded-full bg-ui-accent-sky animate-pulse" />
-              角色
+              {{ __t('ui.settings', '角色') }}
               <span class="opacity-50 font-normal">Agent</span>
             </label>
             <PSelect v-model="filterAgent" :options="agentOptions" @change="fetchSessions" />
@@ -634,7 +686,7 @@ onUnmounted(() => {
               class="text-[10px] font-bold text-ui-text-secondary flex items-center gap-1.5 ml-1 uppercase tracking-wider"
             >
               <span class="w-1.5 h-1.5 rounded-full bg-ui-accent-sky" />
-              来源
+              {{ __t('ui.settings', '来源') }}
               <span class="opacity-50 font-normal">Source</span>
             </label>
             <PSelect v-model="filterChannel" :options="channelOptions" @change="fetchSessions" />
@@ -646,7 +698,7 @@ onUnmounted(() => {
               class="text-[10px] font-bold text-ui-text-secondary flex items-center gap-1.5 ml-1 uppercase tracking-wider"
             >
               <span class="w-1.5 h-1.5 rounded-full bg-ui-accent-sky" />
-              排序
+              {{ __t('ui.settings', '排序') }}
               <span class="opacity-50 font-normal">Sort</span>
             </label>
             <PSelect v-model="selectedSort" :options="sortOptions" />
@@ -665,7 +717,7 @@ onUnmounted(() => {
               >
                 <PixelIcon name="refresh" size="xs" />
               </span>
-              刷新
+              {{ __t('ui.settings', '刷新') }}
             </PButton>
           </div>
         </div>
@@ -677,7 +729,7 @@ onUnmounted(() => {
       <PEmpty v-if="filteredLogs.length === 0">
         <template #description>
           <div class="flex items-center gap-2 justify-center">
-            暂无对话记录
+            {{ __t('ui.settings', '暂无对话记录') }}
             <PixelIcon name="thought" size="xs" />
           </div>
         </template>
@@ -699,7 +751,7 @@ onUnmounted(() => {
                     viewBox="0 0 48 48"
                     fill="none"
                     xmlns="http://www.w3.org/2000/svg"
-                    aria-label="据点房间"
+                    :aria-label="__t('ui.settings', '据点房间')"
                     class="w-full h-full p-1"
                   >
                     <path
@@ -745,7 +797,7 @@ onUnmounted(() => {
                   <div class="flex gap-3 mt-1 flex-wrap">
                     <span class="text-[10px] text-ui-text-secondary flex items-center gap-1">
                       <PixelIcon name="chat" size="xs" />
-                      {{ log.messageCount }} 条
+                      {{ log.messageCount }} {{ __t('ui.settings', '条') }}
                     </span>
                     <span
                       class="text-[10px] font-bold px-1.5 py-0.5 bg-ui-accent-sky-soft text-ui-accent-sky border border-ui-border-default"
@@ -762,16 +814,16 @@ onUnmounted(() => {
               <div class="flex items-center gap-1 relative z-20">
                 <button
                   class="p-1.5 text-ui-text-secondary hover:text-ui-accent-sky hover:bg-ui-accent-sky-soft transition-colors"
-                  title="修改会话标题"
-                  aria-label="修改会话标题"
+                  :title="__t('ui.settings', '修改会话标题')"
+                  :aria-label="__t('ui.settings', '修改会话标题')"
                   @click.stop="threadPendingRename = log"
                 >
                   <PixelIcon name="pencil" size="xs" />
                 </button>
                 <button
                   class="p-1.5 text-ui-text-secondary hover:text-ui-danger hover:bg-ui-danger-soft transition-colors"
-                  title="删除整条会话"
-                  aria-label="删除整条会话"
+                  :title="__t('ui.settings', '删除整条会话')"
+                  :aria-label="__t('ui.settings', '删除整条会话')"
                   @click.stop="requestDeleteThread(log)"
                 >
                   <PixelIcon name="trash" size="xs" />
@@ -803,7 +855,7 @@ onUnmounted(() => {
               class="flex items-center gap-2 text-ui-text-secondary text-sm font-bold py-4 justify-center"
             >
               <PixelIcon name="refresh" size="sm" animation="spin" />
-              <span class="font-pixel">加载消息中...</span>
+              <span class="font-pixel">{{ __t('ui.settings', '加载消息中...') }}</span>
             </div>
 
             <!-- 消息气泡 -->
@@ -834,7 +886,7 @@ onUnmounted(() => {
                       viewBox="0 0 48 48"
                       fill="none"
                       xmlns="http://www.w3.org/2000/svg"
-                      aria-label="据点房间"
+                      :aria-label="__t('ui.settings', '据点房间')"
                       class="w-full h-full p-1 relative z-10"
                     >
                       <path
@@ -884,7 +936,11 @@ onUnmounted(() => {
                         size="xs"
                         animation="spin"
                       />
-                      {{ msg.role === 'user' ? '主人' : getMessageAgentName(log, msg) }}
+                      {{
+                        msg.role === 'user'
+                          ? __t('ui.settings', '主人')
+                          : getMessageAgentName(log, msg)
+                      }}
                       <PixelIcon
                         v-if="msg.role === 'user'"
                         name="heart"
@@ -899,7 +955,7 @@ onUnmounted(() => {
                       v-if="msg.role !== 'user' && msg.outputTokens !== undefined"
                       class="text-ui-text-secondary font-mono text-[9px]"
                     >
-                      {{ msg.outputTokens.toLocaleString('zh-CN') }} Token
+                      {{ msg.outputTokens.toLocaleString(getDisplayLocale()) }} Token
                     </span>
                   </div>
 
@@ -932,14 +988,14 @@ onUnmounted(() => {
                     >
                       <button
                         class="p-1.5 text-ui-text-secondary hover:text-ui-accent-sky hover:bg-ui-accent-sky-soft transition-colors"
-                        title="复制"
+                        :title="__t('ui.settings', '复制')"
                         @click.stop="handleCopy(msg.content)"
                       >
                         <PixelIcon name="copy" size="sm" />
                       </button>
                       <button
                         class="p-1.5 text-ui-text-secondary hover:text-ui-danger hover:bg-ui-danger-soft transition-colors"
-                        title="删除该对话对"
+                        :title="__t('ui.settings', '删除该对话对')"
                         @click.stop="handleDeletePair(log, msg.id)"
                       >
                         <PixelIcon name="trash" size="sm" />
@@ -947,7 +1003,7 @@ onUnmounted(() => {
                       <button
                         v-if="msg.role === 'assistant'"
                         class="p-1.5 text-ui-text-secondary hover:text-ui-accent-purple hover:bg-ui-accent-purple-soft transition-colors border-l border-ui-border-default"
-                        title="查看内部构造"
+                        :title="__t('ui.settings', '查看内部构造')"
                         @click.stop="openDebugDialog(msg)"
                       >
                         <PixelIcon name="terminal" size="sm" />
@@ -963,7 +1019,8 @@ onUnmounted(() => {
                   class="text-[10px] text-ui-text-secondary font-bold px-3 py-1 bg-ui-accent-sky-soft border border-ui-border-default inline-flex items-center gap-1.5"
                 >
                   <PixelIcon name="thought" size="xs" />
-                  展示前 {{ log.messages.length }} 条消息
+                  {{ __t('ui.settings', '展示前') }} {{ log.messages.length }}
+                  {{ __t('ui.settings', '条消息') }}
                   <PixelIcon name="paw" size="xs" />
                 </span>
               </div>
@@ -977,13 +1034,13 @@ onUnmounted(() => {
   <!-- ═══ 调试日志弹窗 ═══ -->
   <PDialog
     :model-value="Boolean(threadPendingRename)"
-    title="修改会话标题"
+    :title="__t('ui.settings', '修改会话标题')"
     mode="prompt"
     :default-value="
       threadPendingRename?.summary === '未命名会话' ? '' : threadPendingRename?.summary || ''
     "
-    placeholder="未命名会话"
-    confirm-text="保存标题"
+    :placeholder="__t('ui.settings', '未命名会话')"
+    :confirm-text="__t('ui.settings', '保存标题')"
     @update:model-value="
       (visible) => {
         if (!visible) threadPendingRename = null
@@ -1000,9 +1057,17 @@ onUnmounted(() => {
     @confirm="rewind.confirm"
   />
 
-  <PDialog v-model="showDebugDialog" title="对话调试详情 (Debug View)" width="800px">
+  <PDialog
+    v-model="showDebugDialog"
+    :title="__t('ui.settings', '对话调试详情 (Debug View)')"
+    width="800px"
+  >
     <div v-if="currentDebugMsg" class="debug-dialog-body space-y-4">
-      <div class="debug-view-switch" role="tablist" aria-label="调试内容视图">
+      <div
+        class="debug-view-switch"
+        role="tablist"
+        :aria-label="__t('ui.settings', '调试内容视图')"
+      >
         <button
           type="button"
           role="tab"
@@ -1011,7 +1076,7 @@ onUnmounted(() => {
           @click="debugViewMode = 'prompt'"
         >
           <PixelIcon name="terminal" size="xs" />
-          <span>完整提示词</span>
+          <span>{{ __t('ui.settings', '完整提示词') }}</span>
           <small>PROMPT</small>
         </button>
         <button
@@ -1022,7 +1087,7 @@ onUnmounted(() => {
           @click="debugViewMode = 'raw'"
         >
           <PixelIcon name="file" size="xs" />
-          <span>原始文本</span>
+          <span>{{ __t('ui.settings', '原始文本') }}</span>
           <small>RAW</small>
         </button>
       </div>
@@ -1047,9 +1112,12 @@ onUnmounted(() => {
           </span>
         </div>
         <div v-if="debugViewMode === 'prompt'" class="flex items-center gap-1.5">
-          <span class="opacity-50 uppercase">输入 Token:</span>
+          <span class="opacity-50 uppercase">{{ __t('ui.settings', '输入 Token:') }}</span>
           <span class="font-bold font-mono">
-            {{ getInputTokenCount(currentDebugMsg)?.toLocaleString('zh-CN') ?? '历史记录无统计' }}
+            {{
+              getInputTokenCount(currentDebugMsg)?.toLocaleString(getDisplayLocale()) ??
+              __t('ui.settings', '历史记录无统计')
+            }}
           </span>
         </div>
         <div class="flex items-center gap-1.5 ml-auto">
@@ -1057,11 +1125,12 @@ onUnmounted(() => {
           <span class="font-bold flex items-center gap-1">
             <template v-if="hasStoredRawContent(currentDebugMsg)">
               <PixelIcon name="check" size="xs" class="text-ui-success" />
-              已保存原始日志 ({{ currentDebugMsg.rawContent!.length }} bytes)
+              {{ __t('ui.settings', '已保存原始日志 (')
+              }}{{ currentDebugMsg.rawContent!.length }} bytes)
             </template>
             <template v-else>
               <PixelIcon name="alert" size="xs" class="text-ui-warning" />
-              历史记录未保存原始转写，已显示可见回复
+              {{ __t('ui.settings', '历史记录未保存原始转写，已显示可见回复') }}
             </template>
           </span>
         </div>
@@ -1085,8 +1154,8 @@ onUnmounted(() => {
         </template>
         <div v-else class="prompt-view__empty">
           <PixelIcon name="info" size="md" />
-          <strong>该轮没有初始提示词快照</strong>
-          <span>此记录生成于提示词持久化功能启用之前，无法还原首次 LLM 请求。</span>
+          <strong>{{ __t('ui.settings', '无提示词记录') }}</strong>
+          <span>{{ __t('ui.settings', '此记录未保存提示词。') }}</span>
         </div>
       </div>
 
@@ -1099,7 +1168,9 @@ onUnmounted(() => {
     </div>
 
     <template #footer>
-      <PButton variant="secondary" size="sm" @click="showDebugDialog = false">关闭</PButton>
+      <PButton variant="secondary" size="sm" @click="showDebugDialog = false">
+        {{ __t('ui.settings', '关闭') }}
+      </PButton>
     </template>
   </PDialog>
 </template>

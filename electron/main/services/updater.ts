@@ -1,3 +1,4 @@
+import { t as __t } from '../utils/i18n'
 /**
  * Electron Release 更新服务。
  *
@@ -104,9 +105,9 @@ function createInitialState(): UpdateState {
     message:
       mode === 'unsupported'
         ? isDev
-          ? '开发版本不使用 Release 自动更新'
-          : '当前发行形态不支持此更新器'
-        : '尚未检查更新',
+          ? __t('electron.ui.updater', '开发版本不使用 Release 自动更新')
+          : __t('electron.ui.updater', '当前发行形态不支持此更新器')
+        : __t('electron.ui.updater', '尚未检查更新'),
   }
 }
 
@@ -246,7 +247,10 @@ async function fetchReleaseList(): Promise<UpdateRelease[]> {
     await writeFile(cachePath, JSON.stringify(list), 'utf8')
     return list
   } catch (error) {
-    logger.warn('Updater', `获取 Release 列表失败，尝试读取缓存: ${String(error)}`)
+    logger.warn(
+      'Updater',
+      __t('electron.logs.updater', '获取 Release 列表失败，尝试读取缓存: {0}', [String(error)]),
+    )
     try {
       return JSON.parse(await readFile(cachePath, 'utf8')) as UpdateRelease[]
     } catch {
@@ -270,7 +274,11 @@ export function getCachedReleases(): UpdateRelease[] {
 
 export async function checkForUpdates(): Promise<UpdateState> {
   if (deployment() === 'unsupported') return getUpdateState()
-  updateState({ phase: 'checking', progress: 0, message: '正在检查 GitHub Release…' })
+  updateState({
+    phase: 'checking',
+    progress: 0,
+    message: __t('electron.ui.updater', '正在检查 GitHub Release…'),
+  })
   try {
     releases = await fetchReleaseList()
     selectedRelease = releases[0] ?? null
@@ -279,7 +287,9 @@ export async function checkForUpdates(): Promise<UpdateState> {
       selectedVersion: selectedRelease?.version,
       selectedTag: selectedRelease?.tagName,
       progress: releases.length ? 0 : 100,
-      message: releases.length ? `发现 ${releases.length} 个可用版本` : '当前已是最新版本',
+      message: releases.length
+        ? __t('electron.ui.updater', '发现 {0} 个可用版本', [releases.length])
+        : __t('electron.ui.updater', '当前已是最新版本'),
       checkedAt: new Date().toISOString(),
       downloadedPath: undefined,
     })
@@ -287,7 +297,9 @@ export async function checkForUpdates(): Promise<UpdateState> {
   } catch (error) {
     updateState({
       phase: 'error',
-      message: `检查更新失败：${error instanceof Error ? error.message : String(error)}`,
+      message: __t('electron.ui.updater', '检查更新失败：{0}', [
+        error instanceof Error ? error.message : String(error),
+      ]),
     })
     throw error
   }
@@ -341,7 +353,10 @@ async function downloadFile(release: UpdateRelease, destination: string): Promis
       progress,
       transferredBytes: transferred,
       totalBytes: total,
-      message: total > 0 ? `正在下载 ${progress}%` : '正在下载更新包…',
+      message:
+        total > 0
+          ? __t('electron.ui.updater', '正在下载 {0}%', [progress])
+          : __t('electron.ui.updater', '正在下载更新包…'),
     })
   })
   await pipeline(source, createWriteStream(destination))
@@ -387,7 +402,7 @@ export async function downloadUpdate(tagName?: string): Promise<UpdateState> {
     transferredBytes: 0,
     totalBytes: release.assetSize,
     downloadedPath: undefined,
-    message: `准备下载 ${release.version}`,
+    message: __t('electron.ui.updater', '准备下载 {0}', [release.version]),
   })
   try {
     await downloadFile(release, downloadPath)
@@ -407,13 +422,15 @@ export async function downloadUpdate(tagName?: string): Promise<UpdateState> {
       transferredBytes: release.assetSize,
       totalBytes: release.assetSize,
       downloadedPath: downloadPath,
-      message: '更新已下载，点击安装后应用将完整退出',
+      message: __t('electron.ui.updater', '更新已下载，点击安装后应用将完整退出'),
     })
     return getUpdateState()
   } catch (error) {
     updateState({
       phase: 'error',
-      message: `下载更新失败：${error instanceof Error ? error.message : String(error)}`,
+      message: __t('electron.ui.updater', '下载更新失败：{0}', [
+        error instanceof Error ? error.message : String(error),
+      ]),
     })
     throw error
   }
@@ -464,7 +481,10 @@ export async function installUpdate(): Promise<boolean> {
     windowsHide: true,
   })
   child.unref()
-  logger.info('Updater', `已启动退出安装助手: ${selectedRelease.version}`)
+  logger.info(
+    'Updater',
+    __t('electron.logs.updater', '已启动退出安装助手: {0}', [selectedRelease.version]),
+  )
   setImmediate(() => app.quit())
   return true
 }

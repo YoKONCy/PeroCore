@@ -1,3 +1,4 @@
+import { t as __t } from '../utils/i18n'
 /**
  * @file 3D 资产联邦扫描与 asset:// 安全协议
  * @description 统一扫描官方、用户和 Steam Workshop 模型；外部只读资源通过虚拟协议加载。
@@ -76,7 +77,10 @@ function extractModelMeta(modelJsonPath: string): { bones: string[]; visibleHeig
       .filter((name): name is string => !!name)
     return { bones, visibleHeight: geo?.description?.visible_bounds_height }
   } catch (e) {
-    logger.warn('Assets', `解析模型元数据失败: ${modelJsonPath} - ${e}`)
+    logger.warn(
+      'Assets',
+      __t('electron.logs.assets', '解析模型元数据失败: {0} - {1}', [modelJsonPath, e]),
+    )
     return { bones: [] }
   }
 }
@@ -187,11 +191,11 @@ export function registerAssetProtocol(): void {
       }
       return net.fetch(pathToFileURL(filePath).toString())
     } catch (e) {
-      logger.warn('Assets', `asset:// 请求失败: ${e}`)
+      logger.warn('Assets', __t('electron.logs.assets', 'asset:// 请求失败: {0}', [e]))
       return new Response('资产加载失败', { status: 500 })
     }
   })
-  logger.info('Assets', 'asset:// 安全资产协议已注册')
+  logger.info('Assets', __t('electron.logs.assets', 'asset:// 安全资产协议已注册'))
 }
 
 /** 判断目录自身是否为模型包。 */
@@ -286,11 +290,19 @@ export async function scan3DModels(): Promise<AssetInfo[]> {
         })
       }
     } catch (e) {
-      logger.warn('Assets', `扫描模型源失败: ${root.dirPath} - ${e}`)
+      logger.warn(
+        'Assets',
+        __t('electron.logs.assets', '扫描模型源失败: {0} - {1}', [root.dirPath, e]),
+      )
     }
   }
 
   const assets = [...results.values()]
-  logger.info('Assets', `扫描到 ${assets.length} 个 3D 模型（官方/本地/Workshop 联邦）`)
+  logger.info(
+    'Assets',
+    __t('electron.logs.assets', '扫描到 {0} 个 3D 模型（官方/本地/Workshop 联邦）', [
+      assets.length,
+    ]),
+  )
   return assets
 }

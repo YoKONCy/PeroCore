@@ -34,6 +34,7 @@ describe('SocialScheduler 确定性门控', () => {
     const review = vi.fn().mockResolvedValue(undefined)
     const manager = {
       listSessions: vi.fn(() => [low, high]),
+      checkActiveExpiry: vi.fn(),
       dueDeferredIntent: vi.fn(() => undefined),
       review,
       retry: vi.fn(),
@@ -55,6 +56,7 @@ describe('SocialScheduler 确定性门控', () => {
     const target = session({ channelType: 'private' })
     const manager = {
       listSessions: vi.fn(() => [target]),
+      checkActiveExpiry: vi.fn(),
       dueDeferredIntent: vi.fn().mockReturnValueOnce({ intention: '稍后询问' }),
       review: vi.fn().mockResolvedValue(undefined),
       retry: vi.fn(),
@@ -74,6 +76,7 @@ describe('SocialScheduler 确定性门控', () => {
     const manager = {
       listSessions: vi.fn(() => [target]),
       dueDeferredIntent: vi.fn(() => undefined),
+      checkActiveExpiry: vi.fn(),
       review: vi.fn(),
       retry: vi.fn().mockResolvedValue(undefined),
     }

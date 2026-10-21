@@ -1,6 +1,9 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import PetHudIcon from './PetHudIcon.vue'
+import type { PetUiRect } from '../../composables/pet/usePetActivity'
 
 const props = defineProps<{
   text: string
@@ -15,6 +18,7 @@ const emit = defineEmits<{
   (event: 'ui-leave'): void
   (event: 'open-conversation'): void
   (event: 'stop-speech'): void
+  (event: 'placement', rect: PetUiRect | null): void
 }>()
 const element = ref<HTMLElement | null>(null)
 const size = ref({ width: 0, height: 0 })
@@ -65,6 +69,21 @@ function measure(): void {
   if (width !== size.value.width || height !== size.value.height) size.value = { width, height }
 }
 watch(
+  placement,
+  (value) => {
+    if (!size.value.width) return
+    const left = Number.parseFloat(value.left),
+      top = Number.parseFloat(value.top)
+    emit('placement', {
+      left: left - 12,
+      top,
+      right: left + size.value.width + 12,
+      bottom: top + size.value.height + 12,
+    })
+  },
+  { flush: 'post', immediate: true },
+)
+watch(
   () => [props.text, props.petName, layout.value.maxWidth, props.viewport.height],
   () => {
     void nextTick(measure)
@@ -78,7 +97,10 @@ onMounted(() => {
     observer.observe(element.value)
   }
 })
-onUnmounted(() => observer?.disconnect())
+onUnmounted(() => {
+  observer?.disconnect()
+  emit('placement', null)
+})
 </script>
 
 <template>
@@ -97,13 +119,14 @@ onUnmounted(() => observer?.disconnect())
       <span>{{ petName }}</span>
       <PetHudIcon name="heart" size="xs" />
     </div>
-    <div class="bubble-content">{{ text }}</div>
+    <div v-if="text" class="bubble-content">{{ text }}</div>
+    <slot />
     <div v-if="conversation || speaking" class="bubble-actions">
       <button
         v-if="speaking"
         type="button"
-        title="停止朗读"
-        aria-label="停止朗读"
+        :title="__t('ui.pet', '停止朗读')"
+        :aria-label="__t('ui.pet', '停止朗读')"
         @click="emit('stop-speech')"
       >
         <PetHudIcon name="volume-x" size="xs" />
@@ -111,8 +134,8 @@ onUnmounted(() => observer?.disconnect())
       <button
         v-if="conversation"
         type="button"
-        title="打开对话"
-        aria-label="打开对话"
+        :title="__t('ui.pet', '打开对话')"
+        :aria-label="__t('ui.pet', '打开对话')"
         @click="emit('open-conversation')"
       >
         <PetHudIcon name="chevron-right" size="xs" />

@@ -64,6 +64,13 @@ function createCtx() {
   const thread = createThread()
   const messages = createMessages()
   return {
+    conversationQueue: {
+      beginHistoryChange: vi.fn(() => vi.fn()),
+      pause: vi.fn(),
+      afterTurn: vi.fn(),
+      historyChanged: vi.fn(),
+      setLive: vi.fn(),
+    },
     agentService: {
       chatWithCompiledMessages: vi.fn(() => Promise.resolve('回复')),
       chatStreamWithCompiledMessages: vi.fn(),
@@ -250,14 +257,17 @@ describe('ChatRouter', () => {
         surface: expect.objectContaining({ surfaceId: 'conversation-message:2' }),
       },
     })
-    expect(ctx.conversationTurnService.executeTurn).toHaveBeenCalledWith({
-      threadId: 't1',
-      agentId: undefined,
-      content: '你好',
-      attachmentIds: undefined,
-      imageMode: undefined,
-      workspaceContext: undefined,
-    })
+    expect(ctx.conversationTurnService.executeTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: 't1',
+        agentId: 'pero',
+        signal: expect.any(AbortSignal),
+        content: '你好',
+        attachmentIds: undefined,
+        imageMode: undefined,
+        workspaceContext: undefined,
+      }),
+    )
   })
 
   it('应当停止生成、创建 Thread 并获取最新 Thread', async () => {

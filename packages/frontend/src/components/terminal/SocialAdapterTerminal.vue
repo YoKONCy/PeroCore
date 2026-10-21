@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /**
  * SocialAdapterTerminal — 社交适配器交互终端
  *
@@ -321,7 +323,7 @@ onUnmounted(() => {
         <div class="sa-icon-pulse">
           <PixelIcon name="terminal" size="sm" />
         </div>
-        <span class="sa-title">社交适配器终端</span>
+        <span class="sa-title">{{ __t('ui.workspace', '社交适配器终端') }}</span>
         <span class="sa-badge">SOCIAL</span>
       </div>
       <div class="sa-header-right">
@@ -374,8 +376,8 @@ onUnmounted(() => {
       <!-- 空状态 -->
       <div v-if="logs.length === 0 && !isLoading" class="sa-empty">
         <PixelIcon name="terminal" size="xl" />
-        <span>等待社交适配器输出...</span>
-        <span class="sa-empty-hint">适配器连接后日志将自动显示</span>
+        <span>{{ __t('ui.workspace', '等待社交适配器输出...') }}</span>
+        <span class="sa-empty-hint">{{ __t('ui.workspace', '适配器连接后日志将自动显示') }}</span>
       </div>
     </div>
 
@@ -386,7 +388,7 @@ onUnmounted(() => {
         <input
           v-model="inputValue"
           class="sa-input"
-          placeholder="输入调试指令并回车..."
+          :placeholder="__t('ui.workspace', '输入调试指令并回车...')"
           spellcheck="false"
           @keyup.enter="sendCommand"
         />

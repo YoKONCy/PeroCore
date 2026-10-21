@@ -1,0 +1,10 @@
+{
+  "连接中断，消息已刷新": "connection interrupted, message has been refreshed",
+  "消息已发送；{0}": "message sent; {0}",
+  "发送消息失败: ": "failed to send message:",
+  "已删除 {0} 条关联消息": "has deleted {0} related messages",
+  "消息已删除": "message has been deleted",
+  "删除消息失败: ": "Failed to delete message:",
+  "管家已执行": "Butler has been executed",
+  "管家调用失败: ": "Housekeeper call failed:"
+}

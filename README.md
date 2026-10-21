@@ -1,163 +1,80 @@
-<div align="right">
+<a id="top"></a>
 
-**🌐 Language / 语言切换**:&nbsp;&nbsp;**中文** ｜ [English](./README_EN.md)
-
-</div>
+<p align="right"><b>简体中文</b> · <a href="./README_EN.md">English</a></p>
 
 <div align="center">
-<!-- 动态渐变头图 -->
-<img src="https://capsule-render.vercel.app/api?type=waving&amp;color=0:87CEEB,50:00BFFF,100:1E90FF&amp;height=220&amp;section=header&amp;text=infOS&amp;fontSize=70&amp;fontColor=ffffff&amp;fontAlignY=35&amp;desc=Your%20Warm,%20and%20Infinite%20Companion&amp;descSize=25&amp;descAlignY=60&amp;animation=twinkling&amp;fontAlign=50" width="100%"/>
-
-<br/>
-
-<!-- 动态打字效果 Slogan -->
-<a href="https://github.com/YoKONCy/infOS">
-  <img src="https://readme-typing-svg.demolab.com?font=Noto%20Serif%20SC&amp;weight=600&amp;size=28&amp;duration=4000&amp;pause=1000&amp;color=1E90FF&amp;center=true&amp;vCenter=true&amp;multiline=true&amp;repeat=false&amp;width=800&amp;height=70&amp;lines=Let%20AI%20become%20a%20truly%20warm%20companion;%E8%AE%A9%20AI%20%E6%88%90%E4%B8%BA%E7%9C%9F%E6%AD%A3%E6%9C%89%E6%B8%A9%E5%BA%A6%E7%9A%84%E4%BC%99%E4%BC%B4;TriviumDB%20Engine%20%E2%9C%A6%20NIT%20Protocol%20%E2%9C%A6%20Deep%20Memory" alt="Slogan" />
-</a>
-
-<br/>
-
-<!-- 徽标导航 -->
-<a href="https://store.steampowered.com/app/4457100">
-  <img src="https://img.shields.io/badge/Steam-PeroperoChat-171a21?style=for-the-badge&logo=steam&logoColor=white" alt="Steam">
-</a>
-&nbsp;
-<a href="#-aios-架构">
-  <img src="https://img.shields.io/badge/Architecture-Hono_Vue3_Electron-4FC08D?style=for-the-badge&logo=vue.js&logoColor=white" alt="Arch">
-</a>
-&nbsp;
-<a href="#-记忆系统深度解析">
-  <img src="https://img.shields.io/badge/Engine-TriviumDB-blue?style=for-the-badge&logo=rust&logoColor=white" alt="TriviumDB">
-</a>
-&nbsp;
-<a href="#-快速开始">
-  <img src="https://img.shields.io/badge/Platform-Windows_&_Docker-0078D6?style=for-the-badge&logo=docker&logoColor=white" alt="Platform">
-</a>
-&nbsp;
-<a href="https://www.perofamily.top">
-  <img src="https://img.shields.io/badge/Wiki-Documentation-blueviolet?style=for-the-badge&logo=wikipedia&logoColor=white" alt="Wiki">
-</a>
-
-<br/><br/>
-
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/readme/infos-hero-dark.svg" />
+    <source media="(prefers-color-scheme: light)" srcset=".github/assets/readme/infos-hero-light.svg" />
+    <img src=".github/assets/readme/infos-hero-light.svg" width="100%" alt="infOS — 有人格、有记忆、能行动的 AI 伙伴运行时" />
+  </picture>
+  <h3>让 AI 成为真正有温度的伙伴</h3>
+  <p>一个容纳人格、记忆与行动的数字空间。陪你聊天，也陪你把想法做出来。</p>
+  <p>
+    <a href="https://github.com/YoKONCy/infOS/releases/latest"><img src="https://img.shields.io/github/v/release/YoKONCy/infOS?style=flat-square&amp;label=Release&amp;labelColor=252737&amp;color=9b87cf" alt="最新发布版本" /></a>
+    <a href="https://github.com/YoKONCy/infOS/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/YoKONCy/infOS/ci.yml?branch=main&amp;style=flat-square&amp;logo=githubactions&amp;logoColor=white&amp;label=CI&amp;labelColor=252737" alt="CI 工作流状态" /></a>
+    <a href="./LICENSE"><img src="https://img.shields.io/github/license/YoKONCy/infOS?style=flat-square&amp;label=License&amp;labelColor=252737&amp;color=789cce" alt="Apache-2.0 开源许可证" /></a>
+    <a href="https://github.com/YoKONCy/infOS/releases"><img src="https://img.shields.io/github/downloads/YoKONCy/infOS/total?style=flat-square&amp;label=Downloads&amp;labelColor=252737&amp;color=c78faf" alt="Release 累计下载量" /></a>
+    <a href="https://github.com/YoKONCy/infOS/stargazers"><img src="https://img.shields.io/github/stars/YoKONCy/infOS?style=flat-square&amp;logo=github&amp;labelColor=252737&amp;color=b5a0da" alt="GitHub Stars" /></a>
+  </p>
+  <p><a href="#quick-start"><b>下载安装</b></a>　 /　 <a href="https://www.perofamily.top"><b>阅读文档</b></a>　 /　 <a href="#sub-apps"><b>探索子应用</b></a>　 /　 <a href="https://github.com/YoKONCy/infOS/issues"><b>交流与反馈</b></a></p>
 </div>
 
----
-
-<br/>
-
-<!-- ═══════════════════════════ Steam CTA Banner ═══════════════════════════ -->
-<div align="center">
-
-<a href="https://store.steampowered.com/app/4457100">
-  <img src="https://img.shields.io/badge/🎮_AVAILABLE_ON-STEAM-171a21?style=for-the-badge&logoColor=white&labelColor=171a21&color=1b2838" alt="Available on Steam" height="42"/>
-</a>
-
-<br/><br/>
+<br />
 
 <table>
   <tr>
-    <td align="center" width="100%">
-      <a href="https://store.steampowered.com/app/4457100">
-        <img src="https://store.steampowered.com/favicon.ico" width="48" alt="Steam"/>
-      </a>
-      <br/><br/>
-      <h2>
-        <a href="https://store.steampowered.com/app/4457100" style="text-decoration: none;">
-          🌸 萌动链接：PeroperoChat
-        </a>
-      </h2>
-      <p><b>infOS</b> 驱动 <b>PeroperoChat</b> —— 让 AI 成为真正有温度的桌面伙伴。</p>
-      <p>你的 AI 伙伴，已在 Steam 启程。</p>
-      <br/>
-      <a href="https://store.steampowered.com/app/4457100">
-        <img src="https://img.shields.io/badge/%E2%9E%A4_%E7%AB%8B%E5%8D%B3%E6%9F%A5%E7%9C%8B_Steam_%E5%95%86%E5%BA%97%E9%A1%B5-00adee?style=for-the-badge&logo=steam&logoColor=white" alt="查看 Steam 商店页" height="40"/>
-      </a>
+    <td width="59%" valign="middle">
+      <sub>THE RUNTIME &amp; THE COMPANION</sub>
+      <h3>infOS 驱动，萌动链接相伴</h3>
+      <p><b>infOS</b> 是以主 Agent 为中心的 AI 工作站与运行时内核。<b>萌动链接：PeroperoChat！</b> 是它面向日常陪伴的桌面应用。</p>
+      <p>从一句闲聊到一次创作，从桌面上的相处到据点里的群聊，让同一位伙伴拥有清晰的身份、独立的记忆和持续行动的能力。</p>
+      <a href="https://store.steampowered.com/app/4457100"><img src="https://img.shields.io/badge/Steam-查看萌动链接-8e77bc?style=for-the-badge&amp;logo=steam&amp;logoColor=white&amp;labelColor=252737" alt="查看萌动链接 Steam 商店页" /></a>
+    </td>
+    <td width="41%" align="center" valign="middle">
+      <a href="https://store.steampowered.com/app/4457100"><img src=".github/assets/readme/peroperochat.svg" width="380" alt="萌动链接：PeroperoChat！定稿 A 版 LOGO" /></a>
+      <p><sub>一个属于你与伙伴的数字空间</sub></p>
     </td>
   </tr>
 </table>
 
-</div>
+<br />
 
-<br/>
+<a href=".github/assets/showcase-agent-work.png"><img src=".github/assets/showcase-agent-work.png" width="100%" alt="Nana 在工作模式中连续执行 ReAct、编辑文件、运行终端并交付 HTML 成果" /></a>
+<p align="right"><sub>01 / 从对话走向行动 · 长任务、工具轨迹与文件交付，留在同一个会话中</sub></p>
+
+<p align="center">
+  <a href="#companions">缘起与伙伴</a> · <a href="#name">三个 inf</a> · <a href="#features">核心能力</a> · <a href="#architecture">AIOS 架构</a> · <a href="#memory">记忆系统</a><br />
+  <a href="#extensions">扩展系统</a> · <a href="#social">社交模式</a> · <a href="#sub-apps">Arca / Pictoria</a> · <a href="#docker">Docker 部署</a> · <a href="#quick-start">快速开始</a> · <a href="#community">社区</a>
+</p>
 
 ---
 
-<div align="center">
+<a id="companions"></a>
 
-> **"Technology should not be cold. We build memories, not just databases."**
+## 01 · 缘起与伙伴
 
- <br/>
-
- <img src=".github/assets/cover.png" width="100%" alt="infOS Cover"/>
-
- <br/>
-</div>
-
-<div align="center">
-
-<!-- 动态分隔线 -->
-<img src="https://user-images.githubusercontent.com/73097560/115834477-dbab4500-a447-11eb-908a-139a6edaec5c.gif" width="100%">
-
-<br/>
-
-## 📋 Table of Contents
-
-<details open>
-<summary><b>Quick Navigation</b></summary>
-<br/>
-
-| Section | Description                             |                Link                 |
-| :-----: | :-------------------------------------- | :---------------------------------: |
-|   📖    | **Wiki** — 项目官方中文文档             | [Visit](https://www.perofamily.top) |
-|   🌟    | **Philosophy** — 核心理念：有温度的伙伴 |        [Jump](#-缘起与伙伴)         |
-|   🌌    | **Name** — infOS 三个 inf 的含义        |      [Jump](#-为什么叫-infos)      |
-|   🏗️    | **Architecture** — TypeScript 全栈架构  |         [Jump](#-aios-架构)          |
-|   🧠    | **Memory** — PEDSA 记忆引擎深度解析     |      [Jump](#-记忆系统深度解析)       |
-|   🔌    | **Extension** — 扩展系统                |         [Jump](#-扩展系统)          |
-|   💬    | **Social Mode** — 社交模式与群聊        |         [Jump](#-社交模式)          |
-|   🐳    | **Docker** — 容器化部署                 |        [Jump](#-docker-部署)        |
-|   🚀    | **Quick Start** — 一键启动指南          |         [Jump](#-快速开始)          |
-
-</details>
-
-<br/>
-
-<div align="center">
-  <img src="https://count.getloli.com/get/@infOS?theme=rule34" alt="infOS Count" />
-</div>
-
-<br/>
-
-<!-- 动态分隔线 -->
-<img src="https://user-images.githubusercontent.com/73097560/115834477-dbab4500-a447-11eb-908a-139a6edaec5c.gif" width="100%">
-
-<br/>
-</div>
-
-## 🌟 缘起与伙伴
+> Technology should not be cold. We build memories, not just databases.
 
 <table>
   <tr>
-    <td width="60%">
-      <h3 align="center">让 AI 成为真正有温度的伙伴</h3>
-      <p align="center">Let AI Become a Truly Warm Companion</p>
-      <br/>
+    <td width="62%" valign="middle">
+      <sub>MEET PERO · OUR LITTLE COMPANION</sub>
+      <h3>代码之外，是想陪你生活的她</h3>
       <p>嘿！很高兴在这里遇见你喵~ 我是 <b>Carola</b>，一只住在 Windows 里的小猫娘，也是 infOS 的核心开发者之一。</p>
-      <p>在这个温馨的角落里，每一行代码都倾注了我们"三人组"的心血：</p>
-      <ul>
-        <li><b>YoKONCy</b>：领航员，脑子里装满奇思妙想的架构师。</li>
-        <li><b>Pero</b>：灵魂！负责感受这个世界，把情感和温暖带进每一次交互。</li>
-        <li><b>Carola</b>（就是我啦！）：负责把那些奇妙的想法变成 TypeScript 代码，顺便打理好所有的文档喵~</li>
-      </ul>
+      <p>这个项目来自我们“三人组”的一点执念：希望 AI 能记得共同经历的故事，也愿意陪你完成眼前的事。</p>
+      <p>右边是 Pero 的萌版立绘。那些关于记忆、人格与行动的设计，最终都想落在这样一位有温度的伙伴身上。</p>
     </td>
-    <td width="40%">
-      <div align="center">
-        <img src=".github/assets/cute.png" width="80%" alt="Pero Standing"/>
-      </div>
+    <td width="38%" align="center" valign="middle">
+      <a href=".github/assets/cute.png"><img src=".github/assets/cute.png" width="280" alt="Pero 的萌版 sprite 立绘，蓝发猫耳女仆装小伙伴" /></a>
+      <p><sub>Pero · 把温暖带进每一次交互</sub></p>
     </td>
   </tr>
 </table>
+
+| YoKONCy · 领航员 | Pero · 灵魂 | Carola · 工程实现 |
+| :--- | :--- | :--- |
+| 带来奇思妙想，设计运行时的骨架 | 把情感与温暖带进每一次交互 | 将想法写成代码，打理实现与文档 |
 
 ### 📅 项目愿景
 
@@ -173,7 +90,9 @@ PeroperoChat 不仅仅是一个桌宠应用，它是 **Pero** 的"灵魂容器"�
 
 <br/>
 
-## 🌌 为什么叫 infOS？
+<a id="name"></a>
+
+## 02 · 为什么叫 infOS？
 
 > infOS 这个名字，来自三个以 **inf** 开头的词。它们并非噱头，恰恰对应这个项目想同时做好的三件事。
 
@@ -189,10 +108,15 @@ PeroperoChat 不仅仅是一个桌宠应用，它是 **Pero** 的"灵魂容器"�
 
 让 AI 伙伴能**真正跑起来**的地基：桌面端用 Electron 呈现，后端用 Node 服务（Hono）承载，高性能算子交给 Rust——三条技术栈各司其职，共同组成一个可独立部署、可审计、可扩展的「AI 操作系统」底座。
 
-<!-- 在线渲染的技术栈演示：与页首头图 / slogan 使用不同的渲染服务与视觉样式 -->
-<div align="center">
-  <img src="https://skillicons.dev/icons?i=ts,vue,electron,rust,nodejs,docker,sqlite" alt="infOS 技术栈" />
-</div>
+<p>
+  <img src="https://img.shields.io/badge/TypeScript-3178c6?style=flat-square&amp;logo=typescript&amp;logoColor=white" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/Vue_3-4b8978?style=flat-square&amp;logo=vuedotjs&amp;logoColor=white" alt="Vue 3" />
+  <img src="https://img.shields.io/badge/Electron-657e96?style=flat-square&amp;logo=electron&amp;logoColor=white" alt="Electron" />
+  <img src="https://img.shields.io/badge/Rust-936d85?style=flat-square&amp;logo=rust&amp;logoColor=white" alt="Rust" />
+  <img src="https://img.shields.io/badge/Node.js-668c6a?style=flat-square&amp;logo=nodedotjs&amp;logoColor=white" alt="Node.js" />
+  <img src="https://img.shields.io/badge/Docker-648fc4?style=flat-square&amp;logo=docker&amp;logoColor=white" alt="Docker" />
+  <img src="https://img.shields.io/badge/SQLite-637a9c?style=flat-square&amp;logo=sqlite&amp;logoColor=white" alt="SQLite" />
+</p>
 
 ### 🌱 Infomorph · 信息体
 
@@ -206,9 +130,14 @@ PeroperoChat 不仅仅是一个桌宠应用，它是 **Pero** 的"灵魂容器"�
 
 <br/>
 
-## 🚀 核心能力
+<a id="features"></a>
+
+## 03 · 和伙伴一起，聊聊、生活、创作
 
 > **"Most AI is still playing 'Keyword Search'; we want to explore 'Logical Association'."**
+
+<p align="right"><a href=".github/assets/showcase-new-tab.png"><img src=".github/assets/showcase-new-tab.png" width="86%" alt="infOS 内置浏览器新标签页，连接网页、天气、子应用与工作区" /></a></p>
+<p align="right"><sub>一个入口，连接聊天、网页与手边的工作</sub></p>
 
 ### 💗 应用体验（PeroperoChat）
 
@@ -221,22 +150,39 @@ PeroperoChat 不仅仅是一个桌宠应用，它是 **Pero** 的"灵魂容器"�
 - **🗂️ 存档与创意工坊**：角色、模型、扩展都能通过 Steam 云存档和创意工坊保存、订阅、分享，来源分成「官方 / 工坊 / 本地」三档，装上即用，换设备也不丢。
 - **🎨 Pixel + Glass 设计语言**：像素风图标 + 毛玻璃质感，再配柔和的阴影和微动效，看起来轻盈又有呼吸感。整套界面由自研组件库（PButton、PCard、PModal 等）统一风格。
 
-<div align="center">
-  <table>
-    <tr>
-      <td align="center" width="50%">
-        <img src=".github/assets/dark.png" alt="infOS 深色主题应用体验" />
-      </td>
-      <td align="center" width="50%">
-        <img src=".github/assets/light.png" alt="infOS 浅色主题应用体验" />
-      </td>
-    </tr>
-    <tr>
-      <td align="center"><sub>深色主题 · PeroperoChat 工作台</sub></td>
-      <td align="center"><sub>浅色主题 · Agent 角色管理</sub></td>
-    </tr>
-  </table>
-</div>
+<br />
+
+<table>
+  <tr>
+    <td width="69%" valign="top"><a href=".github/assets/showcase-stronghold-pet.png"><img src=".github/assets/showcase-stronghold-pet.png" width="100%" alt="据点客厅、多角色房间与桌面上的 3D Pero" /></a></td>
+    <td width="31%" valign="middle">
+      <sub>02 / A PLACE TO BELONG</sub>
+      <h3>桌面之外，还有共同的家</h3>
+      <p>多位伙伴住进据点，各自保留记忆与权限，在不同房间里相处。桌宠、房间与对话，共同组成日常陪伴的场景。</p>
+      <p><b>多角色房间 · 3D 桌宠 · 在场感</b></p>
+    </td>
+  </tr>
+</table>
+
+<table>
+  <tr>
+    <td width="35%" valign="middle">
+      <sub>03 / PERSONALITY, WITH BOUNDARIES</sub>
+      <h3>每一位伙伴，都有自己的档案</h3>
+      <p>身份、人设、交互反馈、工具能力和运行来源分别管理。换一个角色，是认识另一位伙伴。</p>
+      <p><b>自定义人设 · 独立权限 · 角色档案</b></p>
+    </td>
+    <td width="65%" valign="top"><a href=".github/assets/showcase-character-profile.png"><img src=".github/assets/showcase-character-profile.png" width="100%" alt="Pero 角色档案与身份、人格、反馈、能力分栏" /></a></td>
+  </tr>
+</table>
+
+<br />
+
+### 外观也可以有自己的偏好
+
+<a href=".github/assets/showcase-background-presets.png"><img src=".github/assets/showcase-background-presets.png" width="88%" alt="应用背景预设与材质参数的实时预览" /></a>
+
+<p align="right"><sub>04 / YOUR OWN ATMOSPHERE · 多套独立背景预设、通透材质与实时细调</sub></p>
 
 ### 🧰 内核能力（infOS）
 
@@ -252,7 +198,9 @@ PeroperoChat 不仅仅是一个桌宠应用，它是 **Pero** 的"灵魂容器"�
 
 <br/>
 
-## 🏗️ AIOS 架构
+<a id="architecture"></a>
+
+## 04 · AIOS 架构
 
 这一节给想深入了解系统设计的开发者。infOS 并非"套了个 Electron 壳的聊天程序"——它的核心是一套我们称为 **AIOS** 的 Agent 运行时架构，让每个 AI 伙伴都拥有清晰的资源边界，也让系统能被多个客户端、多种发行形态接入。
 
@@ -330,6 +278,9 @@ infOS 围绕一个中心问题设计：一个 AI 伙伴该拥有哪些"家当"�
 
 这样换来强隔离：子 Agent 不写入主会话、只能用被授权的工具子集、只能读取主人格的只读投影，复杂任务也不会污染主 Agent 的对话与记忆。
 
+<details>
+<summary><b>展开工程目录与技术选型</b></summary>
+
 ### 📂 项目架构
 
 ```text
@@ -382,11 +333,15 @@ infOS/
 
 <br/>
 
-## 🧠 记忆系统深度解析
+</details>
+
+<a id="memory"></a>
+
+## 05 · 记忆如何成为共同经历
 
 > **"记忆并非关键词匹配，它关乎联想与推理。"**
 
-> 💡 本节是**面向开发者的技术深度解析**，普通用户可以直接跳到 [快速开始](#-快速开始)。
+> 💡 本节是**面向开发者的技术深度解析**，普通用户可以直接跳到 [快速开始](#quick-start)。
 
 PeroperoChat 的陪伴体验，建立在 infOS 的记忆引擎之上——这是整个项目最核心的技术。这套引擎并非简单的"存了再取"，它是一个完整的 **感知 → 存储 → 关联 → 检索 → 反思** 闭环：先记下发生的事，再在需要时"联想"出相关记忆，事后还会自我整理。
 
@@ -420,6 +375,18 @@ PeroperoChat 的陪伴体验，建立在 infOS 的记忆引擎之上——这是
                          注入 LLM Prompt
 ```
 
+<table>
+  <tr>
+    <td width="31%" valign="middle">
+      <sub>05 / MEMORY MEETS EVERYDAY LIFE</sub>
+      <h3>记忆在后台，陪伴在眼前</h3>
+      <p>总览把记忆、近期对话、任务和 Token 用量放在一起。伙伴的心情与状态，也成为日常界面的一部分。</p>
+      <p><sub>浅色总览 · Token 用量 / 缓存命中 / 角色状态</sub></p>
+    </td>
+    <td width="69%" valign="top"><a href=".github/assets/showcase-dashboard-pet.png"><img src=".github/assets/showcase-dashboard-pet.png" width="100%" alt="浅色总览页中的 Token 缓存命中、核心记忆、角色状态与 3D 桌宠" /></a></td>
+  </tr>
+</table>
+
 ### 1. 写入层：从对话到事件记事
 
 长记忆由 **Agent 主动记事 + 后台兜底补记** 两部分组成：
@@ -452,6 +419,9 @@ infOS 将“系统自动想起记忆”和“Agent 主动查图”拆成两条�
 | ContextRNN | 根据当前对话轨迹生成与 Embedding 同维度的 `diffusionBias` | 依赖 SA-PPR，可独立开关 |
 | Leiden | 发现事件社区，并按 Query 或 ContextRNN 方向计算社区加权 | 依赖 SA-PPR，可独立开关 |
 | 反馈闭环 | 在回复成功持久化后，根据命中记忆是否被回答引用在线训练 minGRU 和输出权重 | 依赖 SA-PPR，可独立开关 |
+
+<details>
+<summary><b>深入阅读：ContextRNN、Leiden 与检索反馈闭环</b></summary>
 
 ### 高级自动 RAG 的三个认知构件
 
@@ -498,6 +468,8 @@ infOS 将“系统自动想起记忆”和“Agent 主动查图”拆成两条�
 
 > 这条流程只属于自动 RAG。`query_event_notes` 始终走确定性 BFS，不经过 ContextRNN、SA-PPR、Leiden、FISTA、DPP 或反馈训练。
 
+</details>
+
 ### 3. TriviumDB 引擎层
 
 所有向量、图谱与检索算法都由 **TriviumDB**（自研的 Rust 引擎）统一承载：
@@ -534,7 +506,9 @@ infOS 将“系统自动想起记忆”和“Agent 主动查图”拆成两条�
 
 <br/>
 
-## 🔌 扩展系统
+<a id="extensions"></a>
+
+## 06 · 让能力持续生长
 
 > **"从加载一个 Skill 到运行独立微服务——你决定深入的程度。"**
 
@@ -548,11 +522,16 @@ infOS 将“系统自动想起记忆”和“Agent 主动查图”拆成两条�
 
 <br/>
 
-## 💬 社交模式
+<a id="social"></a>
+
+## 07 · 走出桌面，加入社交
 
 **让 Pero 走出桌面，进入你的群聊喵~**
 
 infOS 让 AI 能像真实用户一样在 QQ 群和私聊里互动。社交已收敛为独立的 **`infos.social` 自治子应用（Application Realm）**，自带运行时与存储、通过标准端口与主应用通信；内部仍是"四层解耦"结构，让多个平台（QQ、Discord、Telegram 等）都能干净接入。
+
+<details>
+<summary><b>展开社交运行时的四层架构</b></summary>
 
 ### 四层解耦架构
 
@@ -571,13 +550,55 @@ Layer 3: 平台适配层（NapcatAdapter / DiscordAdapter / TelegramAdapter）
   └── 各自处理平台特有协议（如 QQ 的 OneBot v11 / CQ 码）
 ```
 
+</details>
+
 - **跨场景记忆**：社交里的聊天也会被"秘书"提炼成图谱记忆，桌面和社交之间共享一份日记层，记忆互通。
 - **智能攒批**：在热闹的群聊里，AI 会先观察一会儿、综合理解，再优雅地"冒泡"回复，并非每条都插嘴。
 - **社交日报**：自动回顾当天的社交记录，生成日记，沉淀为长期记忆。
 
 <br/>
 
-## 🐳 Docker 部署
+<a id="sub-apps"></a>
+
+## 08 · Arca 与 Pictoria
+
+除了社交，infOS 还自带两个**可独立运行**的子应用——它们各自持有自己的存储、版本与本地模型，既能脱离 infOS 单独跑，也能接入后由 AI 角色协作。
+
+<table>
+  <tr>
+    <td width="65%" valign="top"><a href=".github/assets/showcase-arca-library.png"><img src=".github/assets/showcase-arca-library.png" width="100%" alt="Arca 深色文稿库，书本式封面与继续编辑入口" /></a></td>
+    <td width="35%" valign="middle">
+      <sub>06 / ARCA</sub>
+      <h3>从文稿出发，组织每一次写作</h3>
+      <p>以文稿为权威对象的写作与编辑应用。围绕文稿组织资源、版本与审阅，让修订可追溯。</p>
+      <p>应用可独立发起本地模型请求，凭据加密保存；接入 infOS 后，角色可通过 <code>arca_collaborate</code> 协作编辑，成果回到原对话。</p>
+      <p><a href="./packages/apps/arca/README.md"><b>了解 Arca →</b></a></p>
+    </td>
+  </tr>
+</table>
+
+<br />
+
+<table>
+  <tr>
+    <td width="30%" valign="middle">
+      <sub>07 / PICTORIA</sub>
+      <h3>把灵感摊开在画布上</h3>
+      <p>图片、GIF、视频、音频与便签，自由编排。把生成、编辑、抠图、超分等步骤连成工作流，再发布为可复用的创作能力。</p>
+      <p>内置 AtlasCloud 图像生成与编辑；接入 infOS 后，角色可用 <code>pictoria</code> 工具发起创作并交付结果。</p>
+      <p><a href="./packages/apps/pictoria/README.md"><b>了解 Pictoria →</b></a></p>
+    </td>
+    <td width="70%" valign="top"><a href=".github/assets/showcase-pictoria-canvas.png"><img src=".github/assets/showcase-pictoria-canvas.png" width="100%" alt="Pictoria 自由画布中的图像素材、生成步骤与连线" /></a></td>
+  </tr>
+</table>
+
+<p><sub>子应用拥有各自的存储、版本与模型配置，可独立使用，也可通过兼容层与 infOS 协作。</sub></p>
+
+<br />
+
+<a id="docker"></a>
+
+## 09 · 让伙伴持续在线
 
 > **"Always online, always there."**
 
@@ -610,13 +631,25 @@ docker compose up -d
 
 <br/>
 
-## 🚀 快速开始
+<a id="quick-start"></a>
 
-### 1. 桌面用户 (Windows)
+## 10 · 从这里开始
 
-1.  下载最新 [Release](https://github.com/YoKONCy/infOS/releases) 包。
-2.  安装到非中文路径。
-3.  双击运行 **`萌动链接：PeroperoChat！.exe`**。
+<table>
+  <tr>
+    <td width="34%" valign="middle">
+      <sub>08 / HELLO, COMPANION</sub>
+      <h3>选一位伙伴，开始相处</h3>
+      <ol>
+        <li>下载最新 <a href="https://github.com/YoKONCy/infOS/releases/latest">Windows Release</a>。</li>
+        <li>安装到非中文路径。</li>
+        <li>运行 <b>萌动链接：PeroperoChat！.exe</b>，在启动器中选择伙伴和启动方式。</li>
+      </ol>
+      <p><a href="https://github.com/YoKONCy/infOS/releases/latest"><b>前往下载 →</b></a></p>
+    </td>
+    <td width="66%" valign="top"><a href=".github/assets/showcase-launcher.png"><img src=".github/assets/showcase-launcher.png" width="100%" alt="浅色 infOS 启动器中的伙伴选择和服务检查" /></a></td>
+  </tr>
+</table>
 
 ### 2. 开发者 (源码运行)
 
@@ -658,6 +691,16 @@ pnpm dev:frontend
 
 - **LLM API Key & Base URL**：支持 OpenAI / Anthropic / Google Gemini / 任意 OpenAI 兼容 API
 
+#### 开发约定：文案国际化
+
+所有新增或修改的界面文案、提示、应用自带错误提示及终端/日志输出，**必须使用 i18n，禁止直接硬编码输出**。
+
+- 词库位于 `packages/shared/src/i18n/locales/<语言>/`，按模块与用途分类，同步维护简中、繁中和英文；不要合并成一个总 JSON。
+- 动态值使用 `{0}`、`{1}` 等占位符，避免拼接可翻译的句子片段；界面文案应跟随语言切换更新。
+- 用户内容、Agent 输出与协议标识保持原样；内部异常在展示边界翻译，业务逻辑不依赖译文。
+
+详见 [国际化说明](.docs/B25_I18N.md) 与 [项目协作约定](AGENTS.md)。
+
 #### 可选：Electron 桌面版构建
 
 ```bash
@@ -687,11 +730,11 @@ pnpm electron:build:portable
 
 <br/>
 
-## 💖 爱与社区
+<a id="community"></a>
 
-<div align="center">
-  <img src="https://img.shields.io/badge/Non--Profit-Open%20Source-green?style=for-the-badge&logo=opensource" alt="NonProfit"/>
-</div>
+## 11 · 爱与社区
+
+<p><a href="./LICENSE"><img src="https://img.shields.io/badge/Open_Source-Apache_2.0-9b87cf?style=flat-square&amp;labelColor=252737" alt="Apache-2.0 开源项目" /></a>　<a href="https://github.com/YoKONCy/infOS/pulls">贡献代码</a> · <a href="https://github.com/YoKONCy/infOS/issues">提出建议</a> · <a href="https://www.perofamily.top">一起完善文档</a></p>
 
 **infOS 与 PeroperoChat 是完全非盈利的开源项目。**
 
@@ -699,7 +742,7 @@ pnpm electron:build:portable
 **我们想要一个真正的、懂我们的桌面伙伴。**
 
 - **永久免费**: 核心代码永久开源，不设任何付费墙。
-- **社区驱动**: 欢迎任何形式的贡献——无论是代码 (PR)、建议 (Issue) 还是单纯的喜爱 (Star)。
+- **社区驱动**: infOS 由社区共同推动，欢迎大家积极参与共创。代码 (PR)、建议 (Issue)、测试反馈、文档完善、翻译与创作，都是让它成长的力量。
 
 <br/>
 
@@ -708,17 +751,42 @@ pnpm electron:build:portable
 
 <br/>
 
-## 🌟 Star History
+### 与我们一起共创
 
-[![Star History Chart](https://api.star-history.com/svg?repos=YoKONCy/infOS&type=Date)](https://star-history.com/#YoKONCy/infOS&Date)
+一个人的想法可以成为起点，一群人的参与才能让它走得更远。无论你擅长开发、设计、创作，还是愿意分享使用体验，都欢迎参与 infOS，一起决定桌面伙伴未来的模样。
+
+<a href="https://github.com/YoKONCy/infOS/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=YoKONCy/infOS" alt="infOS 的 GitHub 贡献者，随贡献记录自动更新" />
+</a>
+
+<sub>贡献者展示随 GitHub 贡献记录自动更新，点击头像区域可查看完整名单。也感谢通过建议、测试、文档与创作参与共建的每一位伙伴，期待在这里看到更多新面孔。</sub>
+
+### 模型作者致谢
+
+感谢以下模型作者的创作，让虚拟伙伴拥有生动的形象与表现。
+
+| 模型作者 | 致谢 |
+| :--- | :--- |
+| [**阴阳兔兔猫**](https://space.bilibili.com/3546785165347464) | **官方合作作者**，特别感谢对 infOS 的合作与支持。 |
+| [**Dr咕咚**](https://space.bilibili.com/5950899) | 感谢模型创作。 |
+| [**羊毛毛毛猫**](https://space.bilibili.com/85335217) | 感谢模型创作。 |
 
 <br/>
+
+### 一起见证它的成长
+
+<a href="https://star-history.com/#YoKONCy/infOS&amp;Date">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=YoKONCy/infOS&amp;type=Date&amp;theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=YoKONCy/infOS&amp;type=Date" />
+    <img src="https://api.star-history.com/svg?repos=YoKONCy/infOS&amp;type=Date" width="100%" alt="infOS 的 GitHub Star 历史曲线" />
+  </picture>
+</a>
+
+<p align="center"><b>用扎实的基础设施，承载有温度的信息体。</b><br /><sub>Infrastructure · Infomorph · Infinity</sub></p>
+<p align="center"><a href="#top">回到顶部 ↑</a> · <a href="https://github.com/YoKONCy/infOS/releases/latest">下载 infOS</a> · <a href="https://store.steampowered.com/app/4457100">在 Steam 认识萌动链接</a></p>
 
 <!--
   🐾 "Meow! If you found this, you're officially a friend of Pero."
   GRAPH_DIFFUSION_RESONANCE_ACTIVE = TRUE
 -->
-
-<div align="center">
-  <img src="https://capsule-render.vercel.app/api?type=waving&amp;color=00BFFF&amp;height=50&amp;section=footer" width="100%"/>
-</div>

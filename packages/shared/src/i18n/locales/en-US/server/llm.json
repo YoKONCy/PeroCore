@@ -1,0 +1,3 @@
+{
+  "检测到{0}连续重复生成，已中断本次模型请求；未完成的工具参数不会执行。": "It is detected that {0} is continuously and repeatedly generated, and this model request has been interrupted; unfinished tool parameters will not be executed."
+}

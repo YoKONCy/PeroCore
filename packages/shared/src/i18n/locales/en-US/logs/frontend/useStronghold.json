@@ -1,0 +1,7 @@
+{
+  "加载角色档案失败": "failed to load character file",
+  "加载消息失败": "failed to load message",
+  "发送消息失败": "failed to send message",
+  "删除消息失败": "Failed to delete message",
+  "管家调用失败": "Housekeeper call failed"
+}

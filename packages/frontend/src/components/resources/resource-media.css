@@ -1,0 +1,152 @@
+.resource-media {
+  --media-accent: var(--resource-accent, var(--ui-accent-primary));
+  container: resource-player / inline-size;
+  color: var(--ui-text-primary);
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+.resource-media:focus-visible,
+.resource-media button:focus-visible,
+.resource-media select:focus-visible,
+.resource-media input:focus-visible {
+  outline: 2px solid var(--media-accent);
+  outline-offset: 3px;
+}
+.resource-media .media-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--ui-text-secondary);
+  background: transparent;
+  cursor: pointer;
+  transition:
+    color 140ms,
+    background 140ms,
+    transform 140ms;
+}
+.resource-media .media-button:hover:not(:disabled),
+.resource-media .media-button--selected {
+  color: var(--media-accent);
+  background: color-mix(in srgb, var(--media-accent) 10%, transparent);
+}
+.resource-media .media-button:active:not(:disabled) {
+  transform: scale(0.93);
+}
+.resource-media .media-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.resource-media .media-button--play {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border-color: color-mix(in srgb, var(--media-accent) 45%, var(--ui-border-subtle));
+  color: var(--media-accent);
+  background: color-mix(in srgb, var(--media-accent) 15%, var(--ui-bg-surface));
+  box-shadow: 0 3px 0 color-mix(in srgb, var(--media-accent) 18%, transparent);
+}
+.resource-media .media-button--play:hover:not(:disabled) {
+  color: var(--media-accent);
+  background: color-mix(in srgb, var(--media-accent) 23%, var(--ui-bg-surface));
+  transform: translateY(-1px);
+}
+.resource-media .media-range {
+  --progress: 0%;
+  --buffered: 0%;
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  height: 26px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  cursor: pointer;
+  accent-color: var(--media-accent);
+}
+.resource-media .media-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background:
+    linear-gradient(to right, var(--media-accent) var(--progress), transparent var(--progress)),
+    linear-gradient(
+      to right,
+      color-mix(in srgb, var(--media-accent) 28%, var(--ui-border-subtle)) var(--buffered),
+      var(--ui-border-default) var(--buffered)
+    );
+}
+.resource-media .media-range::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background:
+    linear-gradient(to right, var(--media-accent) var(--progress), transparent var(--progress)),
+    linear-gradient(
+      to right,
+      color-mix(in srgb, var(--media-accent) 28%, var(--ui-border-subtle)) var(--buffered),
+      var(--ui-border-default) var(--buffered)
+    );
+}
+.resource-media .media-range::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 10px;
+  height: 10px;
+  margin-top: -3px;
+  border: 2px solid var(--ui-bg-surface);
+  border-radius: 3px;
+  background: var(--media-accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--media-accent) 50%, transparent);
+}
+.resource-media .media-range::-moz-range-thumb {
+  width: 7px;
+  height: 7px;
+  border: 2px solid var(--ui-bg-surface);
+  border-radius: 3px;
+  background: var(--media-accent);
+}
+.resource-media .media-range:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.resource-media .media-spinner {
+  width: 17px;
+  height: 17px;
+  border: 2px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: media-spin 900ms linear infinite;
+}
+@keyframes media-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (pointer: coarse) {
+  .resource-media .media-button {
+    width: 40px;
+    height: 40px;
+  }
+  .resource-media .media-button--play {
+    width: 44px;
+    height: 44px;
+  }
+  .resource-media .media-range {
+    height: 32px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .resource-media .media-button {
+    transition: none;
+  }
+  .resource-media .media-spinner {
+    animation: none;
+  }
+}

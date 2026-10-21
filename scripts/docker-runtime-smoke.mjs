@@ -1,3 +1,4 @@
+import { t as __t } from './i18n.mjs'
 import assert from 'node:assert/strict'
 import { setTimeout as delay } from 'node:timers/promises'
 
@@ -68,7 +69,9 @@ try {
     assert.equal(status.ownership, 'managed')
     assert.equal(status.federation.state, 'connected')
     if (application === 'arca') await checkArcaSocket()
-    console.log(`Docker 子应用启动与连接通过：${application}`)
+    console.log(
+      __t('scripts.docker-runtime-smoke', 'Docker 子应用启动与连接通过：{0}', [application]),
+    )
   }
 } catch (error) {
   failures.push(error)
@@ -83,7 +86,7 @@ for (const application of started.reverse()) {
       await delay(500)
     }
     assert.equal(status.ownership, 'offline', `${application} 未完成生命周期回收`)
-    console.log(`Docker 子应用停止通过：${application}`)
+    console.log(__t('scripts.docker-runtime-smoke', 'Docker 子应用停止通过：{0}', [application]))
   } catch (error) {
     failures.push(error)
   }

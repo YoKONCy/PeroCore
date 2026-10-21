@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /**
  * PImageViewer — 图片全屏查看器
  *
@@ -13,6 +15,9 @@
 import { ref, watch } from 'vue'
 import PixelIcon from './PixelIcon.vue'
 import { useEventListener } from '../../composables'
+import { useMobileLayout } from '../../composables/ui/useMobileLayout'
+import WorkspaceImageViewer from '../workspace/WorkspaceImageViewer.vue'
+import { createPreviewState } from '../workspace/workspacePreview'
 
 interface Props {
   images: string[]
@@ -30,6 +35,13 @@ const emit = defineEmits<{
 }>()
 
 const currentIndex = ref(props.initialIndex)
+const { isMobile } = useMobileLayout()
+const camera = ref(createPreviewState())
+const imageError = ref('')
+watch(currentIndex, () => {
+  camera.value = createPreviewState()
+  imageError.value = ''
+})
 
 watch(
   () => props.initialIndex,
@@ -69,7 +81,7 @@ useEventListener(window, 'keydown', (e: Event) => {
     <Transition name="viewer">
       <div v-if="visible" class="piv-overlay" @click.self="close">
         <!-- 关闭 -->
-        <button class="piv-close" title="关闭 (Esc)" @click="close">
+        <button class="piv-close" :title="__t('ui.pixel', '关闭 (Esc)')" @click="close">
           <PixelIcon name="close" size="sm" />
         </button>
 
@@ -84,8 +96,25 @@ useEventListener(window, 'keydown', (e: Event) => {
         </button>
 
         <!-- 主图片 -->
-        <div class="piv-image-wrap" @click.stop>
-          <img :src="images[currentIndex]" class="piv-image" alt="查看图片" />
+        <div class="piv-image-wrap" :class="{ 'piv-image-wrap--mobile': isMobile }" @click.stop>
+          <template v-if="isMobile">
+            <p v-if="imageError" role="alert">{{ imageError }}</p>
+            <WorkspaceImageViewer
+              v-else
+              :src="images[currentIndex] || ''"
+              name="查看图片"
+              :state="camera"
+              :active="visible"
+              @state="Object.assign(camera, $event)"
+              @error="imageError = $event"
+            />
+          </template>
+          <img
+            v-else
+            :src="images[currentIndex]"
+            class="piv-image"
+            :alt="__t('ui.pixel', '查看图片')"
+          />
         </div>
 
         <!-- 右箭头 -->

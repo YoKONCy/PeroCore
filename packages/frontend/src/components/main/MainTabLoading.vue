@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /**
  * MainTabLoading — MainView Tab 的稳定加载占位
  *
@@ -15,7 +17,7 @@ defineOptions({ name: 'MainTabLoading' })
     identity="initial-page"
     pending
     fill
-    label="正在加载"
+    :label="__t('ui.navigation', '正在加载')"
   />
 </template>
 

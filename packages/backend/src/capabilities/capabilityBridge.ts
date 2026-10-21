@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -89,10 +90,16 @@ export class CapabilityBridge {
     this.leaseTimer = setInterval(() => this.expireLeases(), LEASE_CHECK_MS)
     this.leaseTimer.unref?.()
     if (!this.authToken) {
-      logger.info('Capability Transport 使用本机信任模式，仅监听 127.0.0.1')
+      logger.info(
+        __t('logs.capabilities', 'Capability Transport 使用本机信任模式，仅监听 127.0.0.1'),
+      )
     }
     logger.info(
-      `Capability Transport 已启动 → ws://${this.authToken ? (process.env.PERO_CAPABILITY_HOST ?? '0.0.0.0') : '127.0.0.1'}:${port}`,
+      '[infOS:ready:capability] ' +
+        __t('logs.capabilities', 'Capability Transport 已启动 → ws://{0}:{1}', [
+          this.authToken ? (process.env.PERO_CAPABILITY_HOST ?? '0.0.0.0') : '127.0.0.1',
+          port,
+        ]),
     )
   }
 
@@ -117,7 +124,7 @@ export class CapabilityBridge {
       this.server = null
       await new Promise<void>((resolve) => server.close(() => resolve()))
     }
-    logger.info('Capability Transport 已停止')
+    logger.info(__t('logs.capabilities', 'Capability Transport 已停止'))
   }
 
   private accept(socket: WebSocket, remoteAddress?: string): void {
@@ -127,15 +134,17 @@ export class CapabilityBridge {
       remoteAddress === '::1' ||
       remoteAddress === '::ffff:127.0.0.1'
     if (!this.authToken && !loopback) {
-      logger.warn(`拒绝未认证的外部Capability连接: ${remoteAddress}`)
+      logger.warn(__t('logs.capabilities', '拒绝未认证的外部Capability连接: {0}', [remoteAddress]))
       socket.close(4003, 'Remote capability transport requires authentication')
       return
     }
     this.states.set(socket, { authenticated: !this.authToken, paired: false })
-    logger.info(`能力 Node 连接: ${remoteAddress ?? 'unknown'}`)
+    logger.info(__t('logs.capabilities', '能力 Node 连接: {0}', [remoteAddress ?? 'unknown']))
     socket.on('message', (data) => void this.handleMessage(socket, data.toString()))
     socket.on('close', () => void this.disconnect(socket))
-    socket.on('error', (error) => logger.warn(`能力 Node 连接错误: ${error.message}`))
+    socket.on('error', (error) =>
+      logger.warn(__t('logs.capabilities', '能力 Node 连接错误: {0}', [error.message])),
+    )
   }
 
   private async handleMessage(socket: WebSocket, raw: string): Promise<void> {
@@ -143,7 +152,10 @@ export class CapabilityBridge {
     try {
       parsed = JSON.parse(raw)
     } catch {
-      this.send(socket, { type: 'error', message: 'CAPABILITY_MESSAGE_INVALID: 消息不是合法JSON' })
+      this.send(socket, {
+        type: 'error',
+        message: __t('server.capabilities', 'CAPABILITY_MESSAGE_INVALID: 消息不是合法JSON'),
+      })
       return
     }
     let message: NodeToDaemonMessage
@@ -177,13 +189,19 @@ export class CapabilityBridge {
         state.paired = pairingAccepted || deviceAccepted
         this.send(socket, { type: 'authenticated', deviceToken })
       } else {
-        this.send(socket, { type: 'error', message: 'CAPABILITY_AUTH_FAILED: Token不匹配' })
+        this.send(socket, {
+          type: 'error',
+          message: __t('server.capabilities', 'CAPABILITY_AUTH_FAILED: Token不匹配'),
+        })
         socket.close()
       }
       return
     }
     if (!state.authenticated) {
-      this.send(socket, { type: 'error', message: 'CAPABILITY_AUTH_REQUIRED: 请先认证' })
+      this.send(socket, {
+        type: 'error',
+        message: __t('server.capabilities', 'CAPABILITY_AUTH_REQUIRED: 请先认证'),
+      })
       return
     }
     try {
@@ -192,7 +210,7 @@ export class CapabilityBridge {
       else if (message.type === 'capability_result') this.complete(socket, message)
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error)
-      logger.warn(`能力消息处理失败: ${text}`)
+      logger.warn(__t('logs.capabilities', '能力消息处理失败: {0}', [text]))
       this.send(socket, { type: 'error', message: text })
     }
   }
@@ -251,7 +269,10 @@ export class CapabilityBridge {
       leaseExpiresAt: session.leaseExpiresAt,
     })
     logger.info(
-      `Node已接入: ${message.descriptor.nodeId}, Offer=[${message.offers.map((item) => item.offerId).join(', ')}]`,
+      __t('logs.capabilities', 'Node已接入: {0}, Offer=[{1}]', [
+        message.descriptor.nodeId,
+        message.offers.map((item) => item.offerId).join(', '),
+      ]),
     )
   }
 
@@ -371,11 +392,17 @@ export class CapabilityBridge {
   ): void {
     const call = this.pending.get(message.invocationId)
     if (!call) {
-      logger.warn(`收到未匹配的 Capability结果: ${message.invocationId}`)
+      logger.warn(
+        __t('logs.capabilities', '收到未匹配的 Capability结果: {0}', [message.invocationId]),
+      )
       return
     }
     if (call.socket !== socket) {
-      logger.warn(`拒绝非调用 Provider 返回的 Capability结果: ${message.invocationId}`)
+      logger.warn(
+        __t('logs.capabilities', '拒绝非调用 Provider 返回的 Capability结果: {0}', [
+          message.invocationId,
+        ]),
+      )
       return
     }
     clearTimeout(call.timer)
@@ -393,7 +420,7 @@ export class CapabilityBridge {
     }
     const error = message.error ?? {
       code: 'CAPABILITY_PROVIDER_ERROR',
-      message: 'Provider调用失败',
+      message: __t('server.capabilities', 'Provider调用失败'),
       retryable: false,
     }
     const result = new Error(`${error.code}: ${error.message}`)
@@ -412,9 +439,11 @@ export class CapabilityBridge {
       this.pending.delete(invocationId)
     }
     if (state.sessionId) this.nodes.disconnect(state.sessionId)
-    await state.scope?.dispose().catch((error) => logger.warn(`释放 Node Offer失败: ${error}`))
+    await state.scope
+      ?.dispose()
+      .catch((error) => logger.warn(__t('logs.capabilities', '释放 Node Offer失败: {0}', [error])))
     if (state.nodeId) this.handles.revokeSubject(`node:${state.nodeId}`)
-    logger.info(`能力 Node 已离线: ${state.nodeId ?? '未注册'}`)
+    logger.info(__t('logs.capabilities', '能力 Node 已离线: {0}', [state.nodeId ?? '未注册']))
   }
 
   private expireLeases(): void {

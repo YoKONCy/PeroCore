@@ -72,6 +72,21 @@ function fixture() {
 }
 
 describe('持久工作上下文', () => {
+  it('主动回合不需要伪造用户消息，仍能恢复输入与工具原件', () => {
+    const { assistant, record, compiled } = fixture()
+    record.inputKind = 'proactive'
+    record.input = { role: 'user', content: '宿主自主检查' }
+    record.inputHash = promptFingerprint(record.input.content)
+    record.historyRevisions = []
+    assistant.metadataJson = JSON.stringify({ workContext: record })
+    const input = compiled.filter((message) => message.cacheControl?.historyMessageId !== 1)
+    const restored = projectWorkHistory(input, [assistant], scope)
+    expect(restored.some((message) => message.content === '宿主自主检查')).toBe(true)
+    expect(
+      restored.some((message) => message.role === 'tool' && message.toolCallId === 'read'),
+    ).toBe(true)
+    expect(restored.at(-1)?.content).toBe('继续')
+  })
   it('冷启动按消息身份恢复完整工具协议，不靠热缓存，保留最新用户修正', () => {
     const { user, assistant, compiled } = fixture()
     const before = JSON.stringify(compiled)

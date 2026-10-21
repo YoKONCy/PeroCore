@@ -5,6 +5,7 @@
  */
 
 import { apiClient } from '../client'
+import type { ProactiveSettings, ProactiveState } from '@infos/shared'
 import type { BackgroundTaskInfo } from './backgroundTasksApi'
 
 /** 任务执行统计 */
@@ -59,12 +60,13 @@ export interface ReminderItem {
   isTriggered: boolean
   agentId: string
   createdAt: string | null
-  status: 'pending' | 'dispatching' | 'dispatched' | 'completed' | 'failed' | 'cancelled'
+  status: 'pending' | 'dispatching' | 'dispatched' | 'completed' | 'failed' | 'cancelled' | 'paused'
   threadId: string | null
   reason: string | null
   lastError: string | null
   attempts: number
   taskId: string | null
+  repeatIntervalMinutes?: number | null
 }
 
 export interface ProactiveSuggestion {
@@ -95,12 +97,18 @@ export interface ReminderListData {
 }
 
 export const schedulerApi = {
+  proactive: () => apiClient.get<ProactiveState>('/scheduler/proactive'),
+  configureProactive: (settings: Partial<ProactiveSettings>) =>
+    apiClient.put<ProactiveState>('/scheduler/proactive', settings),
+  checkProactive: () => apiClient.post<ProactiveState>('/scheduler/proactive/check'),
   activity: (agentId: string) =>
     apiClient.get<CompanionActivity>(`/scheduler/activity?agentId=${encodeURIComponent(agentId)}`),
   cancelReminder: (id: number, agentId: string) =>
     apiClient.post(`/scheduler/reminders/${id}/cancel`, { agentId }),
   retryReminder: (id: number, agentId: string) =>
     apiClient.post(`/scheduler/reminders/${id}/retry`, { agentId }),
+  pauseReminder: (id: number, agentId: string, paused: boolean) =>
+    apiClient.post(`/scheduler/reminders/${id}/${paused ? 'pause' : 'resume'}`, { agentId }),
   resolveSuggestion: (id: string, agentId: string, action: 'accept' | 'dismiss') =>
     apiClient.post<ProactiveSuggestion>(
       `/scheduler/suggestions/${encodeURIComponent(id)}/${action}`,
@@ -118,8 +126,13 @@ export const schedulerApi = {
       '/scheduler/reminders' + (agentId ? `?agentId=${agentId}` : ''),
     ),
 
-  createAgentTask: (data: { agentId: string; time: string; instruction: string }) =>
-    apiClient.post<ReminderItem>('/scheduler/agent-tasks', data),
+  createAgentTask: (data: {
+    agentId: string
+    time: string
+    instruction: string
+    threadId?: string
+    repeatIntervalMinutes?: number
+  }) => apiClient.post<ReminderItem>('/scheduler/agent-tasks', data),
 
   /** 手动触发任务 */
   trigger: (name: string) => apiClient.post<{ taskName: string }>('/scheduler/trigger/' + name),

@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * LLM Service — 统一 LLM 调用门面
  *
@@ -45,6 +46,8 @@ import type { LlmUsageAttempt } from './usage'
 import { estimateInputPayloadTokens } from './inputTokens'
 import { retryableLlmError, retryDelay, retryLimit, retryScope, waitForRetry } from './retryPolicy'
 import type { ModelRetryInfo } from '@infos/shared'
+import { GenerationLoopError, OutputLoopGuard } from './outputLoopGuard'
+import { PROVIDER_DEFAULTS } from './modelConnection'
 
 const logger = createLogger('LlmService')
 
@@ -52,34 +55,24 @@ const logger = createLogger('LlmService')
 // 默认 API 基址预设 (继承 v1)
 // ─────────────────────────────────────────────
 
-export const DEFAULT_API_BASES: Record<string, string> = {
-  openai: 'https://api.openai.com/v1',
-  siliconflow: 'https://api.siliconflow.cn/v1',
-  deepseek: 'https://api.deepseek.com/v1',
-  moonshot: 'https://api.moonshot.cn/v1',
-  dashscope: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-  volcengine: 'https://ark.cn-beijing.volces.com/api/v3',
-  groq: 'https://api.groq.com/openai/v1',
-  zhipu: 'https://open.bigmodel.cn/api/paas/v4',
-  minimax: 'https://api.minimax.chat/v1',
-  mistral: 'https://api.mistral.ai/v1',
-  yi: 'https://api.lingyiwanwu.com/v1',
-  xai: 'https://api.x.ai/v1',
-  stepfun: 'https://api.stepfun.com/v1',
-  hunyuan: 'https://api.hunyuan.cloud.tencent.com/v1',
-  ollama: 'http://localhost:11434/v1',
-}
+export const DEFAULT_API_BASES = PROVIDER_DEFAULTS
 
 // ─────────────────────────────────────────────
 // 模型配置
 // ─────────────────────────────────────────────
 
 export interface ModelConfig {
+  /** 本地模型卡片身份与有序回退链，不发送给 Provider；不递归展开子模型的回退配置。 */
+  configId?: number
+  fallbackModels?: ModelConfig[]
   /** 本地统计归属，不参与 Provider 协议。 */
   usagePurpose?: TokenUsagePurpose
   usageAgentId?: string
   /** Provider 类型 */
   provider: string
+  /** 服务商连接的请求协议，与品牌独立。 */
+  protocol?: 'openai' | 'anthropic' | 'gemini'
+  authMode?: 'api_key' | 'none'
   /** 模型 ID */
   modelId: string
   /** API Key */
@@ -151,6 +144,80 @@ export class LlmService {
     return this.promptPreparer?.(messages, opts) ?? prepareBuiltinTask(messages, opts)
   }
   constructor(private readonly recordAttempt?: (attempt: LlmUsageAttempt) => void) {}
+
+  private retryModels(config: ModelConfig, maxRetries: number): ModelConfig[] {
+    if (!config.fallbackModels?.length) return Array.from({ length: maxRetries + 1 }, () => config)
+    return [config, ...config.fallbackModels.slice(0, 32)].flatMap((model) => {
+      const candidate = {
+        ...model,
+        fallbackModels: undefined,
+        usageAgentId: config.usageAgentId,
+        usagePurpose: config.usagePurpose,
+      }
+      return [candidate, candidate]
+    })
+  }
+
+  private canRetryModel(error: unknown, config: ModelConfig): boolean {
+    if (
+      error instanceof AppError &&
+      (error.data as { loopDetected?: boolean } | undefined)?.loopDetected
+    )
+      return false
+    return (
+      retryableLlmError(error) ||
+      (!!config.fallbackModels?.length &&
+        error instanceof AppError &&
+        /^(?:LLM_|CONFIG_ERROR)/.test(error.code))
+    )
+  }
+
+  private fallbackExhausted(config: ModelConfig, error: unknown): unknown {
+    if (!config.fallbackModels?.length || !this.canRetryModel(error, config)) return error
+    return new AppError('LLM_ERROR', {
+      message: `主模型及全部回退模型均未取得有效响应：${error instanceof Error ? error.message : String(error)}`,
+      data: { retryable: false, fallbackExhausted: true },
+      cause: error,
+    })
+  }
+
+  private attemptOptions(root: ModelConfig, model: ModelConfig, opts?: ChatOptions): ChatOptions {
+    const fallback =
+      model.configId !== root.configId ||
+      model.provider !== root.provider ||
+      model.modelId !== root.modelId ||
+      model.apiBase !== root.apiBase
+    const result = this.mergeOpts(
+      model,
+      fallback
+        ? {
+            ...opts,
+            temperature: model.temperature,
+            topP: model.topP,
+            reasoningEffort: model.reasoningEffort,
+            returnNativeReasoning: model.returnNativeReasoning,
+          }
+        : opts,
+    )
+    if (model.maxTokens && result.maxTokens && result.maxTokens > model.maxTokens)
+      result.maxTokens = model.maxTokens
+    return result
+  }
+
+  private retryModelInfo(
+    models: ModelConfig[],
+    index: number,
+    config: ModelConfig,
+  ): Partial<ModelRetryInfo> {
+    if (!config.fallbackModels?.length) return {}
+    return {
+      modelId: models[index]!.modelId,
+      fromModelId: models[index - 1]!.modelId,
+      modelLevel: Math.floor(index / 2) + 1,
+      modelLevels: models.length / 2,
+      modelAttempt: (index % 2) + 1,
+    }
+  }
   /** 进程级 Token 用量累计 */
   private usage: CumulativeUsage = {
     totalPromptTokens: 0,
@@ -165,13 +232,20 @@ export class LlmService {
    * 大多数厂商 (DeepSeek / SiliconFlow / 火山 / Groq 等) 走 OpenAI 兼容协议。
    */
   createProvider(config: ModelConfig): LlmProvider {
+    const apiKey = config.authMode === 'none' ? '' : config.apiKey
     // 解析基址：优先使用用户配置，否则使用 provider 默认值
-    const apiBase = this.resolveApiBase(config.provider, config.apiBase)
+    const apiBase = this.resolveApiBase(
+      config.provider,
+      config.apiBase ||
+        (config.protocol && config.protocol !== 'openai'
+          ? DEFAULT_API_BASES[config.protocol]
+          : undefined),
+    )
 
-    switch (config.provider) {
+    switch (config.protocol ?? config.provider) {
       case 'gemini':
         return new GeminiProvider({
-          apiKey: config.apiKey,
+          apiKey,
           apiBase,
           modelId: config.modelId,
         })
@@ -179,7 +253,7 @@ export class LlmService {
       case 'claude':
       case 'anthropic':
         return new AnthropicProvider({
-          apiKey: config.apiKey,
+          apiKey,
           apiBase,
           modelId: config.modelId,
           maxTokens: config.maxTokens,
@@ -188,7 +262,7 @@ export class LlmService {
       default:
         if (config.wireApi === 'responses') {
           return new OpenAiResponsesProvider({
-            apiKey: config.apiKey,
+            apiKey,
             apiBase,
             modelId: config.modelId,
             wireApi: config.wireApi,
@@ -197,7 +271,7 @@ export class LlmService {
         }
         // 所有 OpenAI 兼容的厂商统一走Chat Completions协议
         return new OpenAiProvider({
-          apiKey: config.apiKey,
+          apiKey,
           apiBase,
           modelId: config.modelId,
           wireApi: config.wireApi,
@@ -240,19 +314,25 @@ export class LlmService {
 
     try {
       const result = await this.withRetry(
-        async () => {
+        async (candidate) => {
+          await opts?.beforeAttempt?.()
+          scope.signal.throwIfAborted()
+          const attemptOpts = this.attemptOptions(config, candidate, {
+            ...opts,
+            signal: scope.signal,
+          })
           const startedAt = Date.now()
           let result: ChatCompletion | undefined
           let status: LlmUsageAttempt['status'] = 'failed'
           try {
-            const provider = this.createProvider(config)
-            result = await provider.chat(messages, finalOpts)
+            const provider = this.createProvider(candidate)
+            result = await provider.chat(messages, attemptOpts)
             status = 'completed'
             return result
           } finally {
             this.recordCall(
-              config,
-              finalOpts,
+              candidate,
+              attemptOpts,
               startedAt,
               result?.usage,
               status === 'failed' && finalOpts.signal?.aborted ? 'cancelled' : status,
@@ -270,12 +350,15 @@ export class LlmService {
       this.trackUsage(result.usage)
       this.consumeKernelTokens(result.usage)
 
+      // 非流式无法提前停止上游生成，但必须在调用方执行工具前检查完整响应。
+      new OutputLoopGuard().checkCompletion(result)
+
       const durationMs = Date.now() - startTime
       performanceLatencySeconds.observe(
         { metric: 'llm_provider_total', provider: config.provider },
         durationMs / 1000,
       )
-      logger.debug(`LLM chat 完成`, {
+      logger.debug(__t('logs.llm', 'LLM chat 完成'), {
         model: config.modelId,
         durationMs,
         promptTokens: result.usage?.promptTokens,
@@ -288,6 +371,12 @@ export class LlmService {
       })
       return result
     } catch (error) {
+      if (error instanceof GenerationLoopError)
+        logger.warn(__t('logs.llm', '完整模型响应出现退化循环，已阻止交付和工具执行'), {
+          model: config.modelId,
+          threadId: opts?.usageContext?.threadId,
+          ...error.evidence,
+        })
       finishLlmSpan(span, { error })
       throw error
     } finally {
@@ -314,7 +403,8 @@ export class LlmService {
       Math.max(opts?.timeout ?? 600_000, opts?.totalTimeout ?? 1_800_000),
     )
     finalOpts.signal = scope.signal
-    const maxRetries = retryLimit(opts?.maxRetries, 2)
+    const models = this.retryModels(config, retryLimit(opts?.maxRetries, 2))
+    const maxRetries = models.length - 1
     const span = startLlmSpan({ config, messages, options: finalOpts, streaming: true })
 
     let lastUsage: UsageInfo | undefined
@@ -324,10 +414,22 @@ export class LlmService {
     let firstTokenMs: number | undefined
     let streamError: unknown
     let recovery: ModelRetryInfo | undefined
+    let lastAttempt = -1
 
     try {
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
         scope.signal.throwIfAborted()
+        await opts?.beforeAttempt?.()
+        scope.signal.throwIfAborted()
+        const candidate = models[attempt]!
+        lastAttempt = attempt
+        const attemptController = new AbortController()
+        const attemptSignal = AbortSignal.any([scope.signal, attemptController.signal])
+        const attemptOpts = this.attemptOptions(config, candidate, {
+          ...opts,
+          signal: attemptSignal,
+        })
+        const loopGuard = new OutputLoopGuard()
         const attemptStartedAt = Date.now()
         let attemptStatus: LlmUsageAttempt['status'] = 'interrupted'
         let responseDeltaProduced = false
@@ -341,10 +443,28 @@ export class LlmService {
             recovery = { ...recovery, state: 'retrying', updatedAt: Date.now() }
             yield { choices: [], retry: recovery }
           }
-          const provider = this.createProvider(config)
-          for await (const delta of provider.chatStream(messages, finalOpts)) {
+          const provider = this.createProvider(candidate)
+          for await (const delta of this.providerDeltas(
+            provider,
+            candidate,
+            messages,
+            attemptOpts,
+          )) {
             scope.signal.throwIfAborted()
             if (delta.usage) lastUsage = delta.usage
+            try {
+              loopGuard.check(delta)
+            } catch (error) {
+              if (error instanceof GenerationLoopError) {
+                logger.warn(__t('logs.llm', '检测到模型退化循环，已取消当前请求且不自动重放'), {
+                  model: candidate.modelId,
+                  threadId: opts?.usageContext?.threadId,
+                  ...error.evidence,
+                })
+                attemptController.abort(error)
+              }
+              throw error
+            }
             if (
               delta.choices.some(
                 ({ delta: part }) =>
@@ -392,14 +512,17 @@ export class LlmService {
           attemptStatus = finalOpts.signal?.aborted ? 'cancelled' : 'failed'
           scope.signal.throwIfAborted()
           if (
-            retryableLlmError(err) &&
+            this.canRetryModel(err, config) &&
             attempt < maxRetries &&
             (!responseDeltaProduced || opts?.retryPartialResponse)
           ) {
             if (recovery)
               yield { choices: [], retry: { ...recovery, state: 'failed', updatedAt: Date.now() } }
             const now = Date.now()
-            const delayMs = retryDelay(err, attempt)
+            const delayMs =
+              config.fallbackModels?.length && attempt % 2 === 1
+                ? 0
+                : retryDelay(err, config.fallbackModels?.length ? attempt % 2 : attempt)
             recovery = {
               retryId: randomUUID(),
               state: 'waiting',
@@ -410,9 +533,11 @@ export class LlmService {
               startedAt: now,
               updatedAt: now,
               partialResponse: responseDeltaProduced,
+              ...this.retryModelInfo(models, attempt + 1, config),
             }
-            logger.warn('模型请求异常，准备重试', {
-              model: config.modelId,
+            logger.warn(__t('logs.llm', '模型请求异常，准备重试'), {
+              model: candidate.modelId,
+              nextModel: models[attempt + 1]!.modelId,
               attempt: attempt + 1,
               maxRetries,
               delayMs,
@@ -423,11 +548,14 @@ export class LlmService {
           }
           throw err
         } finally {
+          // 调用方提前退出流时也取消底层请求，不能只停止界面接收。
+          if (!completed && !attemptController.signal.aborted)
+            attemptController.abort(new Error('模型响应接收已结束'))
           this.trackUsage(lastUsage)
           this.consumeKernelTokens(lastUsage)
           this.recordCall(
-            config,
-            finalOpts,
+            candidate,
+            attemptOpts,
             attemptStartedAt,
             lastUsage,
             finalOpts.signal?.aborted && attemptStatus !== 'completed'
@@ -438,7 +566,11 @@ export class LlmService {
         }
       }
     } catch (error) {
-      streamError = scope.signal.aborted ? scope.signal.reason : error
+      streamError = scope.signal.aborted
+        ? scope.signal.reason
+        : lastAttempt === maxRetries
+          ? this.fallbackExhausted(config, error)
+          : error
       if (recovery)
         yield {
           choices: [],
@@ -457,7 +589,7 @@ export class LlmService {
         { metric: 'llm_provider_stream_total', provider: config.provider },
         durationMs / 1000,
       )
-      logger.debug(`LLM chatStream 完成`, {
+      logger.debug(__t('logs.llm', 'LLM chatStream 完成'), {
         model: config.modelId,
         durationMs,
         promptTokens: lastUsage?.promptTokens,
@@ -474,12 +606,39 @@ export class LlmService {
   }
 
   /** 按模型配置选择Provider流式或非流式调用，并统一输出Delta。 */
+  private async *providerDeltas(
+    provider: LlmProvider,
+    config: ModelConfig,
+    messages: ChatMessage[],
+    opts: ChatOptions,
+  ): AsyncIterable<ChatDelta> {
+    if (config.stream !== false) {
+      yield* provider.chatStream(messages, opts)
+      return
+    }
+    const completion = await provider.chat(messages, opts)
+    yield {
+      choices: completion.choices.map((choice) => ({
+        delta: {
+          role: choice.message.role,
+          content: choice.message.content ?? undefined,
+          reasoningContent: choice.message.reasoningContent,
+          nativeReasoning: choice.message.nativeReasoning,
+          toolCalls: choice.message.toolCalls?.map((call, index) => ({ ...call, index })),
+        },
+        finishReason: choice.finishReason ?? 'stop',
+      })),
+      usage: completion.usage,
+    }
+  }
+
+  /** 按模型配置选择Provider流式或非流式调用，并统一输出Delta。 */
   async *chatConfigured(
     config: ModelConfig,
     messages: ChatMessage[],
     opts?: ChatOptions,
   ): AsyncIterable<ChatDelta> {
-    if (config.stream !== false) {
+    if (config.stream !== false || config.fallbackModels?.length) {
       yield* this.chatStream(config, messages, opts)
       return
     }
@@ -666,7 +825,7 @@ export class LlmService {
         usage,
       })
     } catch (error) {
-      logger.error('模型调用用量写入失败', {
+      logger.error(__t('logs.llm', '模型调用用量写入失败'), {
         error: error instanceof Error ? error.message : String(error),
       })
     }
@@ -678,43 +837,51 @@ export class LlmService {
    * 仅对临时 HTTP、网络和可恢复超时重试；统一退避支持取消与上游 Retry-After。
    */
   private async withRetry<T>(
-    fn: () => Promise<T>,
+    fn: (candidate: ModelConfig) => Promise<T>,
     config: ModelConfig,
     retry: RetryConfig = DEFAULT_RETRY,
     signal?: AbortSignal,
     onRetry?: (retry: ModelRetryInfo) => void,
   ): Promise<T> {
     let recovery: ModelRetryInfo | undefined
+    const models = this.retryModels(config, retry.maxRetries)
+    const maxRetries = models.length - 1
+    let lastAttempt = -1
     try {
-      for (let attempt = 0; attempt <= retry.maxRetries; attempt++) {
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
         signal?.throwIfAborted()
+        lastAttempt = attempt
         if (attempt > 0) consumeCurrentKernelExecution({ llmCalls: 1 })
         if (recovery) onRetry?.({ ...recovery, state: 'retrying', updatedAt: Date.now() })
         try {
-          const result = await fn()
+          const result = await fn(models[attempt]!)
           if (recovery) onRetry?.({ ...recovery, state: 'recovered', updatedAt: Date.now() })
           return result
         } catch (error) {
           signal?.throwIfAborted()
-          if (!retryableLlmError(error) || attempt >= retry.maxRetries) throw error
+          if (!this.canRetryModel(error, config) || attempt >= maxRetries) throw error
           if (recovery) onRetry?.({ ...recovery, state: 'failed', updatedAt: Date.now() })
           const now = Date.now()
-          const delayMs = retryDelay(error, attempt)
+          const delayMs =
+            config.fallbackModels?.length && attempt % 2 === 1
+              ? 0
+              : retryDelay(error, config.fallbackModels?.length ? attempt % 2 : attempt)
           recovery = {
             retryId: randomUUID(),
             state: 'waiting',
             attempt: attempt + 1,
-            maxRetries: retry.maxRetries,
+            maxRetries,
             delayMs,
             reason: error instanceof Error ? error.message.slice(0, 300) : '上游连接异常',
             startedAt: now,
             updatedAt: now,
             partialResponse: false,
+            ...this.retryModelInfo(models, attempt + 1, config),
           }
-          logger.warn('模型调用失败，等待重试', {
-            model: config.modelId,
+          logger.warn(__t('logs.llm', '模型调用失败，等待重试'), {
+            model: models[attempt]!.modelId,
             attempt: attempt + 1,
-            maxRetries: retry.maxRetries,
+            maxRetries,
             delayMs,
           })
           onRetry?.(recovery)
@@ -728,7 +895,9 @@ export class LlmService {
           state: signal?.aborted && !(signal.reason instanceof AppError) ? 'cancelled' : 'failed',
           updatedAt: Date.now(),
         })
-      throw error
+      throw !signal?.aborted && lastAttempt === maxRetries
+        ? this.fallbackExhausted(config, error)
+        : error
     }
     throw new AppError('LLM_ERROR', { message: '模型重试未取得有效响应' })
   }

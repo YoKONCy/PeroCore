@@ -1,6 +1,18 @@
 /** 社交业务工具的共享契约；平台接口与凭据始终留在子应用内。 */
 export type SocialBusinessTool = 'social' | 'social_group' | 'social_account'
 export type SocialParameters = Record<string, unknown>
+/** 模型判断的机器人标记，仅用于本地互聊保护，不代表平台认证。 */
+export interface SocialBotMark {
+  userId: string
+  reason: string
+  agentId: string
+  accountId: string
+  channelType: 'private' | 'group'
+  channelId: string
+  /** 可选佐证；未提供时，会话字段仅记录标记操作发生的位置。 */
+  messageId?: string
+  createdAt: string
+}
 export interface SocialActionDefinition {
   tool: SocialBusinessTool
   action: string
@@ -131,10 +143,36 @@ add('social', 'forward_read', '读取合并转发', { forward_id: id('转发 ID'
 add(
   'social',
   'image_read',
-  '查看消息图片',
+  '按来源消息读取图片像素；历史中的图片占位或名称不代表已经看过画面',
   { message_ids: list(id('消息 ID'), 3), max_images: integer('图片数量', 1, 3) },
   ['message_ids'],
   { legacy: 'social_read_image' },
+)
+add('social', 'emoji_list', '查询当前会话的 QQ 原生系统/商城表情来源及已记录引用，不返回平台密钥', {
+  message_ids: list(id('来源消息 ID'), 10),
+})
+add(
+  'social',
+  'emoji_remember',
+  '把当前会话原生表情来源记录到角色的账号表情引用库，跨会话复用；不会加入 QQ 图片收藏，来源删除后失效',
+  { reference: id('emoji_list 返回的来源引用'), description: text('描述', 200) },
+  ['reference'],
+  write,
+)
+add(
+  'social',
+  'contact_mark_bot',
+  '按 QQ 账号添加全局机器人标记，跨群聊与私聊生效，目标无需在当前会话发过言。提供账号与判断依据即可，来源消息仅为可选佐证；不修改 QQ 资料、不授予权限、不重置预算。主人及用户登记的可信真人不可标记',
+  {
+    ...user,
+    message_id: id('可选佐证消息 ID，允许来自该角色的其他群聊、私聊或 QQ 账号'),
+    reason: {
+      ...text('判断依据，例如已知互动行为或主人明确指认；不能仅依据昵称或普通群友要求', 500),
+      minLength: 1,
+    },
+  },
+  ['user_id', 'reason'],
+  write,
 )
 add(
   'social',
@@ -190,7 +228,10 @@ for (const action of ['list', 'search', 'read', 'collect', 'describe', 'delete']
       { offset: integer('起始位置', 0, 4096), limit: integer('数量', 1, 60), refresh: boolean },
       [],
     ],
-    search: [{ query: text('关键词', 200), limit: integer('数量', 1, 60) }, ['query']],
+    search: [
+      { query: text('关键词', 200), limit: integer('数量', 1, 60), refresh: boolean },
+      ['query'],
+    ],
     read: [{ sticker_id: id('表情 ID') }, ['sticker_id']],
     collect: [
       {
@@ -602,7 +643,7 @@ export function socialToolDefinition(
   const label = { social: '社交', social_group: '群聊', social_account: '账号与空间' }[tool]
   return {
     name: tool,
-    description: `${label}操作。action 选择操作，input 使用对应参数。正常聊天直接回复。\n${available.map((item) => `${item.action}：${item.description}；${(item.parameters.required as string[]).length ? `必填 ${(item.parameters.required as string[]).join('、')}` : '无必填参数'}`).join('\n')}`,
+    description: `${label}操作。action 选择操作，input 使用对应参数。社交应用内通过 social_act 的 call 步骤调用；日常聊天使用 social_act 的 reply。\n${available.map((item) => `${item.action}：${item.description}；${(item.parameters.required as string[]).length ? `必填 ${(item.parameters.required as string[]).join('、')}` : '无必填参数'}`).join('\n')}`,
     display: { label, description: `${label}操作`, icon: 'chat', color: 'pink' },
     parameters: object(
       {

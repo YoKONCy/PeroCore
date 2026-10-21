@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 import type { KernelCallContext, KernelNodeId } from '@infos/shared'
 import type { BuiltinTool } from '../index'
 import type {
@@ -61,7 +62,9 @@ function operationTool(name: string, operation: RemoteShellOperation): BuiltinTo
               .finally(() => cleanupScope.dispose())
             trackCancellationCleanup(ownerSignal, cleanup)
             void cleanup.catch((error) =>
-              logger.warn(`远程终端回收未确认: ${terminalId}，${String(error)}`),
+              logger.warn(
+                __t('logs.tools', '远程终端回收未确认: {0}，{1}', [terminalId, String(error)]),
+              ),
             )
           }
           ownerSignal.addEventListener('abort', close, { once: true })

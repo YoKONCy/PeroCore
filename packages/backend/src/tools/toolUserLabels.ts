@@ -1,6 +1,9 @@
+import { t } from '../lib/i18n'
+
 /** 官方工具面向用户的名称。模型使用的函数名不会受这里影响。 */
 export const TOOL_USER_LABELS: Record<string, string> = {
   send_file: '发送文件',
+  document: '处理文档',
   finish_task: '完成任务',
   load_skill: '加载技能',
   skill_list_resources: '查看技能资源',
@@ -185,9 +188,9 @@ export const TOOL_USER_DESCRIPTIONS: Record<string, string> = {
 
 /** 解析工具的用户可见名称，未知扩展也不再暴露英文函数名。 */
 export function resolveToolUserLabel(name: string, declared?: string): string {
-  if (declared?.trim()) return declared.trim()
-  if (TOOL_USER_LABELS[name]) return TOOL_USER_LABELS[name]
-  return '扩展工具'
+  if (declared?.trim()) return t('common.tools', declared.trim())
+  if (TOOL_USER_LABELS[name]) return t('common.tools', TOOL_USER_LABELS[name])
+  return t('common.tools', '扩展工具')
 }
 
 /** 解析工具的用户可见说明；开发者描述只保留给模型和开发界面。 */
@@ -196,13 +199,13 @@ export function resolveToolUserDescription(
   declared?: string,
   legacyDescription?: string,
 ): string {
-  if (declared?.trim()) return declared.trim()
-  if (TOOL_USER_DESCRIPTIONS[name]) return TOOL_USER_DESCRIPTIONS[name]
+  if (declared?.trim()) return t('common.tools', declared.trim())
+  if (TOOL_USER_DESCRIPTIONS[name]) return t('common.tools', TOOL_USER_DESCRIPTIONS[name])
   if (
     legacyDescription?.trim() &&
     !/\b(Channel|AgentApplication|SubAgent|command|API|DOM|CDP)\b/i.test(legacyDescription)
   ) {
-    return legacyDescription.trim()
+    return t('common.tools', legacyDescription.trim())
   }
-  return '为当前任务提供额外能力。关闭后，助手将无法使用这项功能。'
+  return t('common.tools', '为当前任务提供额外能力。关闭后，助手将无法使用这项功能。')
 }

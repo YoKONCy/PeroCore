@@ -1,7 +1,12 @@
-/** 应用共用一张背景；预览与整窗使用相同的图片参数和材质参数。 */
+import { t as __t } from '../../i18n/index'
+/** 应用背景预设统一管理图片与材质参数，预览和整窗共享同一状态。 */
 import { computed, ref } from 'vue'
 import { configApi } from '../../api/modules/configApi'
-import { systemApi, type AppBackgroundSettings } from '../../api/modules/systemApi'
+import {
+  systemApi,
+  type AppBackgroundPresetId,
+  type AppBackgroundSettings,
+} from '../../api/modules/systemApi'
 
 export const DEFAULT_APP_BACKGROUND: AppBackgroundSettings = {
   enabled: false,
@@ -21,7 +26,9 @@ export const DEFAULT_APP_BACKGROUND: AppBackgroundSettings = {
 export const APP_BACKGROUND_PRESETS = [
   {
     id: 'clear',
-    label: '通透',
+    get label() {
+      return __t('ui.ui', '通透')
+    },
     opacity: 0.95,
     blur: 0,
     overlayOpacity: 0.08,
@@ -30,7 +37,9 @@ export const APP_BACKGROUND_PRESETS = [
   },
   {
     id: 'balanced',
-    label: '均衡',
+    get label() {
+      return __t('ui.ui', '均衡')
+    },
     opacity: 0.95,
     blur: 0,
     overlayOpacity: 0.18,
@@ -39,7 +48,9 @@ export const APP_BACKGROUND_PRESETS = [
   },
   {
     id: 'focus',
-    label: '专注',
+    get label() {
+      return __t('ui.ui', '专注')
+    },
     opacity: 0.75,
     blur: 5,
     overlayOpacity: 0.38,
@@ -48,11 +59,66 @@ export const APP_BACKGROUND_PRESETS = [
   },
 ] as const
 
+export const USER_APP_BACKGROUND_PRESETS = [
+  {
+    id: 'preset-1',
+    get label() {
+      return __t('ui.ui', '预设 1')
+    },
+  },
+  {
+    id: 'preset-2',
+    get label() {
+      return __t('ui.ui', '预设 2')
+    },
+  },
+  {
+    id: 'preset-3',
+    get label() {
+      return __t('ui.ui', '预设 3')
+    },
+  },
+] as const
+type BackgroundSelection = AppBackgroundPresetId | 'default'
+interface SavedBackgroundPreset {
+  settings: AppBackgroundSettings
+  hasImage: boolean
+}
+const emptyPreset = (): SavedBackgroundPreset => ({
+  settings: { ...DEFAULT_APP_BACKGROUND },
+  hasImage: false,
+})
+const savedPresets = ref<Record<AppBackgroundPresetId, SavedBackgroundPreset>>({
+  'preset-1': emptyPreset(),
+  'preset-2': emptyPreset(),
+  'preset-3': emptyPreset(),
+})
+const selectedPreset = ref<BackgroundSelection>('default')
 const settings = ref<AppBackgroundSettings>({ ...DEFAULT_APP_BACKGROUND })
-const hasImage = ref(false)
+const hasImage = computed(() =>
+  selectedPreset.value === 'default' ? false : savedPresets.value[selectedPreset.value].hasImage,
+)
 const imageVersion = ref(Date.now())
 const loaded = ref(false)
+const busy = ref(false)
 let loading: Promise<void> | null = null
+let mutationQueue: Promise<void> = Promise.resolve()
+let mutationCount = 0
+const selectionKey = 'ui.chatBackground.activePreset'
+const presetKey = (id: AppBackgroundPresetId, field: 'settings' | 'mime'): string =>
+  id === 'preset-1' ? `ui.chatBackground.${field}` : `ui.chatBackground.${id}.${field}`
+
+/** 保存、切换与上传串行处理，防止较慢的旧请求覆盖新的预设选择。 */
+function mutate(operation: () => Promise<void>): Promise<void> {
+  mutationCount++
+  busy.value = true
+  const current = mutationQueue.then(operation)
+  mutationQueue = current.catch(() => undefined)
+  return current.finally(() => {
+    mutationCount--
+    busy.value = mutationCount > 0
+  })
+}
 
 function normalize(raw: unknown): AppBackgroundSettings {
   const value = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
@@ -80,7 +146,15 @@ function normalize(raw: unknown): AppBackgroundSettings {
 
 export function useAppBackground() {
   const imageUrl = computed(() =>
-    hasImage.value ? systemApi.appBackgroundContentUrl(imageVersion.value) : '',
+    hasImage.value && selectedPreset.value !== 'default'
+      ? systemApi.appBackgroundContentUrl(imageVersion.value, selectedPreset.value)
+      : '',
+  )
+  const presets = computed(() =>
+    USER_APP_BACKGROUND_PRESETS.map((preset) => ({
+      ...preset,
+      hasImage: savedPresets.value[preset.id].hasImage,
+    })),
   )
   const style = computed(() => {
     const value = normalize(settings.value)
@@ -130,21 +204,39 @@ export function useAppBackground() {
   async function load(): Promise<void> {
     if (loaded.value) return
     if (loading) return loading
-    // 保留旧配置键；设置页反复打开时不覆盖尚未保存的实时调整。
+    // 预设一沿用旧配置键和图片；重复打开设置页不覆盖实时调整。
     loading = (async () => {
       const response = await configApi.batch([
-        'ui.chatBackground.settings',
-        'ui.chatBackground.mime',
+        selectionKey,
+        ...USER_APP_BACKGROUND_PRESETS.flatMap(({ id }) => [
+          presetKey(id, 'settings'),
+          presetKey(id, 'mime'),
+        ]),
       ])
       const values = response.data ?? {}
-      const raw = values['ui.chatBackground.settings']
-      try {
-        settings.value = normalize(typeof raw === 'string' && raw ? JSON.parse(raw) : {})
-      } catch {
-        settings.value = { ...DEFAULT_APP_BACKGROUND }
+      for (const { id } of USER_APP_BACKGROUND_PRESETS) {
+        const raw = values[presetKey(id, 'settings')]
+        let parsed: unknown = {}
+        try {
+          parsed = typeof raw === 'string' && raw ? JSON.parse(raw) : {}
+        } catch {
+          // 无效参数只重置对应预设，不影响其他预设和图片。
+        }
+        savedPresets.value[id] = {
+          settings: normalize(parsed),
+          hasImage: !!values[presetKey(id, 'mime')],
+        }
       }
-      hasImage.value =
-        typeof values['ui.chatBackground.mime'] === 'string' && !!values['ui.chatBackground.mime']
+      const previous = values[selectionKey]
+      selectedPreset.value =
+        previous === 'default'
+          ? 'default'
+          : (USER_APP_BACKGROUND_PRESETS.find(({ id }) => id === previous)?.id ??
+            (savedPresets.value['preset-1'].hasImage ? 'preset-1' : 'default'))
+      settings.value =
+        selectedPreset.value === 'default'
+          ? { ...DEFAULT_APP_BACKGROUND }
+          : { ...savedPresets.value[selectedPreset.value].settings }
       loaded.value = true
     })()
     try {
@@ -154,31 +246,74 @@ export function useAppBackground() {
     }
   }
 
-  async function save(): Promise<void> {
-    await load()
-    await configApi.set('ui.chatBackground.settings', JSON.stringify(normalize(settings.value)))
+  async function persistSettings(): Promise<void> {
+    const id = selectedPreset.value
+    if (id === 'default') return
+    const snapshot = normalize(settings.value)
+    await configApi.set(presetKey(id, 'settings'), JSON.stringify(snapshot))
+    savedPresets.value[id].settings = snapshot
   }
 
-  async function upload(blob: Blob): Promise<void> {
-    await load()
-    await systemApi.uploadAppBackground(blob)
-    hasImage.value = true
-    settings.value.enabled = true
-    imageVersion.value = Math.max(Date.now(), imageVersion.value + 1)
-    await save()
+  function save(): Promise<void> {
+    return mutate(async () => {
+      await load()
+      await persistSettings()
+      await configApi.set(selectionKey, selectedPreset.value)
+    })
   }
 
-  async function remove(): Promise<void> {
-    await load()
-    await systemApi.deleteAppBackground()
-    hasImage.value = false
-    settings.value.enabled = false
-    imageVersion.value = Math.max(Date.now(), imageVersion.value + 1)
-    await save()
+  function selectPreset(id: string): Promise<void> {
+    return mutate(async () => {
+      await load()
+      if (id !== 'default' && !USER_APP_BACKGROUND_PRESETS.some((preset) => preset.id === id)) {
+        throw new Error('背景预设不存在')
+      }
+      const selection = id as BackgroundSelection
+      if (selection === selectedPreset.value) return
+      await persistSettings()
+      await configApi.set(selectionKey, selection)
+      selectedPreset.value = selection
+      settings.value =
+        selection === 'default'
+          ? { ...DEFAULT_APP_BACKGROUND }
+          : { ...savedPresets.value[selection].settings }
+    })
+  }
+
+  function upload(blob: Blob): Promise<void> {
+    return mutate(async () => {
+      await load()
+      const id = selectedPreset.value
+      if (id === 'default') throw new Error('请先选择自定义预设再上传图片')
+      await systemApi.uploadAppBackground(blob, id)
+      savedPresets.value[id].hasImage = true
+      settings.value.enabled = true
+      imageVersion.value = Math.max(Date.now(), imageVersion.value + 1)
+      await persistSettings()
+      await configApi.set(selectionKey, id)
+    })
+  }
+
+  function remove(): Promise<void> {
+    return mutate(async () => {
+      await load()
+      const id = selectedPreset.value
+      if (id === 'default') return
+      await systemApi.deleteAppBackground(id)
+      savedPresets.value[id].hasImage = false
+      settings.value.enabled = false
+      imageVersion.value = Math.max(Date.now(), imageVersion.value + 1)
+      await persistSettings()
+      await configApi.set(selectionKey, id)
+    })
   }
 
   return {
     settings,
+    presets,
+    selectedPreset,
+    selectPreset,
+    busy,
     hasImage,
     imageUrl,
     loaded,

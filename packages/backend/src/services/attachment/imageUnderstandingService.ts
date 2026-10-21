@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * imageUnderstandingService — 领域服务
  *
@@ -70,7 +71,7 @@ export class ImageUnderstandingService {
     const content: ContentPart[] = [
       {
         type: 'text',
-        text: `图片列表：\n${labels}`,
+        text: __t('server.attachment', '图片列表：\n{0}', [labels]),
       },
       ...images.map((image) => ({
         type: 'image_url' as const,
@@ -99,7 +100,11 @@ export class ImageUnderstandingService {
       return summary ? { summary, modelId: row.modelId } : null
     } catch (error) {
       signal?.throwIfAborted()
-      logger.warn(`图片转述失败: ${error instanceof Error ? error.message : String(error)}`)
+      logger.warn(
+        __t('logs.attachment', '图片转述失败: {0}', [
+          error instanceof Error ? error.message : String(error),
+        ]),
+      )
       return null
     }
   }

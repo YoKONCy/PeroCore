@@ -54,6 +54,16 @@ export interface TokenUsageGroup extends TokenUsageTotals {
   modelId?: string
 }
 
+export interface TokenUsageFilters {
+  threadId?: string
+  provider?: string
+  modelId?: string
+}
+export interface TokenUsageFilterOptions {
+  threads: Array<{ id: string; title: string | null }>
+  models: Array<{ provider: string; modelId: string }>
+}
+
 export interface TokenUsageStatistics {
   period: TokenUsagePeriod
   timeZone: string

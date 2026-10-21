@@ -1,0 +1,15 @@
+{
+  "开始全量资产扫描...": "starts scanning all assets...",
+  "资产扫描完成，共索引 {0} 个资产": "asset scanning completed, a total of {0} assets indexed",
+  "扫描资产目录失败: {0}": "Failed to scan asset directory: {0}",
+  "无法解析 {0}: {1}": "cannot resolve {0}: {1}",
+  "资产覆盖: {0} ({1} → {2})": "asset coverage: {0} ({1} → {2})",
+  "虚拟路径管理器初始化完成": "virtual path manager initialization completed",
+  "(不可用)": "(not available)",
+  "无法创建目录: {0}": "Unable to create directory: {0}",
+  "加载自定义提示词: {0}": "Load custom prompt words: {0}",
+  "加载 Workshop 提示词: {0}": "Loading Workshop prompt word: {0}",
+  "提示词模板未找到: {0}": "prompt word template not found: {0}",
+  "提示词模板已导出到自定义层: {0}": "prompt word template has been exported to the custom layer: {0}",
+  "提示词模板已恢复为官方版本: {0}": "prompt word template has been restored to the official version: {0}"
+}

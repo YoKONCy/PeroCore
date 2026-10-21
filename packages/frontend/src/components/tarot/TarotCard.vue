@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import { computed } from 'vue'
 import { getTarotCard, TAROT_SUIT_LABELS, type TarotDraw } from '@infos/shared'
 import PixelIcon from '../pixel/PixelIcon.vue'
@@ -58,8 +60,12 @@ const numeral = computed(() => {
     :disabled="disabled || !card"
     :aria-label="
       card
-        ? `${label} ${card.name} ${draw?.reversed ? '逆位' : '正位'}，查看牌意`
-        : `${label} 等待抽牌`
+        ? __t('ui.tarot', '{0} {1} {2}，查看牌意', [
+            label,
+            card.name,
+            draw?.reversed ? '逆位' : '正位',
+          ])
+        : __t('ui.tarot', '{0} 等待抽牌', [label])
     "
     @click="$emit('select')"
   >
@@ -102,9 +108,19 @@ const numeral = computed(() => {
         </span>
       </div>
       <strong>{{ card.name }}</strong>
-      <small>{{ compact ? (draw?.reversed ? '逆位' : '正位') : card.keywords }}</small>
+      <small>
+        {{
+          compact
+            ? draw?.reversed
+              ? __t('ui.tarot', '逆位')
+              : __t('ui.tarot', '正位')
+            : card.keywords
+        }}
+      </small>
       <span v-if="!compact" class="tarot-card-orientation">
-        {{ draw?.reversed ? '逆位 · 换个角度' : '正位 · 顺着心意' }}
+        {{
+          draw?.reversed ? __t('ui.tarot', '逆位 · 换个角度') : __t('ui.tarot', '正位 · 顺着心意')
+        }}
       </span>
     </template>
     <template v-else>
@@ -112,7 +128,7 @@ const numeral = computed(() => {
         <PixelIcon name="sparkle" size="3xl" />
         <span>infOS</span>
       </span>
-      <small>{{ label || '等待一个小小的巧合' }}</small>
+      <small>{{ label || __t('ui.tarot', '等待一个小小的巧合') }}</small>
     </template>
   </button>
 </template>

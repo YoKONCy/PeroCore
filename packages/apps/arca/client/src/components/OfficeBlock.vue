@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   officeChildren,
@@ -182,7 +184,7 @@ function composition(active: boolean, text?: string): void {
     >
       <button
         type="button"
-        title="选择此内容"
+        :title="__t('apps.arca.ui', '选择此内容')"
         @mousedown.prevent
         @click="emit('select', node.nodeId)"
       >
@@ -190,7 +192,7 @@ function composition(active: boolean, text?: string): void {
       </button>
       <button
         type="button"
-        title="在后方插入正文"
+        :title="__t('apps.arca.ui', '在后方插入正文')"
         @mousedown.prevent
         @click="emit('insert', node.nodeId)"
       >
@@ -198,7 +200,7 @@ function composition(active: boolean, text?: string): void {
       </button>
       <button
         type="button"
-        title="删除此内容"
+        :title="__t('apps.arca.ui', '删除此内容')"
         @mousedown.prevent
         @click="emit('remove', node.nodeId)"
       >
@@ -250,7 +252,7 @@ function composition(active: boolean, text?: string): void {
             typeof node.attributes.width === 'number' ? `${node.attributes.width}px` : undefined,
         }"
       />
-      <p v-else>图片暂不可用</p>
+      <p v-else>{{ __t('apps.arca.ui', '图片暂不可用') }}</p>
       <figcaption v-if="node.attributes.caption">{{ node.attributes.caption }}</figcaption>
     </figure>
     <table v-else-if="node.type === 'table'">
@@ -304,7 +306,9 @@ function composition(active: boolean, text?: string): void {
         @before="(id, event) => emit('before', id, event)"
       />
     </component>
-    <p v-if="node.type === 'programmable-island'" class="office-unsupported">扩展内容</p>
+    <p v-if="node.type === 'programmable-island'" class="office-unsupported">
+      {{ __t('apps.arca.ui', '扩展内容') }}
+    </p>
     <OfficeBlock
       v-for="child in node.type === 'list' || node.type === 'table' ? [] : children"
       :key="child.nodeId"

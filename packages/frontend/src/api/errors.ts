@@ -1,3 +1,5 @@
+import { t as __t } from '../i18n/index'
+import { translateDiagnostic } from '@infos/shared/i18n'
 /**
  * API 错误类型定义
  *
@@ -10,7 +12,7 @@ export class ApiError extends Error {
     message: string,
     public data?: unknown,
   ) {
-    super(message)
+    super(translateDiagnostic(message))
     this.name = 'ApiError'
   }
 }
@@ -21,7 +23,7 @@ export class NetworkError extends Error {
     public status: number,
     statusText: string,
   ) {
-    super(`网络错误: ${status} ${statusText}`)
+    super(translateDiagnostic(`网络错误: ${status} ${statusText}`))
     this.name = 'NetworkError'
   }
 }
@@ -74,21 +76,55 @@ export const ERROR_UI_MAP: Record<string, ErrorSeverity> = {
 
 /** 错误码 → 用户友好标题映射 (用于 Toast 标题显示) */
 export const ERROR_TITLE_MAP: Record<string, string> = {
-  LLM_ERROR: 'AI 服务异常',
-  LLM_RATE_LIMITED: 'AI 服务繁忙',
-  LLM_TIMEOUT: 'AI 响应超时',
-  EMBEDDING_ERROR: '向量服务异常',
-  MCP_ERROR: '工具调用失败',
-  MODEL_NOT_FOUND: '模型未配置',
-  AGENT_NOT_FOUND: 'Agent 未找到',
-  CONFIG_ERROR: '配置异常',
-  DB_ERROR: '数据库错误',
-  NETWORK_ERROR: '网络连接失败',
-  STREAM_ERROR: '流式传输中断',
-  RATE_LIMITED: '请求频率过高',
-  GATEWAY_TIMEOUT: '服务响应超时',
-  SERVICE_UNAVAILABLE: '服务不可用',
-  SERVICE_INITIALIZING: '服务启动中',
-  UNAUTHORIZED: '认证失败',
-  INTERNAL_ERROR: '内部错误',
+  get LLM_ERROR() {
+    return __t('ui.errors', 'AI 服务异常')
+  },
+  get LLM_RATE_LIMITED() {
+    return __t('ui.errors', 'AI 服务繁忙')
+  },
+  get LLM_TIMEOUT() {
+    return __t('ui.errors', 'AI 响应超时')
+  },
+  get EMBEDDING_ERROR() {
+    return __t('ui.errors', '向量服务异常')
+  },
+  get MCP_ERROR() {
+    return __t('ui.errors', '工具调用失败')
+  },
+  get MODEL_NOT_FOUND() {
+    return __t('ui.errors', '模型未配置')
+  },
+  get AGENT_NOT_FOUND() {
+    return __t('ui.errors', 'Agent 未找到')
+  },
+  get CONFIG_ERROR() {
+    return __t('ui.errors', '配置异常')
+  },
+  get DB_ERROR() {
+    return __t('ui.errors', '数据库错误')
+  },
+  get NETWORK_ERROR() {
+    return __t('ui.errors', '网络连接失败')
+  },
+  get STREAM_ERROR() {
+    return __t('ui.errors', '流式传输中断')
+  },
+  get RATE_LIMITED() {
+    return __t('ui.errors', '请求频率过高')
+  },
+  get GATEWAY_TIMEOUT() {
+    return __t('ui.errors', '服务响应超时')
+  },
+  get SERVICE_UNAVAILABLE() {
+    return __t('ui.errors', '服务不可用')
+  },
+  get SERVICE_INITIALIZING() {
+    return __t('ui.errors', '服务启动中')
+  },
+  get UNAUTHORIZED() {
+    return __t('ui.errors', '认证失败')
+  },
+  get INTERNAL_ERROR() {
+    return __t('ui.errors', '内部错误')
+  },
 }

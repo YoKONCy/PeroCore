@@ -1,0 +1,8 @@
+{
+  "永久删除尚未完成，清理记录已保留": "The permanent deletion has not been completed and the cleanup record has been retained.",
+  "恢复数据清理失败: {0}": "Recovery data cleanup failed: {0}",
+  "对话记录已清空: {0}": "Conversation history has been cleared: {0}",
+  "记忆已重置: {0}": "memory reset: {0}",
+  "出厂重置完成: {0}": "factory reset completed: {0}",
+  "清空表失败（已跳过）: {0}": "Failed to clear table (skipped): {0}"
+}

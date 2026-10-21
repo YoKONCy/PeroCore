@@ -14,11 +14,14 @@ import {
   imagePreviewsFromToolResult,
   resourceFromToolResult,
   type ResourceOrigin,
+  DOCUMENT_MAX_INPUT_BYTES,
+  isOfficeDocumentName,
 } from '@infos/shared'
 import type { AttachmentKind } from '../../repositories/attachment.repo'
 import { tokenCounter } from '../tokenizer/tokenCounter'
 import type { PdfParserService } from '../integrations/pdfParserService'
 import type { IntegrationSource } from '../integrations/integrationService'
+import { resourceMime } from './resourceSource'
 
 const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
 const TEXT_MIMES = new Set([
@@ -84,7 +87,14 @@ export class AttachmentService {
     await Promise.allSettled([...this.pdfJobs.values()].map((job) => job.promise))
   }
   capabilities() {
-    return this.pdfParser?.capabilities() ?? { pdf: false, maxPdfBytes: 0, sourceName: null }
+    const parser = this.pdfParser?.capabilities()
+    return {
+      ...(parser?.pdf
+        ? parser
+        : { pdf: true, maxPdfBytes: DOCUMENT_MAX_INPUT_BYTES, sourceName: '内置文档读取' }),
+      office: true,
+      maxDocumentBytes: DOCUMENT_MAX_INPUT_BYTES,
+    }
   }
 
   async saveOutgoing(input: {
@@ -194,25 +204,27 @@ export class AttachmentService {
           ? 'image'
           : TEXT_MIMES.has(mimeType)
             ? 'text'
-            : null
+            : isOfficeDocumentName(file.name)
+              ? 'file'
+              : null
     if (!kind)
       throw new AppError('UNSUPPORTED_MEDIA_TYPE', {
-        message: `不支持的附件类型 ${mimeType || '未知二进制'}；请选择图片、UTF-8 文本或已配置解析来源的 PDF`,
+        message: '不支持此附件类型，请选择图片、文本、PDF 或 Office 文档',
       })
     const pdfSource = kind === 'pdf' ? this.pdfParser?.capture() : undefined
     if (pdfSource && this.pdfJobs.size >= 8)
       throw new AppError('SERVICE_UNAVAILABLE', { message: '正在解析的 PDF 较多，请稍后上传' })
-    if (kind === 'pdf' && !pdfSource)
-      throw new AppError('NOT_CONFIGURED', { message: 'PDF 解析尚未启用' })
     const max =
       kind === 'pdf'
         ? this.capabilities().maxPdfBytes
         : kind === 'image'
           ? MAX_IMAGE_BYTES
-          : MAX_TEXT_BYTES
+          : kind === 'file'
+            ? DOCUMENT_MAX_INPUT_BYTES
+            : MAX_TEXT_BYTES
     if (file.size > max)
       throw new AppError('BAD_REQUEST', {
-        message: `${kind === 'image' ? '图片' : kind === 'pdf' ? 'PDF' : '文本'}附件超过 ${max / 1024 / 1024}MB 限制`,
+        message: `附件超过 ${max / 1024 / 1024}MB 限制`,
       })
 
     const bytes = Buffer.from(await file.arrayBuffer())
@@ -250,13 +262,18 @@ export class AttachmentService {
         threadId,
         kind,
         originalName: file.name || '未命名文件',
-        mimeType: kind === 'pdf' ? 'application/pdf' : mimeType,
+        mimeType:
+          kind === 'pdf'
+            ? 'application/pdf'
+            : kind === 'file'
+              ? resourceMime(file.name, mimeType, bytes)
+              : mimeType,
         sizeBytes: bytes.length,
         sha256: createHash('sha256').update(bytes).digest('hex'),
         storageKey,
         extractedText,
         tokenEstimate,
-        status: kind === 'pdf' ? 'processing' : 'uploaded',
+        status: pdfSource ? 'processing' : 'uploaded',
         metadataJson: pdfSource ? this.pdfMetadata(pdfSource) : '{}',
       })
       if (pdfSource) this.startPdf(row, bytes, pdfSource)

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import type { PromptBundle } from '@infos/shared'
+import { WHOLESOME_MODE_KEY, type PromptBundle } from '@infos/shared'
 import type { ConfigRepository } from '../../../../src/repositories/config.repo'
 import { MdpEngine } from '../../../../src/services/prompt/mdpEngine'
 import { PromptWorkspace } from '../../../../src/services/prompt/promptWorkspace'
@@ -74,6 +74,72 @@ async function setup() {
   return { workspace, bundle, repository, values, engine }
 }
 
+describe('全局健全模式', () => {
+  async function wholesomeSetup(useCore: boolean) {
+    const fixture = await setup()
+    fixture.bundle.documents.push({
+      id: 'components/rules/wholesome_mode',
+      name: '健全模式',
+      kind: 'component',
+      body: '<wholesome_mode>亲密互动保持含蓄。</wholesome_mode>',
+      role: 'system',
+      enabled: true,
+      variables: [],
+    })
+    if (useCore) {
+      fixture.bundle.documents.push({
+        id: 'components/rules/system_core',
+        name: '基础规则',
+        kind: 'component',
+        body: '原有核心规则',
+        role: 'system',
+        enabled: true,
+        variables: [],
+      })
+      fixture.bundle.frameworks[0]!.bindings.push({
+        name: 'system_core',
+        kind: 'template',
+        source: 'components/rules/system_core',
+      })
+      fixture.bundle.frameworks[0]!.blocks[0]!.template = '{{ system_core }}'
+      delete fixture.bundle.frameworks[0]!.blocks[0]!.source
+    }
+    return fixture
+  }
+
+  it('默认注入核心规则且不重复，开关落盘后下一次装配生效，不改写快照', async () => {
+    const { workspace, bundle, values } = await wholesomeSetup(true)
+    const snapshot = { id: 'test', bundle }
+    const original = JSON.stringify(snapshot)
+    const enabled = await workspace.prepare(snapshot, 'desktop', 'pero', {})
+    expect(enabled.messages).toHaveLength(1)
+    expect(enabled.messages[0]!.content).toContain('原有核心规则\n\n<wholesome_mode>')
+    expect(enabled.messages[0]!.content.match(/<wholesome_mode>/g)).toHaveLength(1)
+    values.set(WHOLESOME_MODE_KEY, 'false')
+    const disabled = await workspace.prepare(snapshot, 'desktop', 'pero', {})
+    expect(disabled.messages[0]!.content).toBe('原有核心规则')
+    expect(enabled.messages[0]!.content).toContain('<wholesome_mode>')
+    values.set(WHOLESOME_MODE_KEY, 'true')
+    expect(
+      (await workspace.prepare(snapshot, 'desktop', 'pero', {})).messages[0]!.content,
+    ).toContain('<wholesome_mode>')
+    expect(JSON.stringify(snapshot)).toBe(original)
+  })
+
+  it('未引用核心规则的社交框架同样生效，普通输入不能覆盖全局配置', async () => {
+    const { workspace, bundle, values } = await wholesomeSetup(false)
+    const snapshot = { id: 'test', bundle }
+    const result = await workspace.prepare(snapshot, 'social', 'keromi', {
+      wholesome_mode_enabled: false,
+    })
+    expect(result.messages[0]!.slotId).toBe('system_core/wholesome_mode')
+    expect(result.preview.segments[0]!.source).toBe('components/rules/wholesome_mode')
+    expect(result.preview.tokens).toBeGreaterThan(0)
+    values.set(WHOLESOME_MODE_KEY, 'false')
+    expect((await workspace.prepare(snapshot, 'social', 'keromi', {})).messages).toHaveLength(1)
+  })
+})
+
 describe('提示词工作区发布与装配边界', () => {
   it('随应用发布的台词更新模板语法有效', async () => {
     const { engine } = await setup()
@@ -128,6 +194,51 @@ describe('提示词工作区发布与装配边界', () => {
         .validate(customized.draft)
         .some((issue) => issue.source === document.id && issue.level === 'error'),
     ).toBe(true)
+  })
+
+  it('有效社交规则升级已知旧内置副本，保存后保留基准指纹及用户改写', async () => {
+    const { engine, workspace, bundle, repository, values } = await setup()
+    const directory = mkdtempSync(path.join(tmpdir(), 'infos-social-prompt-'))
+    directories.push(directory)
+    const currentBody = '新版社交编排：调用 social_act 回复 {{ agent_name }}'
+    writeFileSync(path.join(directory, 'social_rules.md'), currentBody)
+    engine.addTemplateRoot(directory, 'apps/social')
+    const original = workspace
+      .defaults()
+      .documents.find((doc) => doc.id === 'apps/social/social_rules')!
+    const oldBody = readFileSync(
+      new URL('../../../fixtures/prompts/social-rules-before-orchestration.md', import.meta.url),
+      'utf8',
+    ).trim()
+    const legacy = { ...original }
+    delete legacy.builtinBodyHash
+    bundle.documents.push({ ...legacy, name: '我的社交规则', body: oldBody })
+    values.set(
+      'prompt.workspace.v1',
+      JSON.stringify({
+        revision: 2,
+        draft: bundle,
+        activeReleaseId: 'legacy',
+        releases: [{ id: 'legacy', createdAt: new Date().toISOString(), note: '', bundle }],
+      }),
+    )
+    const restored = new PromptWorkspace(repository as unknown as ConfigRepository, engine)
+    await restored.initialize()
+    const find = (source: PromptBundle) => source.documents.find((doc) => doc.id === original.id)!
+    expect(find(restored.snapshot().bundle)).toMatchObject({
+      body: currentBody,
+      name: '我的社交规则',
+      builtinBodyHash: original.builtinBodyHash,
+    })
+    expect(find(restored.release('legacy').bundle).body).toBe(oldBody)
+    const saved = await restored.save(restored.view().draft, 2)
+    const stored = JSON.parse(values.get('prompt.workspace.v1')!)
+    expect(find(stored.draft).builtinBodyHash).toBe(original.builtinBodyHash)
+    const custom = structuredClone(saved.draft)
+    find(custom).body += '\n用户自定义规则'
+    await restored.save(custom, 3)
+    expect(find(restored.view().draft).body).toBe(currentBody + '\n用户自定义规则')
+    expect(find(restored.release('legacy').bundle).body).toBe(oldBody)
   })
 
   it('酒馆正文使用宏解析器，发布后仍保留自有编排与当前输入位置', async () => {

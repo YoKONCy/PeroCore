@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * Gateway Router — Hono WebSocket 端点
  *
@@ -28,7 +29,7 @@ export function createGatewayRouter(hub: GatewayHub) {
   router.get('/status', (c) => {
     return c.json({
       code: 'OK',
-      message: '获取成功',
+      message: __t('server.routers', '获取成功'),
       data: {
         connectedNodes: hub.connectedCount,
         uptime: process.uptime(),
@@ -67,7 +68,7 @@ export function handleWsOpen(
     (data) => ws.send(data),
     () => ws.close?.(),
   )
-  logger.info(`WS 连接建立: ${nodeId}`)
+  logger.info(__t('logs.routers', 'WS 连接建立: {0}', [nodeId]))
 }
 
 /** WS 收到消息时 */
@@ -83,5 +84,5 @@ export async function handleWsMessage(
 /** WS 连接关闭时 */
 export function handleWsClose(hub: GatewayHub, nodeId: string): void {
   hub.unregisterNode(nodeId)
-  logger.info(`WS 连接断开: ${nodeId}`)
+  logger.info(__t('logs.routers', 'WS 连接断开: {0}', [nodeId]))
 }

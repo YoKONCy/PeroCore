@@ -8,12 +8,39 @@
  */
 import PToast from './components/notification/PToast.vue'
 import PModal from './components/notification/PModal.vue'
+import { onMounted, watch } from 'vue'
+import { applyLanguage } from './i18n'
+import { configApi } from './api/modules/configApi'
+import { LANGUAGE_CONFIG_KEY } from '@infos/shared/i18n'
+import ClientPairing from './components/connection/ClientPairing.vue'
+import { useClientSession } from './composables/system/useClientSession'
+import { useMobileViewport } from './composables/ui/useMobileLayout'
+
+const { session, check } = useClientSession()
+watch(
+  () => session.value.authenticated,
+  (authenticated) => {
+    if (!authenticated) return
+    void configApi
+      .get<{ value: string | null }>(LANGUAGE_CONFIG_KEY)
+      .then((response) => {
+        if (session.value.authenticated && response.data?.value) applyLanguage(response.data.value)
+      })
+      .catch(() => {
+        /* 连接恢复前保留本机语言 */
+      })
+  },
+  { immediate: true },
+)
+onMounted(check)
+useMobileViewport()
 
 const keepAliveInclude = ['MainView']
 </script>
 
 <template>
-  <router-view v-slot="{ Component }">
+  <ClientPairing v-if="!session.authenticated" />
+  <router-view v-else v-slot="{ Component }">
     <keep-alive :include="keepAliveInclude" :max="2">
       <component :is="Component" />
     </keep-alive>

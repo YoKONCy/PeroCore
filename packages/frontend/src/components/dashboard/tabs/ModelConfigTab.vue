@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../../i18n/index'
+
 /**
  * ModelConfigTab — 模型配置 Tab (F1-1)
  *
@@ -20,7 +22,7 @@ import {
   PCheckbox,
   PCard,
 } from '../../pixel'
-import { watch, computed, type Ref } from 'vue'
+import { watch, computed, ref } from 'vue'
 import {
   useModelConfig,
   TASK_SLOTS,
@@ -33,13 +35,24 @@ import { useDashboardContext } from '../../../composables/dashboard'
 import { useAgentStore } from '../../../stores/useAgentStore'
 import { getApiBaseUrl } from '../../../api/transport'
 import IndexMaintenancePanel from '../IndexMaintenancePanel.vue'
-import { DEFAULT_DESKTOP_REACT_MAX_TURNS } from '@infos/shared'
+import ModelFallbackDialog from '../ModelFallbackDialog.vue'
+import ProviderConnectionsDialog from '../ProviderConnectionsDialog.vue'
+import {
+  DEFAULT_DESKTOP_REACT_MAX_TURNS,
+  usesReasoningLevels,
+  reasoningEffortOptions as getReasoningEffortOptions,
+} from '@infos/shared'
 
 const ctx = useDashboardContext()
 const agentStore = useAgentStore()
+const fallbackModel = ref<LlmModel | null>(null)
 
 const {
   models,
+  modelTests,
+  testModel,
+  setModelConnection,
+  switchingConnections,
   currentTab,
   mainModelId,
   taskAssignments,
@@ -59,8 +72,11 @@ const {
   setAgentAssignment,
   fetchAgentAssignments,
   isGlobalOpen,
-  globalConfig,
-  saveGlobalConfig,
+  providerConnections,
+  selectedConnection,
+  loadConnections,
+  handleConnectionChange,
+  setConnectionOverride,
   embeddingProvider,
   embeddingEnabled,
   embeddingSwitchReady,
@@ -83,7 +99,6 @@ const {
   isFetchingRemote,
   fetchRemoteModels,
   customProviderTypeOptions,
-  handleProviderChange,
   providerDefaults,
   // 向量远程模型列表
   remoteEmbeddingModels,
@@ -99,9 +114,6 @@ const {
   visionModels,
   saveRelayConfig,
 } = useModelConfig()
-
-/** 将 globalConfig 转为 Record<string,...> 供弹窗模板遍历使用，避免 TS 索引类型报错 */
-const globalConfigRecord = globalConfig as Ref<Record<string, { apiBase: string; apiKey: string }>>
 
 /** 参数是否应写入 Provider 请求；关闭时统一保存为 null，即完全不传。 */
 const sendTemperature = computed({
@@ -138,28 +150,85 @@ const wireApiOptions = [
   { label: 'Chat Completions', value: 'chat_completions' },
   { label: 'Responses', value: 'responses' },
 ]
-const reasoningDialectOptions = [
-  { label: '自动识别', value: 'auto' },
-  { label: 'OpenAI官方', value: 'openai' },
-  { label: 'DeepSeek兼容', value: 'deepseek' },
-  { label: 'OpenRouter兼容', value: 'openrouter' },
-  { label: '通用兼容', value: 'generic' },
-]
-const geminiThinkingLevels = computed(() =>
-  /gemini[-_ ]?4(?:[._ /-]|$)/i.test(editorForm.value.modelId),
+const editorProtocol = computed(() =>
+  selectedConnection.value && !editorForm.value.connectionOverride
+    ? selectedConnection.value.protocol
+    : editorForm.value.connectionProtocol,
 )
+const connectionProtocolLabel = computed(
+  () =>
+    ({
+      get openai() {
+        return __t('ui.settings', 'OpenAI 兼容')
+      },
+      anthropic: 'Anthropic',
+      gemini: 'Gemini',
+    })[editorProtocol.value] ?? editorProtocol.value,
+)
+const connectionApiBase = computed(() =>
+  editorForm.value.connectionOverride
+    ? (editorForm.value.apiBase ?? '')
+    : (selectedConnection.value?.apiBase ?? ''),
+)
+const connectionSummaryBrand = computed(() =>
+  resolveProviderBrand(selectedConnection.value?.brand, connectionApiBase.value),
+)
+const connectionAuthStatus = computed(() => {
+  const override = editorForm.value.connectionOverride
+  const noAuth =
+    (override ? editorForm.value.connectionAuthMode : selectedConnection.value?.authMode) === 'none'
+  const hasKey = override
+    ? !!editorForm.value.apiKey?.trim()
+    : !!selectedConnection.value?.hasApiKey
+  return {
+    label: noAuth
+      ? __t('ui.settings', '无需认证')
+      : hasKey
+        ? __t('ui.settings', '密钥已配置')
+        : __t('ui.settings', '缺少密钥'),
+    icon: noAuth ? 'shield' : hasKey ? 'check' : 'alert',
+    ready: !noAuth && hasKey,
+    missing: !noAuth && !hasKey,
+  }
+})
+const reasoningDialectOptions = [
+  {
+    get label() {
+      return __t('ui.settings', '自动识别')
+    },
+    value: 'auto',
+  },
+  {
+    get label() {
+      return __t('ui.settings', 'OpenAI官方')
+    },
+    value: 'openai',
+  },
+  {
+    get label() {
+      return __t('ui.settings', 'DeepSeek兼容')
+    },
+    value: 'deepseek',
+  },
+  {
+    get label() {
+      return __t('ui.settings', 'OpenRouter兼容')
+    },
+    value: 'openrouter',
+  },
+  {
+    get label() {
+      return __t('ui.settings', '通用兼容')
+    },
+    value: 'generic',
+  },
+]
+const geminiThinkingLevels = computed(() => usesReasoningLevels(editorForm.value.modelId))
 const reasoningEffortOptions = computed(() =>
-  [
-    { label: '默认（不传）', value: '' },
-    { label: '关闭', value: 'off' },
-    { label: 'Low', value: 'low' },
-    { label: 'Medium', value: 'medium' },
-    { label: 'High', value: 'high' },
-    { label: 'XHigh', value: 'xhigh' },
-    { label: 'Max', value: 'max' },
-  ].filter(
-    (option) => !geminiThinkingLevels.value || !['off', 'xhigh', 'max'].includes(option.value),
-  ),
+  getReasoningEffortOptions(editorForm.value.modelId).map((option) => ({
+    ...option,
+    label: __t('common.interface', option.label),
+  })),
 )
 const legacyGeminiEffort = computed(() =>
   geminiThinkingLevels.value &&
@@ -184,13 +253,12 @@ const reasoningEffortValue = computed({
 // 监听全局刷新
 watch(
   () => ctx.refreshKey.value,
-  () => fetchModels(),
+  () => refreshConnections(),
 )
 
-/** 保存全局配置并关闭弹窗 */
-async function handleSaveGlobal() {
-  await saveGlobalConfig()
-  isGlobalOpen.value = false
+async function refreshConnections() {
+  await loadConnections()
+  await fetchModels()
 }
 
 function avatarUrlOf(avatarUrl?: string): string {
@@ -206,11 +274,13 @@ async function openAgentAssignment(): Promise<void> {
 
 function assignedModelName(agentId: string): string {
   const modelId = agentAssignments.value[agentId]
-  return models.value.find((model) => model.id === modelId)?.name ?? '跟随主模型'
+  return (
+    models.value.find((model) => model.id === modelId)?.name ?? __t('ui.settings', '跟随主模型')
+  )
 }
 
 function formatTokens(tokens: number | null): string {
-  if (!tokens) return '不传'
+  if (!tokens) return __t('ui.settings', '不传')
   if (tokens >= 1000000) return (tokens / 1000000).toFixed(1) + 'M'
   return (tokens / 1000).toFixed(0) + 'K'
 }
@@ -222,54 +292,41 @@ const providerLabels: Record<string, string> = {
   xai: 'xAI (Grok)',
   mistral: 'Mistral',
   groq: 'Groq',
-  siliconflow: '硅基流动',
+  get siliconflow() {
+    return __t('ui.settings', '硅基流动')
+  },
   deepseek: 'DeepSeek',
   moonshot: 'Moonshot (Kimi)',
-  dashscope: '阿里百炼',
-  volcengine: '火山引擎',
-  zhipu: '智谱 GLM',
+  get dashscope() {
+    return __t('ui.settings', '阿里百炼')
+  },
+  get volcengine() {
+    return __t('ui.settings', '火山引擎')
+  },
+  get zhipu() {
+    return __t('ui.settings', '智谱 GLM')
+  },
   minimax: 'MiniMax',
-  yi: '01.AI 零一万物',
-  stepfun: '阶跃星辰',
-  hunyuan: '腾讯混元',
+  get yi() {
+    return __t('ui.settings', '01.AI 零一万物')
+  },
+  get stepfun() {
+    return __t('ui.settings', '阶跃星辰')
+  },
+  get hunyuan() {
+    return __t('ui.settings', '腾讯混元')
+  },
   ollama: 'Ollama',
-  custom: 'Custom',
+  get custom() {
+    return __t('ui.settings', '自定义')
+  },
 }
 
-/** 供应商分组，用于全局弹窗分组展示 */
-const providerGroups = [
-  {
-    label: '国际主流',
-    keys: ['openai', 'anthropic', 'gemini', 'xai', 'mistral', 'groq'],
-  },
-  {
-    label: '国内服务商',
-    keys: [
-      'siliconflow',
-      'deepseek',
-      'moonshot',
-      'dashscope',
-      'volcengine',
-      'zhipu',
-      'minimax',
-      'yi',
-      'stepfun',
-      'hunyuan',
-    ],
-  },
-  {
-    label: '本地部署',
-    keys: ['ollama'],
-  },
-]
-
-// providerDefaults 已从 composable 导入供模板直接使用
-void providerDefaults
-
-const providerChoices = computed<BrandSelectOption[]>(() =>
-  providerOptions.value.map((option) => ({
-    ...option,
-    brand: resolveProviderBrand(option.value),
+const connectionChoices = computed<BrandSelectOption[]>(() =>
+  providerConnections.value.map((connection) => ({
+    label: `${connection.name} · ${connection.protocol}`,
+    value: connection.id,
+    brand: resolveProviderBrand(connection.brand, connection.apiBase),
   })),
 )
 const modelChoices = computed<BrandSelectOption[]>(() =>
@@ -283,11 +340,23 @@ const mainModelBrand = computed(() =>
   resolveModelBrand(models.value.find((model) => model.id === mainModelId.value)?.modelId),
 )
 const taskModelChoices = computed<BrandSelectOption[]>(() => [
-  { label: '使用主模型（默认）', value: '', brand: mainModelBrand.value },
+  {
+    get label() {
+      return __t('ui.settings', '跟随主模型')
+    },
+    value: '',
+    brand: mainModelBrand.value,
+  },
   ...modelChoices.value,
 ])
 const agentModelChoices = computed<BrandSelectOption[]>(() => [
-  { label: '跟随主模型', value: '', brand: mainModelBrand.value },
+  {
+    get label() {
+      return __t('ui.settings', '跟随主模型')
+    },
+    value: '',
+    brand: mainModelBrand.value,
+  },
   ...modelChoices.value,
 ])
 const visionModelChoices = computed<BrandSelectOption[]>(() =>
@@ -309,13 +378,26 @@ const embeddingModelChoices = computed(() => choicesForModelIds(remoteEmbeddingM
 const rerankerModelChoices = computed(() => choicesForModelIds(remoteRerankerModels.value))
 
 function providerBrandForModel(model: LlmModel) {
-  const apiBase = model.apiBase?.trim() || globalConfigRecord.value[model.provider]?.apiBase
-  return resolveProviderBrand(model.provider, apiBase)
+  const connection = providerConnections.value.find(
+    (item) => item.id === model.providerConnectionId,
+  )
+  return resolveProviderBrand(
+    connection && !model.connectionOverride ? connection.brand : model.provider,
+    connection && !model.connectionOverride ? connection.apiBase : model.apiBase,
+  )
+}
+function connectionName(model: LlmModel) {
+  const connection = providerConnections.value.find(
+    (item) => item.id === model.providerConnectionId,
+  )
+  return connection
+    ? `${connection.name}${model.connectionOverride ? __t('ui.settings', ' · 自定义连接') : ''}`
+    : (providerLabels[model.provider] ?? model.provider)
 }
 </script>
 
 <template>
-  <div class="p-8 h-full flex flex-col overflow-hidden">
+  <div class="model-config-layout p-8 h-full flex flex-col overflow-hidden">
     <!-- 头部 + 子选项卡 -->
     <div class="flex items-start justify-between gap-4 mb-6 flex-shrink-0 relative group/header">
       <!-- 背景氛围光晕 -->
@@ -333,8 +415,8 @@ function providerBrandForModel(model: LlmModel) {
             ]"
             @click="currentTab = 'llm'"
           >
-            <PixelIcon name="settings" size="sm" />
-            <span class="font-pixel">模型配置</span>
+            <PixelIcon name="cpu" size="sm" />
+            <span class="font-pixel">{{ __t('ui.settings', '模型配置') }}</span>
           </button>
           <span class="text-slate-200 text-xl font-light">/</span>
           <button
@@ -347,49 +429,30 @@ function providerBrandForModel(model: LlmModel) {
             @click="currentTab = 'vector'"
           >
             <PixelIcon name="brain" size="sm" />
-            <span class="font-pixel">向量模型</span>
-          </button>
-          <span class="text-slate-200 text-xl font-light">/</span>
-          <button
-            :class="[
-              'flex items-center gap-2 text-xl font-black bg-none border-none cursor-pointer p-0 transition-all',
-              currentTab === 'multimodal'
-                ? 'text-slate-800 scale-[1.02]'
-                : 'text-slate-400 hover:text-slate-500',
-            ]"
-            @click="currentTab = 'multimodal'"
-          >
-            <PixelIcon name="image" size="sm" />
-            <span class="font-pixel">多模态转述</span>
+            <span class="font-pixel">{{ __t('ui.settings', '向量模型') }}</span>
           </button>
         </div>
         <p class="text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400 ml-7 font-pixel">
-          {{
-            currentTab === 'llm'
-              ? 'LLM MODEL MANAGEMENT'
-              : currentTab === 'vector'
-                ? 'VECTOR CONFIGURATION'
-                : 'MULTIMODAL RELAY'
-          }}
+          {{ currentTab === 'llm' ? 'LLM MODEL MANAGEMENT' : 'VECTOR CONFIGURATION' }}
         </p>
       </div>
       <div class="flex gap-2 items-center">
         <template v-if="currentTab === 'llm'">
           <PButton variant="ghost" @click="isGlobalOpen = true">
             <PixelIcon name="settings" size="xs" />
-            <span>全局服务商</span>
+            <span>{{ __t('ui.settings', '服务商连接') }}</span>
           </PButton>
           <PButton variant="ghost" @click="isTaskAssignOpen = true">
             <PixelIcon name="brain" size="xs" />
-            <span>任务指派</span>
+            <span>{{ __t('ui.settings', '任务指派') }}</span>
           </PButton>
           <PButton variant="ghost" class="agent-assign-trigger" @click="openAgentAssignment">
             <PixelIcon name="users" size="xs" />
-            <span>角色指派</span>
+            <span>{{ __t('ui.settings', '角色指派') }}</span>
           </PButton>
           <PButton variant="primary" @click="openEditor(null)">
             <PixelIcon name="plus" size="xs" />
-            <span>添加模型</span>
+            <span>{{ __t('ui.settings', '添加模型') }}</span>
           </PButton>
         </template>
         <template v-else>
@@ -401,7 +464,7 @@ function providerBrandForModel(model: LlmModel) {
             "
             @click="saveVectorConfig"
           >
-            {{ isSavingVector ? '激活中' : '保存配置' }}
+            {{ isSavingVector ? __t('ui.settings', '激活中') : __t('ui.settings', '保存配置') }}
           </PButton>
         </template>
       </div>
@@ -410,20 +473,20 @@ function providerBrandForModel(model: LlmModel) {
     <!-- LLM 模型网格 -->
     <div
       v-if="currentTab === 'llm'"
-      class="model-card-grid grid grid-cols-[repeat(auto-fill,minmax(520px,1fr))] content-start gap-5 flex-1 overflow-y-auto pr-1 pt-2 model-scrollbar"
+      class="model-card-grid grid content-start flex-1 overflow-y-auto pr-1 pt-2 model-scrollbar"
     >
       <PCard v-for="model in models" :key="model.id" pixel hoverable class="model-config-card">
         <!-- 卡片头部 -->
-        <div class="flex justify-between items-start">
+        <div class="model-card-header">
           <div class="model-card-identity">
-            <BrandIcon :brand="resolveModelBrand(model.modelId)" size="lg" framed />
+            <BrandIcon :brand="resolveModelBrand(model.modelId)" size="md" framed />
             <div class="flex flex-col gap-0.5 min-w-0">
-              <h3 class="text-base font-black text-slate-800 truncate">{{ model.name }}</h3>
+              <h3 class="model-card-name" :title="model.name">{{ model.name }}</h3>
               <span
                 class="model-provider-line text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel"
               >
                 <BrandIcon :brand="providerBrandForModel(model)" size="xs" fallback="provider" />
-                <span>{{ providerLabels[model.provider] ?? model.provider }}</span>
+                <span>{{ connectionName(model) }}</span>
               </span>
             </div>
           </div>
@@ -434,108 +497,69 @@ function providerBrandForModel(model: LlmModel) {
               class="flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold text-sky-700 bg-sky-100 border-2 border-sky-300 shadow-[1px_1px_0_#7dd3fc] font-pixel"
             >
               <PixelIcon name="star" size="xs" />
-              <span>主模型</span>
+              <span>{{ __t('ui.settings', '主模型') }}</span>
             </span>
-            <div
-              v-if="model.enableVision"
-              class="flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold text-sky-500 bg-sky-50 border border-sky-200"
-            >
-              <PixelIcon name="eye" size="xs" />
-              <span>VISION</span>
-            </div>
-            <div
-              v-if="model.enableAudioInput"
-              class="flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold text-violet-500 bg-violet-50 border border-violet-200"
-            >
-              <PixelIcon name="volume" size="xs" />
-              <span>AUDIO IN</span>
-            </div>
           </div>
         </div>
 
         <!-- 模型详情 -->
-        <div class="model-detail-grid">
-          <div class="flex justify-between items-center">
-            <span class="text-[11px] text-slate-400">模型 ID</span>
-            <span class="text-[11px] font-bold text-slate-500 font-mono max-w-[160px] truncate">
-              {{ model.modelId }}
-            </span>
-          </div>
-          <div class="flex justify-between items-center">
-            <span class="text-[11px] text-slate-400">最大输出 Token</span>
-            <span class="text-[11px] font-bold text-slate-500 font-mono">
-              {{ formatTokens(model.maxTokens) }}
-            </span>
-          </div>
-          <div class="flex justify-between items-center">
-            <span class="text-[11px] text-slate-400">最大轮次</span>
-            <span class="text-[11px] font-bold text-slate-500 font-mono">
-              {{ model.maxReActTurns ?? DEFAULT_DESKTOP_REACT_MAX_TURNS }} 轮
-            </span>
-          </div>
-          <div class="flex justify-between items-center">
-            <span class="text-[11px] text-slate-400">Wire API</span>
-            <span class="text-[11px] font-mono text-slate-600">
-              {{ model.wireApi === 'responses' ? 'RESPONSES' : 'CHAT' }}
-            </span>
-          </div>
-          <div class="flex justify-between items-center">
-            <span class="text-[11px] text-slate-400">原生思考</span>
-            <span class="text-[11px] font-mono text-slate-600">
-              {{ model.returnNativeReasoning ? '回传' : '隐藏' }}
-            </span>
-          </div>
-          <div class="flex justify-between items-center">
-            <span class="text-[11px] text-slate-400">思考等级</span>
-            <span class="text-[11px] font-bold text-slate-500 font-mono uppercase">
-              {{ model.reasoningEffort ?? '不传' }}
-            </span>
-          </div>
-          <div class="flex justify-between items-center">
-            <span class="text-[11px] text-slate-400">温度 / TopP</span>
-            <span class="text-[11px] font-bold text-slate-500 font-mono">
-              {{ model.temperature }} / {{ model.topP }}
-            </span>
-          </div>
+        <div class="model-connection-picker">
+          <label class="text-[11px] text-slate-400">
+            {{ __t('ui.settings', '服务商连接')
+            }}{{ model.connectionOverride ? __t('ui.settings', '（已自定义）') : '' }}
+          </label>
+          <BrandSelect
+            size="sm"
+            :model-value="model.providerConnectionId || ''"
+            :options="connectionChoices"
+            fallback="provider"
+            teleport
+            :disabled="switchingConnections[model.id] || modelTests[model.id]?.loading"
+            :placeholder="__t('ui.settings', '选择服务商连接')"
+            @change="(value: string | number) => setModelConnection(model, String(value))"
+          />
         </div>
+        <dl class="model-detail-grid">
+          <div class="model-detail-id">
+            <dt>{{ __t('ui.settings', '模型 ID') }}</dt>
+            <dd :title="model.modelId">{{ model.modelId }}</dd>
+          </div>
+          <div>
+            <dt>{{ __t('ui.settings', '思考等级') }}</dt>
+            <dd>{{ model.reasoningEffort ?? __t('ui.settings', '不传') }}</dd>
+          </div>
+          <div>
+            <dt>{{ __t('ui.settings', '最大轮次') }}</dt>
+            <dd>{{ model.maxReActTurns ?? DEFAULT_DESKTOP_REACT_MAX_TURNS }}</dd>
+          </div>
+          <div>
+            <dt>{{ __t('ui.settings', '最大输出 Token') }}</dt>
+            <dd>{{ formatTokens(model.maxTokens) }}</dd>
+          </div>
+        </dl>
 
-        <!-- 常用能力：横向像素控制条。 -->
+        <!-- 能力开关收成一排，避免重复展示开关状态。 -->
         <section class="model-capability-panel">
-          <header class="model-capability-panel__header">
-            <span>
-              <i />
-              运行与输入能力
-            </span>
-            <small>CAPABILITY BUS / 03</small>
-          </header>
           <div class="model-capability-list">
             <label class="model-capability-toggle" :class="{ 'is-enabled': model.stream }">
-              <span class="model-capability-toggle__topline">
-                <em>01 / STREAM</em>
-                <i :class="{ 'is-on': model.stream }" />
-              </span>
-              <span class="model-capability-toggle__copy">
-                <strong>流式输出</strong>
-                <small>{{ model.stream ? '逐字返回' : '完整返回' }}</small>
-              </span>
+              <strong :title="__t('ui.settings', '流式输出')">
+                {{ __t('ui.settings', '流式输出') }}
+              </strong>
               <PSwitch
                 size="sm"
                 :model-value="model.stream"
+                :aria-label="__t('ui.settings', '流式输出')"
                 @update:model-value="(enabled: boolean) => setModelToggle(model, 'stream', enabled)"
               />
             </label>
             <label class="model-capability-toggle" :class="{ 'is-enabled': model.enableVision }">
-              <span class="model-capability-toggle__topline">
-                <em>02 / VISION</em>
-                <i :class="{ 'is-on': model.enableVision }" />
-              </span>
-              <span class="model-capability-toggle__copy">
-                <strong>图片输入</strong>
-                <small>{{ model.enableVision ? '允许识图' : '不接收图片' }}</small>
-              </span>
+              <strong :title="__t('ui.settings', '图片输入')">
+                {{ __t('ui.settings', '图片输入') }}
+              </strong>
               <PSwitch
                 size="sm"
                 :model-value="model.enableVision"
+                :aria-label="__t('ui.settings', '图片输入')"
                 @update:model-value="
                   (enabled: boolean) => setModelToggle(model, 'enableVision', enabled)
                 "
@@ -545,17 +569,13 @@ function providerBrandForModel(model: LlmModel) {
               class="model-capability-toggle model-capability-toggle-audio"
               :class="{ 'is-enabled': model.enableAudioInput }"
             >
-              <span class="model-capability-toggle__topline">
-                <em>03 / AUDIO</em>
-                <i :class="{ 'is-on': model.enableAudioInput }" />
-              </span>
-              <span class="model-capability-toggle__copy">
-                <strong>音频输入</strong>
-                <small>{{ model.enableAudioInput ? '允许音频' : '不接收音频' }}</small>
-              </span>
+              <strong :title="__t('ui.settings', '音频输入')">
+                {{ __t('ui.settings', '音频输入') }}
+              </strong>
               <PSwitch
                 size="sm"
                 :model-value="model.enableAudioInput"
+                :aria-label="__t('ui.settings', '音频输入')"
                 @update:model-value="
                   (enabled: boolean) => setModelToggle(model, 'enableAudioInput', enabled)
                 "
@@ -577,20 +597,40 @@ function providerBrandForModel(model: LlmModel) {
             @click="setMainModel(model.id)"
           >
             <PixelIcon name="star" size="xs" />
-            <span>{{ mainModelId === model.id ? '主模型' : '设为主模型' }}</span>
+            <span>
+              {{
+                mainModelId === model.id
+                  ? __t('ui.settings', '主模型')
+                  : __t('ui.settings', '设为主模型')
+              }}
+            </span>
           </button>
-          <div class="flex gap-1">
-            <PTooltip content="编辑" placement="top">
+          <div class="model-card-secondary-actions">
+            <PButton
+              size="sm"
+              variant="ghost"
+              :loading="modelTests[model.id]?.loading"
+              :disabled="switchingConnections[model.id]"
+              @click="testModel(model.id)"
+            >
+              {{ __t('ui.settings', '测试') }}
+            </PButton>
+            <PButton size="sm" variant="ghost" @click="fallbackModel = model">
+              {{ __t('ui.settings', '回退') }}
+            </PButton>
+            <PTooltip :content="__t('ui.settings', '编辑')" placement="top">
               <button
                 class="p-1.5 bg-none border-none cursor-pointer text-slate-400 hover:text-sky-500 transition-all"
+                :aria-label="__t('ui.settings', '编辑')"
                 @click="openEditor(model)"
               >
                 <PixelIcon name="pencil" size="xs" />
               </button>
             </PTooltip>
-            <PTooltip content="删除" placement="top">
+            <PTooltip :content="__t('ui.settings', '删除')" placement="top">
               <button
                 class="p-1.5 bg-none border-none cursor-pointer text-slate-400 hover:text-rose-500 transition-all"
+                :aria-label="__t('ui.settings', '删除')"
                 @click="deleteModel(model.id)"
               >
                 <PixelIcon name="trash" size="xs" />
@@ -598,67 +638,14 @@ function providerBrandForModel(model: LlmModel) {
             </PTooltip>
           </div>
         </div>
-      </PCard>
-    </div>
-
-    <!-- 多模态转述配置 -->
-    <div v-else-if="currentTab === 'multimodal'" class="flex-1 overflow-y-auto flex flex-col gap-6">
-      <PCard pixel padding="lg" overflow-visible>
-        <div class="flex items-center gap-4 mb-6">
-          <div
-            class="w-12 h-12 flex items-center justify-center bg-violet-500 text-white flex-shrink-0"
-          >
-            <PixelIcon name="image" size="sm" />
-          </div>
-          <div class="flex-1">
-            <h4 class="text-base font-black text-slate-800 font-pixel">多模态转述</h4>
-            <p class="text-xs text-slate-400 mt-0.5">
-              用专用视觉模型将图片转为文字，帮助无视觉模型理解并保存长期上下文
-            </p>
-          </div>
-          <PSwitch v-model="relayEnabled" />
-        </div>
-        <div class="grid grid-cols-2 gap-4" :class="{ 'opacity-60': !relayEnabled }">
-          <div class="flex flex-col gap-1.5 col-span-2">
-            <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
-              转述模型
-            </label>
-            <BrandSelect
-              v-model="relayModelConfigId"
-              :disabled="!relayEnabled"
-              :options="visionModelChoices"
-              placeholder="选择已启用图片视觉能力的模型"
-            />
-            <p v-if="!visionModels.length" class="text-xs text-amber-600">
-              请先在模型配置中为至少一个模型开启“图片输入”。
-            </p>
-          </div>
-          <div class="flex flex-col gap-1.5 col-span-2">
-            <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
-              转述详细度
-            </label>
-            <PSelect
-              v-model="relayDetail"
-              :disabled="!relayEnabled"
-              :options="[
-                { label: '简洁 · 快速概括', value: 'brief' },
-                { label: '标准 · 主体、状态与可见文字', value: 'standard' },
-                { label: '详细 · 布局、对象关系与 OCR', value: 'detailed' },
-              ]"
-            />
-          </div>
-        </div>
-        <div class="flex justify-end mt-6">
-          <PButton :loading="isSavingRelay" @click="saveRelayConfig">保存转述配置</PButton>
-        </div>
-      </PCard>
-      <PCard pixel padding="lg">
-        <h4 class="text-sm font-black text-slate-800 font-pixel mb-3">运行规则</h4>
-        <div class="text-xs leading-6 text-slate-500">
-          <p>· 原图只进入当前一次 ReAct 对话，不会在后续上下文中重复发送。</p>
-          <p>· 转述文字作为图片理解记录永久保存，后续对话只读取文字。</p>
-          <p>· 未配置转述模型时，支持视觉的主模型仍可原生识图，但不会生成文字档案。</p>
-        </div>
+        <p
+          v-if="modelTests[model.id]"
+          class="model-test-result"
+          :class="{ 'is-error': modelTests[model.id]?.success === false }"
+          role="status"
+        >
+          {{ modelTests[model.id]?.message }}
+        </p>
       </PCard>
     </div>
 
@@ -667,13 +654,15 @@ function providerBrandForModel(model: LlmModel) {
       <PCard pixel padding="lg">
         <div class="flex items-center justify-between gap-4">
           <div>
-            <h4 class="font-pixel font-bold">向量功能</h4>
-            <p class="text-xs text-slate-400 mt-1">生成向量并用于检索</p>
+            <h4 class="font-pixel font-bold">{{ __t('ui.settings', '向量功能') }}</h4>
+            <p class="text-xs text-slate-400 mt-1">
+              {{ __t('ui.settings', '生成向量并用于检索') }}
+            </p>
           </div>
           <PSwitch
             :model-value="embeddingEnabled"
             :disabled="!embeddingSwitchReady || embeddingSwitchSaving || isSavingVector"
-            aria-label="向量功能"
+            :aria-label="__t('ui.settings', '向量功能')"
             @update:model-value="setEmbeddingEnabled"
           />
         </div>
@@ -688,26 +677,32 @@ function providerBrandForModel(model: LlmModel) {
             <PixelIcon name="brain" size="sm" />
           </div>
           <div>
-            <h4 class="text-base font-black text-slate-800 font-pixel">Embedding 嵌入模型</h4>
-            <p class="text-xs text-slate-400 mt-0.5">用于语义检索</p>
+            <h4 class="text-base font-black text-slate-800 font-pixel">
+              {{ __t('ui.settings', 'Embedding 嵌入模型') }}
+            </h4>
+            <p class="text-xs text-slate-400 mt-0.5">{{ __t('ui.settings', '用于语义检索') }}</p>
           </div>
         </div>
         <div class="grid grid-cols-2 gap-4">
           <div class="flex flex-col gap-1.5">
             <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
-              模型来源 Provider
+              {{ __t('ui.settings', '模型来源 Provider') }}
             </label>
             <PSelect
               v-model="embeddingProvider"
               :options="[
-                { label: '本地内置 (BGE-512) — 待实现', value: 'local', disabled: true },
-                { label: '在线 API (OpenAI 兼容)', value: 'api' },
+                {
+                  label: __t('ui.settings', '本地内置 (BGE-512) — 待实现'),
+                  value: 'local',
+                  disabled: true,
+                },
+                { label: __t('ui.settings', '在线 API (OpenAI 兼容)'), value: 'api' },
               ]"
             />
           </div>
           <div class="flex flex-col gap-1.5">
             <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
-              向量维度 Dimension
+              {{ __t('ui.settings', '向量维度 Dimension') }}
             </label>
             <PInputNumber
               v-model="embeddingDimension"
@@ -716,7 +711,7 @@ function providerBrandForModel(model: LlmModel) {
               :disabled="embeddingProvider === 'local'"
             />
             <p v-if="embeddingProvider === 'local'" class="text-[10px] text-slate-400 italic">
-              * 本地模型固定为 512 维
+              {{ __t('ui.settings', '* 本地模型固定为 512 维') }}
             </p>
           </div>
           <template v-if="embeddingProvider === 'api'">
@@ -726,7 +721,7 @@ function providerBrandForModel(model: LlmModel) {
               >
                 <span class="model-id-label">
                   <BrandIcon :brand="resolveModelBrand(embeddingModelId)" size="xs" />
-                  模型 ID
+                  {{ __t('ui.settings', '模型 ID') }}
                 </span>
                 <PButton
                   variant="ghost"
@@ -735,36 +730,43 @@ function providerBrandForModel(model: LlmModel) {
                   @click="fetchRemoteEmbeddingModels"
                 >
                   <PixelIcon name="refresh" size="xs" />
-                  获取模型列表
+                  {{ __t('ui.settings', '获取模型列表') }}
                 </PButton>
               </label>
               <BrandSelect
                 v-if="remoteEmbeddingModels.length > 0"
                 v-model="embeddingModelId"
                 :options="embeddingModelChoices"
-                placeholder="从列表中选择..."
+                :placeholder="__t('ui.settings', '从列表中选择...')"
               />
               <PInput
                 v-else
                 v-model="embeddingModelId"
-                placeholder="例如: text-embedding-3-small"
+                :placeholder="__t('ui.settings', '例如: text-embedding-3-small')"
               />
             </div>
             <div class="flex flex-col gap-1.5">
               <label
                 class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel"
               >
-                API Base URL (可选)
+                {{ __t('ui.settings', 'API Base URL (可选)') }}
               </label>
-              <PInput v-model="embeddingApiBase" placeholder="留空则使用全局配置" />
+              <PInput
+                v-model="embeddingApiBase"
+                :placeholder="__t('ui.settings', 'API 地址（留空保留）')"
+              />
             </div>
             <div class="flex flex-col gap-1.5">
               <label
                 class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel"
               >
-                API Key (可选)
+                {{ __t('ui.settings', 'API Key (可选)') }}
               </label>
-              <PInput v-model="embeddingApiKey" type="password" placeholder="留空则使用全局配置" />
+              <PInput
+                v-model="embeddingApiKey"
+                type="password"
+                :placeholder="__t('ui.settings', 'API Key（留空保留）')"
+              />
             </div>
           </template>
         </div>
@@ -798,8 +800,10 @@ function providerBrandForModel(model: LlmModel) {
             <PixelIcon name="sparkle" size="sm" />
           </div>
           <div class="flex-1">
-            <h4 class="text-base font-black text-slate-800 font-pixel">Reranker 重排序模型</h4>
-            <p class="text-xs text-slate-400 mt-0.5">对初步检索结果精排，提升检索准确度</p>
+            <h4 class="text-base font-black text-slate-800 font-pixel">
+              {{ __t('ui.settings', 'Reranker 重排序模型') }}
+            </h4>
+            <p class="text-xs text-slate-400 mt-0.5">{{ __t('ui.settings', '优化检索排序') }}</p>
           </div>
           <PSwitch v-model="rerankerEnabled" class="flex-shrink-0" />
         </div>
@@ -811,7 +815,7 @@ function providerBrandForModel(model: LlmModel) {
               >
                 <span class="model-id-label">
                   <BrandIcon :brand="resolveModelBrand(rerankerModelId)" size="xs" />
-                  模型 ID
+                  {{ __t('ui.settings', '模型 ID') }}
                 </span>
                 <PButton
                   variant="ghost"
@@ -820,32 +824,43 @@ function providerBrandForModel(model: LlmModel) {
                   @click="fetchRemoteRerankerModels"
                 >
                   <PixelIcon name="refresh" size="xs" />
-                  获取模型列表
+                  {{ __t('ui.settings', '获取模型列表') }}
                 </PButton>
               </label>
               <BrandSelect
                 v-if="remoteRerankerModels.length > 0"
                 v-model="rerankerModelId"
                 :options="rerankerModelChoices"
-                placeholder="从列表中选择..."
+                :placeholder="__t('ui.settings', '从列表中选择...')"
               />
-              <PInput v-else v-model="rerankerModelId" placeholder="例如: bge-reranker-v2-m3" />
+              <PInput
+                v-else
+                v-model="rerankerModelId"
+                :placeholder="__t('ui.settings', '例如: bge-reranker-v2-m3')"
+              />
             </div>
             <div class="flex flex-col gap-1.5">
               <label
                 class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel"
               >
-                API Base URL (可选)
+                {{ __t('ui.settings', 'API Base URL (可选)') }}
               </label>
-              <PInput v-model="rerankerApiBase" placeholder="留空则使用全局配置" />
+              <PInput
+                v-model="rerankerApiBase"
+                :placeholder="__t('ui.settings', 'Reranker API 地址')"
+              />
             </div>
             <div class="flex flex-col gap-1.5">
               <label
                 class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel"
               >
-                API Key (可选)
+                {{ __t('ui.settings', 'API Key (可选)') }}
               </label>
-              <PInput v-model="rerankerApiKey" type="password" placeholder="留空则使用全局配置" />
+              <PInput
+                v-model="rerankerApiKey"
+                type="password"
+                :placeholder="__t('ui.settings', 'Reranker 专用密钥')"
+              />
             </div>
           </div>
         </template>
@@ -853,63 +868,124 @@ function providerBrandForModel(model: LlmModel) {
           v-else
           class="p-4 bg-slate-50 border border-slate-200 text-center text-[13px] text-slate-400"
         >
-          <p>
-            Reranker 已关闭。
-            <strong class="text-amber-600">建议开启</strong>
-            以获得更精准的记忆检索效果。
-          </p>
+          <p>{{ __t('ui.settings', 'Reranker 已关闭') }}</p>
         </div>
       </PCard>
     </div>
 
     <!-- 模型编辑弹窗 -->
-    <PDialog v-model="isEditorOpen" :title="editingModel ? '编辑模型' : '添加模型'" width="560px">
+    <ModelFallbackDialog :model="fallbackModel" :models="models" @close="fallbackModel = null" />
+    <PDialog
+      v-model="isEditorOpen"
+      :title="editingModel ? __t('ui.settings', '编辑模型') : __t('ui.settings', '添加模型')"
+      width="560px"
+    >
       <div class="model-dialog-body flex flex-col gap-4">
         <div class="flex flex-col gap-1.5">
           <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
-            模型名称
+            {{ __t('ui.settings', '模型名称') }}
           </label>
-          <PInput v-model="editorForm.name" placeholder="给模型起个名字" />
+          <PInput v-model="editorForm.name" :placeholder="__t('ui.settings', '给模型起个名字')" />
         </div>
         <div class="flex flex-col gap-1.5">
           <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
-            Provider
+            {{ __t('ui.settings', '服务商连接') }}
           </label>
           <BrandSelect
-            v-model="editorForm.provider"
-            :options="providerChoices"
+            :model-value="editorForm.providerConnectionId || ''"
+            :options="connectionChoices"
             fallback="provider"
-            @change="(v: string | number) => handleProviderChange(String(v))"
+            :placeholder="__t('ui.settings', '选择服务商连接')"
+            @change="(v: string | number) => handleConnectionChange(String(v))"
+          />
+          <div class="flex items-center justify-between gap-2">
+            <PButton size="sm" variant="ghost" @click="isGlobalOpen = true">
+              {{ __t('ui.settings', '管理服务商连接') }}
+            </PButton>
+          </div>
+        </div>
+        <div v-if="selectedConnection" class="connection-summary">
+          <div class="connection-summary__header">
+            <span class="connection-summary__brand">
+              <BrandIcon :brand="connectionSummaryBrand" size="md" fallback="provider" />
+            </span>
+            <div class="connection-summary__identity">
+              <strong :title="selectedConnection.name">{{ selectedConnection.name }}</strong>
+              <span>{{ connectionProtocolLabel }}</span>
+            </div>
+            <span
+              class="connection-summary__auth"
+              :class="{
+                'is-ready': connectionAuthStatus.ready,
+                'is-missing': connectionAuthStatus.missing,
+              }"
+            >
+              <PixelIcon :name="connectionAuthStatus.icon" size="xs" aria-hidden="true" />
+              {{ connectionAuthStatus.label }}
+            </span>
+          </div>
+          <div class="connection-summary__endpoint">
+            <PixelIcon name="link" size="xs" aria-hidden="true" />
+            <code>{{ connectionApiBase || '未设置地址' }}</code>
+          </div>
+          <div class="connection-summary__override">
+            <span>{{ __t('ui.settings', '自定义此模型的连接') }}</span>
+            <PSwitch
+              size="sm"
+              :aria-label="__t('ui.settings', '自定义此模型的连接')"
+              :model-value="editorForm.connectionOverride"
+              @update:model-value="setConnectionOverride"
+            />
+          </div>
+        </div>
+        <div
+          v-if="editorForm.connectionOverride || !editorForm.providerConnectionId"
+          class="flex flex-col gap-1.5"
+        >
+          <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
+            {{ __t('ui.settings', '协议格式') }}
+          </label>
+          <PSelect v-model="editorForm.connectionProtocol" :options="customProviderTypeOptions" />
+          <p class="text-[10px] text-slate-400">{{ __t('ui.settings', '按服务商文档选择。') }}</p>
+        </div>
+        <div
+          v-if="editorForm.connectionOverride || !editorForm.providerConnectionId"
+          class="flex flex-col gap-1.5"
+        >
+          <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
+            {{ __t('ui.settings', '独立 API 地址') }}
+          </label>
+          <PInput v-model="editorForm.apiBase" placeholder="https://api.example.com/v1" />
+        </div>
+        <div
+          v-if="editorForm.connectionOverride || !editorForm.providerConnectionId"
+          class="flex flex-col gap-1.5"
+        >
+          <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
+            {{ __t('ui.settings', '认证方式') }}
+          </label>
+          <PSelect
+            v-model="editorForm.connectionAuthMode"
+            :options="[
+              { value: 'api_key', label: 'API Key' },
+              { value: 'none', label: __t('ui.settings', '无需认证') },
+            ]"
           />
         </div>
-        <!-- 自定义 Provider 的协议格式选择 -->
-        <div v-if="editorForm.provider === 'custom'" class="flex flex-col gap-1.5">
+        <div
+          v-if="
+            (editorForm.connectionOverride || !editorForm.providerConnectionId) &&
+            editorForm.connectionAuthMode !== 'none'
+          "
+          class="flex flex-col gap-1.5"
+        >
           <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
-            协议格式
-          </label>
-          <PSelect v-model="editorForm.providerType" :options="customProviderTypeOptions" />
-          <p class="text-[10px] text-slate-400 italic">* 选择当前自定义 API 兼容的协议格式</p>
-        </div>
-        <!-- 自定义 API Base / Key -->
-        <div class="flex flex-col gap-1.5">
-          <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
-            API Base (可选)
-          </label>
-          <PInput
-            v-model="editorForm.apiBase"
-            :placeholder="
-              editorForm.provider === 'custom' ? 'https://api.example.com/v1' : '留空则使用全局配置'
-            "
-          />
-        </div>
-        <div class="flex flex-col gap-1.5">
-          <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
-            API Key (可选)
+            {{ __t('ui.settings', '独立 API Key') }}
           </label>
           <PInput
             v-model="editorForm.apiKey"
             type="password"
-            :placeholder="editingModel?.apiKey ? '已载入保存的密钥' : '留空则使用全局配置'"
+            :placeholder="__t('ui.settings', 'API Key（留空清除）')"
           />
         </div>
         <!-- 模型 ID + 获取列表 -->
@@ -919,7 +995,7 @@ function providerBrandForModel(model: LlmModel) {
           >
             <span class="model-id-label">
               <BrandIcon :brand="resolveModelBrand(editorForm.modelId)" size="xs" />
-              模型 ID
+              {{ __t('ui.settings', '模型 ID') }}
             </span>
             <PButton
               variant="ghost"
@@ -928,24 +1004,29 @@ function providerBrandForModel(model: LlmModel) {
               @click="fetchRemoteModels"
             >
               <PixelIcon name="refresh" size="xs" />
-              获取模型列表
+              {{ __t('ui.settings', '获取模型列表') }}
             </PButton>
           </label>
           <BrandSelect
             v-if="remoteModels.length > 0"
             v-model="editorForm.modelId"
             :options="remoteModelChoices"
-            placeholder="从列表中选择..."
+            :placeholder="__t('ui.settings', '从列表中选择...')"
           />
-          <PInput v-else v-model="editorForm.modelId" placeholder="例如: gpt-4o" />
+          <PInput
+            v-model="editorForm.modelId"
+            :placeholder="__t('ui.settings', '模型 ID，如 gpt-4o')"
+          />
         </div>
         <!-- 请求参数：每项先决定是否传参，再显示匹配的编辑控件。 -->
         <div class="model-params flex flex-col gap-3 rounded border-2 p-3">
           <div class="flex items-center justify-between border-b border-slate-200 pb-2">
             <div>
-              <h4 class="text-[11px] font-bold text-slate-700 font-pixel">请求参数</h4>
+              <h4 class="text-[11px] font-bold text-slate-700 font-pixel">
+                {{ __t('ui.settings', '请求参数') }}
+              </h4>
               <p class="mt-0.5 text-[10px] text-slate-400">
-                关闭项目时不会向 Provider 发送该字段。
+                {{ __t('ui.settings', '关闭的参数使用服务商默认值。') }}
               </p>
             </div>
             <span class="text-[9px] text-slate-400 font-mono">OPTIONAL</span>
@@ -953,9 +1034,11 @@ function providerBrandForModel(model: LlmModel) {
 
           <div class="model-param-row">
             <div class="model-param-heading">
-              <span class="text-xs font-bold text-slate-700">流式输出</span>
+              <span class="text-xs font-bold text-slate-700">
+                {{ __t('ui.settings', '流式输出') }}
+              </span>
               <span class="text-[10px] text-slate-400">
-                关闭后等待Provider完整响应，再一次性显示正文
+                {{ __t('ui.settings', '逐字显示回复') }}
               </span>
             </div>
             <span class="text-[9px] text-slate-400 font-mono">STREAM</span>
@@ -964,11 +1047,11 @@ function providerBrandForModel(model: LlmModel) {
             </div>
           </div>
 
-          <div class="model-param-row">
+          <div v-if="editorProtocol === 'openai'" class="model-param-row">
             <div class="model-param-heading">
               <span class="text-xs font-bold text-slate-700">Wire API</span>
               <span class="text-[10px] text-slate-400">
-                选择Chat Completions或Responses传输协议
+                {{ __t('ui.settings', '按服务商支持的接口选择') }}
               </span>
             </div>
             <span class="text-[9px] text-slate-400 font-mono">ENDPOINT</span>
@@ -977,11 +1060,16 @@ function providerBrandForModel(model: LlmModel) {
             </div>
           </div>
 
-          <div v-if="editorForm.wireApi === 'chat_completions'" class="model-param-row">
+          <div
+            v-if="editorProtocol === 'openai' && editorForm.wireApi === 'chat_completions'"
+            class="model-param-row"
+          >
             <div class="model-param-heading">
-              <span class="text-xs font-bold text-slate-700">思考协议方言</span>
+              <span class="text-xs font-bold text-slate-700">
+                {{ __t('ui.settings', '思考兼容模式') }}
+              </span>
               <span class="text-[10px] text-slate-400">
-                控制DeepSeek、OpenRouter等请求字段与跨轮重放
+                {{ __t('ui.settings', '通常选择自动') }}
               </span>
             </div>
             <span class="text-[9px] text-slate-400 font-mono">DIALECT</span>
@@ -992,9 +1080,11 @@ function providerBrandForModel(model: LlmModel) {
 
           <div class="model-param-row">
             <div class="model-param-heading">
-              <span class="text-xs font-bold text-slate-700">原生思考回传</span>
+              <span class="text-xs font-bold text-slate-700">
+                {{ __t('ui.settings', '显示原生思考') }}
+              </span>
               <span class="text-[10px] text-slate-400">
-                请求并展示Provider原生思考摘要；不同于正文中的&lt;think&gt;
+                {{ __t('ui.settings', '显示模型提供的思考摘要') }}
               </span>
             </div>
             <span class="text-[9px] text-slate-400 font-mono">NATIVE</span>
@@ -1005,14 +1095,19 @@ function providerBrandForModel(model: LlmModel) {
 
           <div class="model-param-row">
             <div class="model-param-heading">
-              <span class="text-xs font-bold text-slate-700">思考等级</span>
+              <span class="text-xs font-bold text-slate-700">
+                {{ __t('ui.settings', '思考等级') }}
+              </span>
               <span class="text-[10px] text-slate-400">
                 {{
                   legacyGeminiEffort
-                    ? `旧档位 ${legacyGeminiEffort} 按 ${reasoningEffortValue} 发送`
+                    ? __t('ui.settings', '旧档位 {0} 按 {1} 发送', [
+                        legacyGeminiEffort,
+                        reasoningEffortValue,
+                      ])
                     : geminiThinkingLevels
-                      ? 'Low / Medium / High，不支持关闭思考'
-                      : '按 Provider 协议映射推理强度'
+                      ? __t('ui.settings', '此模型不支持关闭思考')
+                      : __t('ui.settings', '模型的思考强度')
                 }}
               </span>
             </div>
@@ -1024,32 +1119,42 @@ function providerBrandForModel(model: LlmModel) {
 
           <div class="model-param-row">
             <div class="model-param-heading">
-              <span class="text-xs font-bold text-slate-700">温度 Temperature</span>
-              <span class="text-[10px] text-slate-400">控制回复随机性，范围 0–2</span>
+              <span class="text-xs font-bold text-slate-700">
+                {{ __t('ui.settings', '温度 Temperature') }}
+              </span>
+              <span class="text-[10px] text-slate-400">
+                {{ __t('ui.settings', '控制回复随机性，范围 0–2') }}
+              </span>
             </div>
             <PSwitch v-model="sendTemperature" />
             <div v-if="sendTemperature" class="model-param-control">
               <PSlider v-model="temperatureValue" :min="0" :max="2" :step="0.1" show-input />
             </div>
-            <span v-else class="model-param-off">不传</span>
+            <span v-else class="model-param-off">{{ __t('ui.settings', '不传') }}</span>
           </div>
 
           <div class="model-param-row">
             <div class="model-param-heading">
               <span class="text-xs font-bold text-slate-700">Top P</span>
-              <span class="text-[10px] text-slate-400">核采样概率阈值，范围 0–1</span>
+              <span class="text-[10px] text-slate-400">
+                {{ __t('ui.settings', '核采样概率阈值，范围 0–1') }}
+              </span>
             </div>
             <PSwitch v-model="sendTopP" />
             <div v-if="sendTopP" class="model-param-control">
               <PSlider v-model="topPValue" :min="0" :max="1" :step="0.05" show-input />
             </div>
-            <span v-else class="model-param-off">不传</span>
+            <span v-else class="model-param-off">{{ __t('ui.settings', '不传') }}</span>
           </div>
 
           <div class="model-param-row">
             <div class="model-param-heading">
-              <span class="text-xs font-bold text-slate-700">上下文窗口 Token</span>
-              <span class="text-[10px] text-slate-400">用于长记忆后台安全容量计算</span>
+              <span class="text-xs font-bold text-slate-700">
+                {{ __t('ui.settings', '上下文窗口 Token') }}
+              </span>
+              <span class="text-[10px] text-slate-400">
+                {{ __t('ui.settings', '填写模型支持的上下文长度') }}
+              </span>
             </div>
             <span class="text-[9px] text-slate-400 font-mono">CONTEXT</span>
             <div class="model-param-control">
@@ -1064,8 +1169,12 @@ function providerBrandForModel(model: LlmModel) {
 
           <div class="model-param-row">
             <div class="model-param-heading">
-              <span class="text-xs font-bold text-slate-700">最大轮次</span>
-              <span class="text-[10px] text-slate-400">桌面对话，留空使用默认值</span>
+              <span class="text-xs font-bold text-slate-700">
+                {{ __t('ui.settings', '最大轮次') }}
+              </span>
+              <span class="text-[10px] text-slate-400">
+                {{ __t('ui.settings', '桌面对话，留空使用默认值') }}
+              </span>
             </div>
             <span class="text-[9px] text-slate-400 font-mono">ReAct</span>
             <div class="model-param-control">
@@ -1081,124 +1190,176 @@ function providerBrandForModel(model: LlmModel) {
 
           <div class="model-param-row">
             <div class="model-param-heading">
-              <span class="text-xs font-bold text-slate-700">最大输出 Token</span>
-              <span class="text-[10px] text-slate-400">限制单次回复长度，不是上下文窗口</span>
+              <span class="text-xs font-bold text-slate-700">
+                {{ __t('ui.settings', '最大输出 Token') }}
+              </span>
+              <span class="text-[10px] text-slate-400">
+                {{ __t('ui.settings', '单次回复的长度上限') }}
+              </span>
             </div>
             <PSwitch v-model="sendMaxTokens" />
             <div v-if="sendMaxTokens" class="model-param-control">
               <PInputNumber v-model="editorForm.maxTokens" :min="1" :max="2000000" :step="256" />
             </div>
-            <span v-else class="model-param-off">不传</span>
+            <span v-else class="model-param-off">{{ __t('ui.settings', '不传') }}</span>
           </div>
         </div>
 
         <div class="grid grid-cols-2 gap-3 pt-1">
           <div class="capability-editor rounded border p-3">
-            <PCheckbox v-model="editorForm.enableVision" label="图片视觉 (Vision)" />
+            <PCheckbox
+              v-model="editorForm.enableVision"
+              :label="__t('ui.settings', '图片视觉 (Vision)')"
+            />
             <p class="mt-1 text-[10px] leading-relaxed text-slate-400">
-              允许聊天将图片作为多模态输入。
+              {{ __t('ui.settings', '支持识图') }}
             </p>
           </div>
           <div class="capability-editor rounded border p-3">
-            <PCheckbox v-model="editorForm.enableAudioInput" label="音频输入 (Audio)" />
+            <PCheckbox
+              v-model="editorForm.enableAudioInput"
+              :label="__t('ui.settings', '音频输入 (Audio)')"
+            />
             <p class="mt-1 text-[10px] leading-relaxed text-slate-400">
-              允许聊天将音频作为多模态输入。
+              {{ __t('ui.settings', '支持音频') }}
             </p>
           </div>
         </div>
       </div>
       <template #footer>
-        <PButton variant="ghost" @click="isEditorOpen = false">取消</PButton>
-        <PButton variant="primary" @click="saveModel">{{ editingModel ? '保存' : '添加' }}</PButton>
+        <PButton variant="ghost" @click="isEditorOpen = false">
+          {{ __t('ui.settings', '取消') }}
+        </PButton>
+        <PButton variant="primary" @click="saveModel">
+          {{ editingModel ? __t('ui.settings', '保存') : __t('ui.settings', '添加') }}
+        </PButton>
       </template>
     </PDialog>
 
-    <!-- 全局服务商弹窗 -->
-    <PDialog v-model="isGlobalOpen" title="全局服务商配置" width="640px">
-      <div class="model-dialog-body flex flex-col gap-6 max-h-[60vh] overflow-y-auto pr-1">
-        <p class="text-xs text-slate-400 -mb-2">
-          为各供应商预置全局 API Key。添加模型时若不填写单独 Key，则将使用这里的配置。
-        </p>
-
-        <!-- 分组展示 -->
-        <div v-for="group in providerGroups" :key="group.label" class="flex flex-col gap-2">
-          <h5
-            class="text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400 font-pixel pb-1.5 border-b border-slate-100"
-          >
-            {{ group.label }}
-          </h5>
-          <div
-            v-for="key in group.keys"
-            :key="key"
-            class="grid grid-cols-[140px_1fr_1fr] items-center gap-2"
-          >
-            <span
-              class="model-provider-line text-xs font-semibold text-slate-600"
-              :title="providerLabels[key] ?? key"
-            >
-              <BrandIcon :brand="resolveProviderBrand(key)" size="xs" fallback="provider" />
-              <span>{{ providerLabels[key] ?? key }}</span>
-            </span>
-            <PInput
-              v-model="globalConfigRecord[key]!.apiBase"
-              placeholder="API Base (optional)"
-              class="text-xs h-8"
-            />
-            <PInput
-              v-model="globalConfigRecord[key]!.apiKey"
-              type="password"
-              placeholder="API Key"
-              class="text-xs h-8"
-            />
-          </div>
-        </div>
-      </div>
-      <template #footer>
-        <PButton variant="ghost" @click="isGlobalOpen = false">关闭</PButton>
-        <PButton variant="primary" @click="handleSaveGlobal">保存</PButton>
-      </template>
-    </PDialog>
+    <ProviderConnectionsDialog
+      v-model="isGlobalOpen"
+      :connections="providerConnections"
+      :templates="providerOptions"
+      :defaults="providerDefaults"
+      @changed="refreshConnections"
+    />
 
     <!-- 任务指派弹窗 -->
-    <PDialog v-model="isTaskAssignOpen" title="任务指派" width="560px">
-      <div class="model-dialog-body flex flex-col gap-4">
-        <p class="text-xs text-slate-400">
-          为不同的系统工作选择合适模型；未单独选择时会使用主模型。
-        </p>
-        <div
-          v-for="slot in TASK_SLOTS"
-          :key="slot.key"
-          class="flex items-center justify-between gap-4"
-        >
-          <div class="flex flex-col gap-0.5">
-            <span class="text-sm font-bold text-slate-700">{{ slot.label }}</span>
-            <span class="text-[10px] text-slate-400">{{ slot.description }}</span>
+    <PDialog
+      v-model="isTaskAssignOpen"
+      :title="__t('ui.settings', '任务指派')"
+      width="min(780px, calc(100vw - 32px))"
+    >
+      <div class="model-dialog-body task-assignment-dialog">
+        <section class="task-assignment-section">
+          <div class="task-assignment-heading">
+            <span class="task-assignment-heading-icon">
+              <PixelIcon name="brain" size="sm" />
+            </span>
+            <div class="task-assignment-heading-copy">
+              <h4>{{ __t('ui.settings', '系统任务') }}</h4>
+              <p>{{ __t('ui.settings', '默认使用主模型，选择后自动保存。') }}</p>
+            </div>
           </div>
-          <BrandSelect
-            :model-value="taskAssignments[slot.key] || ''"
-            :options="taskModelChoices"
-            class="w-48"
-            @update:model-value="
-              (v: string | number) => setTaskAssignment(slot.key, v ? String(v) : null)
-            "
-          />
-        </div>
+          <div v-for="slot in TASK_SLOTS" :key="slot.key" class="task-assignment-row">
+            <span class="task-assignment-row-icon" aria-hidden="true">
+              <PixelIcon :name="slot.icon" size="sm" />
+            </span>
+            <div class="task-assignment-copy">
+              <strong>{{ slot.label }}</strong>
+              <p>{{ slot.description }}</p>
+            </div>
+            <BrandSelect
+              teleport
+              :model-value="taskAssignments[slot.key] || ''"
+              :options="taskModelChoices"
+              :aria-label="slot.label"
+              class="task-assignment-select"
+              @update:model-value="
+                (v: string | number) => setTaskAssignment(slot.key, v ? String(v) : null)
+              "
+            />
+          </div>
+        </section>
+        <section class="task-assignment-section">
+          <div class="task-assignment-heading">
+            <span class="task-assignment-heading-icon">
+              <PixelIcon name="image" size="sm" />
+            </span>
+            <div class="task-assignment-heading-copy">
+              <h4>{{ __t('ui.settings', '多模态转述') }}</h4>
+              <p>{{ __t('ui.settings', '将图片转为文字，便于后续对话引用。') }}</p>
+            </div>
+            <PSwitch
+              v-model="relayEnabled"
+              :disabled="isSavingRelay"
+              :aria-label="__t('ui.settings', '启用多模态转述')"
+            />
+          </div>
+          <div class="task-assignment-fields" :class="{ 'is-disabled': !relayEnabled }">
+            <div class="task-assignment-field">
+              <span>{{ __t('ui.settings', '转述模型') }}</span>
+              <BrandSelect
+                v-model="relayModelConfigId"
+                teleport
+                :disabled="!relayEnabled || isSavingRelay"
+                :options="visionModelChoices"
+                :placeholder="__t('ui.settings', '选择已启用图片输入的模型')"
+              />
+              <p v-if="!visionModels.length" class="text-xs text-amber-600">
+                {{ __t('ui.settings', '请先为至少一个模型开启“图片输入”。') }}
+              </p>
+            </div>
+            <div class="task-assignment-field">
+              <span>{{ __t('ui.settings', '转述详细度') }}</span>
+              <PSelect
+                v-model="relayDetail"
+                teleport
+                :disabled="!relayEnabled || isSavingRelay"
+                :options="[
+                  { label: __t('ui.settings', '简洁 · 快速概括'), value: 'brief' },
+                  { label: __t('ui.settings', '标准 · 主体、状态与可见文字'), value: 'standard' },
+                  {
+                    label: __t('ui.settings', '详细 · 布局、对象关系与文字识别'),
+                    value: 'detailed',
+                  },
+                ]"
+              />
+            </div>
+          </div>
+          <div class="task-assignment-footer">
+            <p class="task-assignment-rules">
+              <PixelIcon name="info" size="xs" aria-hidden="true" />
+              {{ __t('ui.settings', '后续对话保留转述文字，不重复发送原图。') }}
+            </p>
+            <PButton
+              size="sm"
+              :loading="isSavingRelay"
+              :disabled="isSavingRelay"
+              @click="saveRelayConfig"
+            >
+              {{ __t('ui.settings', '保存转述配置') }}
+            </PButton>
+          </div>
+        </section>
       </div>
       <template #footer>
-        <PButton variant="primary" @click="isTaskAssignOpen = false">完成</PButton>
+        <PButton variant="primary" @click="isTaskAssignOpen = false">
+          {{ __t('ui.settings', '完成') }}
+        </PButton>
       </template>
     </PDialog>
 
     <!-- 角色模型指派弹窗 -->
-    <PDialog v-model="isAgentAssignOpen" title="角色指派" width="680px">
+    <PDialog v-model="isAgentAssignOpen" :title="__t('ui.settings', '角色指派')" width="680px">
       <div class="model-dialog-body agent-assignment-dialog">
         <div class="agent-assignment-intro">
           <div class="agent-assignment-intro__icon">
             <PixelIcon name="sparkles" size="sm" />
           </div>
           <div>
-            <strong>让每位角色拥有自己的思考引擎</strong>
-            <p>未单独指派的角色会自然跟随主模型，随时可以恢复默认。</p>
+            <strong>{{ __t('ui.settings', '选择角色使用的模型') }}</strong>
+            <p>{{ __t('ui.settings', '未指派时使用主模型。') }}</p>
           </div>
         </div>
 
@@ -1229,7 +1390,7 @@ function providerBrandForModel(model: LlmModel) {
             </div>
 
             <div class="agent-assignment-card__selector">
-              <span class="agent-assignment-card__label">对话模型</span>
+              <span class="agent-assignment-card__label">{{ __t('ui.settings', '对话模型') }}</span>
               <BrandSelect
                 teleport
                 :model-value="agentAssignments[agent.id] || ''"
@@ -1246,18 +1407,263 @@ function providerBrandForModel(model: LlmModel) {
 
         <div v-else class="agent-assignment-empty">
           <PixelIcon name="users" size="md" />
-          <strong>还没有可指派的角色</strong>
-          <span>请先在角色配置中启用至少一个角色。</span>
+          <strong>{{ __t('ui.settings', '还没有可指派的角色') }}</strong>
+          <span>{{ __t('ui.settings', '请先在角色配置中启用至少一个角色。') }}</span>
         </div>
       </div>
       <template #footer>
-        <PButton variant="primary" @click="isAgentAssignOpen = false">完成</PButton>
+        <PButton variant="primary" @click="isAgentAssignOpen = false">
+          {{ __t('ui.settings', '完成') }}
+        </PButton>
       </template>
     </PDialog>
   </div>
 </template>
 
 <style scoped>
+.model-connection-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.model-test-result {
+  font-size: 11px;
+  line-height: 1.8;
+  color: var(--ui-text-muted);
+  overflow-wrap: anywhere;
+}
+.model-test-result.is-error {
+  color: var(--ui-accent-rose);
+}
+.connection-summary {
+  padding: 12px 14px 8px;
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: 4px;
+  background:
+    linear-gradient(
+      125deg,
+      color-mix(in srgb, var(--ui-accent-purple) 5%, transparent),
+      transparent 65%
+    ),
+    var(--ui-bg-surface-soft);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ui-text-primary) 3%, transparent);
+  color: var(--ui-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.connection-summary__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.connection-summary__brand {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: 4px;
+  background: var(--ui-bg-surface);
+}
+.connection-summary__identity {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+}
+.connection-summary__identity strong {
+  overflow: hidden;
+  color: var(--ui-text-primary);
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.connection-summary__identity > span {
+  color: var(--ui-text-tertiary);
+  font-size: 10px;
+}
+.connection-summary__auth {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 5px;
+  color: var(--ui-text-tertiary);
+  font-size: 10px;
+  white-space: nowrap;
+}
+.connection-summary__auth.is-ready {
+  color: var(--ui-success);
+}
+.connection-summary__auth.is-missing {
+  color: var(--ui-warning);
+}
+.connection-summary__endpoint {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+  color: var(--ui-text-secondary);
+}
+.connection-summary__endpoint > .pixel-icon {
+  flex-shrink: 0;
+  margin-top: 3px;
+  color: var(--ui-text-tertiary);
+}
+.connection-summary__endpoint code {
+  min-width: 0;
+  background: transparent;
+  color: inherit;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.connection-summary__override {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  padding-top: 6px;
+  border-top: 1px solid var(--ui-border-subtle);
+  font-size: 11px;
+}
+.task-assignment-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  font-family: var(--ui-font-sans);
+}
+.task-assignment-section {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0;
+  padding: 16px;
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: 8px;
+  background: var(--dash-panel-soft);
+}
+.task-assignment-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 14px;
+}
+.task-assignment-heading-icon {
+  display: grid;
+  flex: 0 0 34px;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid color-mix(in srgb, var(--ui-accent-purple) 20%, var(--ui-border-subtle));
+  border-radius: 7px;
+  background: var(--ui-accent-purple-soft);
+  color: var(--ui-accent-purple);
+}
+/* 单独约束文字容器，避免将 PixelIcon 的外层 div 一并拉伸。 */
+.task-assignment-heading-copy {
+  flex: 1;
+  min-width: 0;
+}
+.task-assignment-heading h4,
+.task-assignment-copy strong,
+.task-assignment-field > span {
+  color: var(--ui-text-primary);
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0;
+}
+.task-assignment-heading p,
+.task-assignment-copy p,
+.task-assignment-rules {
+  margin: 4px 0 0;
+  color: var(--ui-text-secondary);
+  font-size: 11px;
+  line-height: 1.8;
+}
+.task-assignment-row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) minmax(0, 252px);
+  align-items: center;
+  gap: 12px;
+  min-height: 70px;
+  padding: 12px 0;
+  border-top: 1px solid var(--ui-border-subtle);
+}
+.task-assignment-row-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  color: var(--ui-text-tertiary);
+  background: var(--ui-bg-hover);
+}
+.task-assignment-select :deep(.p-select-trigger) {
+  min-height: 38px;
+}
+.task-assignment-copy,
+.task-assignment-select {
+  min-width: 0;
+}
+.task-assignment-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.task-assignment-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--ui-border-subtle);
+}
+.task-assignment-fields.is-disabled {
+  opacity: 0.6;
+}
+.task-assignment-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 16px;
+}
+.task-assignment-footer > .p-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.task-assignment-rules {
+  display: flex;
+  align-items: flex-start;
+  flex: 1 1 260px;
+  gap: 6px;
+  margin: 0;
+  color: var(--ui-text-tertiary);
+}
+.task-assignment-rules > .pixel-icon {
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+@media (max-width: 620px) {
+  .task-assignment-row {
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 8px;
+  }
+  .task-assignment-select {
+    grid-column: 2 / -1;
+  }
+  .task-assignment-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .task-assignment-section {
+    padding: 12px;
+  }
+}
 .model-card-identity {
   display: flex;
   min-width: 0;
@@ -1568,224 +1974,182 @@ function providerBrandForModel(model: LlmModel) {
   }
 }
 
-/* 横向模型卡：以信息密度和微像素控制条为主。 */
+/* 模型卡片按实际内容宽度排成三列，窄屏逐级收为两列和单列。 */
+.model-config-layout {
+  min-width: 0;
+  container: model-config / inline-size;
+}
 .model-card-grid {
   min-height: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   grid-auto-rows: max-content;
+  gap: 16px;
+  padding-left: 2px;
+  padding-bottom: 6px;
   scroll-padding-top: 8px;
 }
-
-.model-config-card {
+.model-card-grid .model-config-card {
+  min-width: 0;
   min-height: min-content;
+  padding: 14px;
+  border-width: 2px;
   border-color: color-mix(in srgb, var(--ui-border-strong) 82%, transparent);
   background:
-    linear-gradient(90deg, var(--ui-accent-sky) 0 34px, transparent 34px) top left / 72px 2px
+    linear-gradient(90deg, var(--ui-accent-sky) 0 26px, transparent 26px) top left / 56px 2px
       no-repeat,
     var(--ui-bg-surface);
-  box-shadow:
-    3px 3px 0 color-mix(in srgb, var(--ui-border-strong) 88%, transparent),
-    inset 0 0 0 1px color-mix(in srgb, var(--ui-text-inverse) 5%, transparent);
+  box-shadow: 2px 2px 0 color-mix(in srgb, var(--ui-border-strong) 88%, transparent);
 }
-
-/* 内容布局应用到 PCard 的插槽容器，列表溢出时保留完整操作区。 */
 .model-config-card :deep(.p-card-body) {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
-
+.model-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.model-card-header .model-card-identity {
+  flex: 1;
+  gap: 9px;
+  margin-right: 0;
+}
+.model-card-name {
+  overflow: hidden;
+  color: var(--ui-text-primary);
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .model-card-actions {
   flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 8px;
+  border-color: var(--ui-border-subtle);
 }
-
+.model-card-actions .main-model-button {
+  min-height: 28px;
+  padding: 3px 7px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.model-card-secondary-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+.model-card-secondary-actions :deep(.p-btn-sm) {
+  padding: 5px 6px;
+  font-size: 11px;
+}
 .model-detail-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 5px 22px;
-  padding: 9px 10px;
-  border-left: 2px solid var(--ui-border-default);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 8px;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--ui-border-subtle);
   background: color-mix(in srgb, var(--ui-bg-hover) 48%, transparent);
 }
-
-/* 模型卡片内的横向能力总线。 */
+.model-detail-grid > div {
+  min-width: 0;
+}
+.model-detail-grid dt {
+  color: var(--ui-text-secondary);
+  font-size: 10px;
+  line-height: 1.5;
+}
+.model-detail-grid dd {
+  overflow: hidden;
+  margin: 4px 0 0;
+  color: var(--ui-text-primary);
+  font: 600 11px/1.5 var(--ui-font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: uppercase;
+}
+.model-detail-grid .model-detail-id {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  grid-column: 1 / -1;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--ui-border-subtle);
+}
+.model-detail-id dt {
+  flex-shrink: 0;
+}
+.model-detail-id dd {
+  flex: 1;
+  margin: 0;
+  text-align: right;
+  text-transform: none;
+}
 .model-capability-panel {
   overflow: hidden;
-  border: 1px solid var(--ui-border-strong);
-  border-radius: 0;
+  border: 1px solid var(--ui-border-subtle);
   background: var(--ui-bg-surface);
-  box-shadow: 2px 2px 0 color-mix(in srgb, var(--ui-border-strong) 76%, transparent);
 }
-
-.model-capability-panel__header {
-  display: flex;
-  min-height: 27px;
-  align-items: center;
-  justify-content: space-between;
-  padding: 5px 9px;
-  border-bottom: 1px solid var(--ui-border-strong);
-  background:
-    repeating-linear-gradient(
-      90deg,
-      transparent 0 7px,
-      color-mix(in srgb, var(--ui-border-default) 35%, transparent) 7px 8px
-    ),
-    color-mix(in srgb, var(--ui-bg-hover) 76%, transparent);
-}
-
-.model-capability-panel__header span {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--ui-text-primary);
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-}
-
-.model-capability-panel__header span i {
-  width: 5px;
-  height: 5px;
-  background: var(--ui-accent-sky);
-  box-shadow: 6px 0 0 color-mix(in srgb, var(--ui-accent-sky) 38%, transparent);
-}
-
-.model-capability-panel__header small {
-  color: var(--ui-text-muted);
-  font-family: var(--font-mono), monospace;
-  font-size: 7px;
-  letter-spacing: 0.1em;
-}
-
 .model-capability-list {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
-
 .model-capability-toggle {
   position: relative;
-  display: grid;
-  min-width: 0;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: auto 1fr;
-  gap: 5px 8px;
-  padding: 8px 9px 9px;
-  cursor: pointer;
-  transition:
-    background-color 0.12s steps(2, end),
-    box-shadow 0.12s steps(2, end);
-}
-
-.model-capability-toggle + .model-capability-toggle {
-  border-left: 1px solid var(--ui-border-default);
-}
-
-.model-capability-toggle::after {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 2px;
-  background: var(--ui-border-default);
-  content: '';
-}
-
-.model-capability-toggle:hover {
-  background: color-mix(in srgb, var(--ui-accent-sky-soft) 38%, transparent);
-}
-
-.model-capability-toggle.is-enabled {
-  background: color-mix(in srgb, var(--ui-accent-sky-soft) 23%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ui-accent-sky) 16%, transparent);
-}
-
-.model-capability-toggle.is-enabled::after {
-  background: var(--ui-accent-sky);
-}
-
-.model-capability-toggle-audio.is-enabled::after {
-  background: var(--ui-accent-purple);
-}
-
-.model-capability-toggle__topline {
-  display: flex;
-  grid-column: 1 / -1;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.model-capability-toggle__topline em {
-  color: var(--ui-text-muted);
-  font-family: var(--font-mono), monospace;
-  font-size: 7px;
-  font-style: normal;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-}
-
-.model-capability-toggle__topline i {
-  width: 5px;
-  height: 5px;
-  border: 1px solid var(--ui-text-muted);
-  background: transparent;
-}
-
-.model-capability-toggle__topline i.is-on {
-  border-color: var(--ui-accent-sky);
-  background: var(--ui-accent-sky);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ui-accent-sky) 18%, transparent);
-}
-
-.model-capability-toggle-audio .model-capability-toggle__topline i.is-on {
-  border-color: var(--ui-accent-purple);
-  background: var(--ui-accent-purple);
-}
-
-.model-capability-toggle__copy {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 1px;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 4px;
+  cursor: pointer;
+  transition: background-color 120ms;
 }
-
+.model-capability-toggle + .model-capability-toggle {
+  border-left: 1px solid var(--ui-border-subtle);
+}
+.model-capability-toggle:hover,
+.model-capability-toggle:focus-within {
+  background: var(--ui-bg-hover);
+}
+.model-capability-toggle.is-enabled {
+  background: color-mix(in srgb, var(--ui-accent-sky-soft) 24%, transparent);
+}
+.model-capability-toggle-audio.is-enabled {
+  background: color-mix(in srgb, var(--ui-accent-purple-soft) 24%, transparent);
+}
+.model-capability-toggle-audio :deep(.p-switch-wrapper) {
+  --switch-accent: var(--ui-accent-purple);
+}
 .model-capability-toggle strong {
+  max-width: 100%;
   overflow: hidden;
-  color: var(--ui-text-primary);
-  font-size: 11px;
-  font-weight: 800;
-  line-height: 1.2;
+  color: var(--ui-text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.5;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
-.model-capability-toggle__copy small {
-  overflow: hidden;
-  color: var(--ui-text-muted);
-  font-size: 8px;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+@container model-config (max-width: 900px) {
+  .model-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
-
-.model-capability-toggle :deep(.p-switch-wrapper) {
-  align-self: center;
-  justify-self: end;
-}
-
-@media (max-width: 900px) {
+@container model-config (max-width: 600px) {
   .model-card-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 }
-
-@media (max-width: 620px) {
-  .model-detail-grid,
-  .model-capability-list {
-    grid-template-columns: 1fr;
-  }
-
-  .model-capability-toggle + .model-capability-toggle {
-    border-top: 1px solid var(--ui-border-default);
-    border-left: 0;
+@media (prefers-reduced-motion: reduce) {
+  .model-capability-toggle {
+    transition: none;
   }
 }
 

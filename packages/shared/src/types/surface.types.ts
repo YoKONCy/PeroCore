@@ -48,6 +48,11 @@ export interface MarkdownSurfaceProps {
 
 /** 上游重试的持久时间线记录；计数表示已使用的重试次数，不含首次请求。 */
 export interface ModelRetryInfo {
+  modelId?: string
+  fromModelId?: string
+  modelLevel?: number
+  modelLevels?: number
+  modelAttempt?: number
   retryId: string
   state: 'waiting' | 'retrying' | 'recovered' | 'failed' | 'cancelled'
   attempt: number
@@ -80,6 +85,8 @@ export interface NativeReasoningSurfaceProps {
 
 export interface ToolCallSurfaceProps {
   callId: string
+  /** 内部编排调用所属的外层工具。 */
+  parentCallId?: string
   name: string
   args: string
   draftId?: string
@@ -337,6 +344,7 @@ export type ConversationContentBlock =
       blockId: string
       sequence: number
       kind: 'tool'
+      parentCallId?: string
       automaticApproval?: import('../executionMode').AutomaticApprovalRecord
       turn: number
       callId: string
@@ -369,6 +377,7 @@ export interface ConversationMessageProjection {
   outputTokens?: number
   contentBlocks: ConversationContentBlock[]
   toolCalls: Array<{
+    parentCallId?: string
     automaticApproval?: import('../executionMode').AutomaticApprovalRecord
     callId?: string
     name: string

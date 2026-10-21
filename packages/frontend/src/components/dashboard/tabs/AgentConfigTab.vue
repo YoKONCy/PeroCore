@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../../i18n/index'
+
 /**
  * AgentConfigTab.vue — 界面组件
  *
@@ -59,36 +61,157 @@ const avatarUploading = ref(false)
 let avatarCropObjectUrl = ''
 
 const sections: Array<{ id: AtlasSection; code: string; label: string; help: string }> = [
-  { id: 'identity', code: '01', label: '身份档案', help: '角色名称、称呼与档案说明' },
-  { id: 'persona', code: '02', label: '人格内核', help: '核心人格与不同场景表达' },
-  { id: 'reactions', code: '03', label: '交互反应', help: '桌宠点击、闲置与时段问候' },
-  { id: 'capability', code: '04', label: '能力协议', help: '主 Agent 在各场景下的工具与技能' },
-  { id: 'runtime', code: '05', label: '运行来源', help: '配置来源、系统协议与资源状态' },
+  {
+    id: 'identity',
+    code: '01',
+    get label() {
+      return __t('ui.settings', '身份档案')
+    },
+    help: '角色名称、称呼与档案说明',
+  },
+  {
+    id: 'persona',
+    code: '02',
+    get label() {
+      return __t('ui.settings', '人格内核')
+    },
+    help: '核心人格与不同场景表达',
+  },
+  {
+    id: 'reactions',
+    code: '03',
+    get label() {
+      return __t('ui.settings', '交互反应')
+    },
+    help: '桌宠点击、闲置与时段问候',
+  },
+  {
+    id: 'capability',
+    code: '04',
+    get label() {
+      return __t('ui.settings', '能力协议')
+    },
+    help: '主 Agent 在各场景下的工具与技能',
+  },
+  {
+    id: 'runtime',
+    code: '05',
+    get label() {
+      return __t('ui.settings', '运行来源')
+    },
+    help: '配置来源、系统协议与资源状态',
+  },
 ]
 const channels: Array<{ value: ManagedChannel; code: string; label: string; help: string }> = [
-  { value: 'desktop', code: 'DESK', label: '桌面工作', help: '主窗口与桌宠共享的本地能力' },
-  { value: 'group', code: 'BASE', label: '据点群聊', help: 'infOS 据点内部的多人会话能力' },
+  {
+    value: 'desktop',
+    code: 'DESK',
+    get label() {
+      return __t('ui.settings', '桌面工作')
+    },
+    help: '主窗口与桌宠共享的本地能力',
+  },
+  {
+    value: 'group',
+    code: 'BASE',
+    get label() {
+      return __t('ui.settings', '据点群聊')
+    },
+    help: 'infOS 据点内部的多人会话能力',
+  },
 ]
 const reactionParts = [
-  { key: 'click.head', code: 'HEAD', label: '头部', help: '头发、面部、眼睛与头饰区域' },
-  { key: 'click.arm', code: 'ARM', label: '手臂与手部', help: '手臂、手掌与袖子区域' },
-  { key: 'click.body', code: 'BODY', label: '身体', help: '胸部、腰部与服装主体区域' },
-  { key: 'click.leg', code: 'LEG', label: '腿部', help: '腿、脚与鞋袜区域' },
+  {
+    key: 'click.head',
+    code: 'HEAD',
+    get label() {
+      return __t('ui.settings', '头部')
+    },
+    help: '头发、面部、眼睛与头饰区域',
+  },
+  {
+    key: 'click.arm',
+    code: 'ARM',
+    get label() {
+      return __t('ui.settings', '手臂与手部')
+    },
+    help: '手臂、手掌与袖子区域',
+  },
+  {
+    key: 'click.body',
+    code: 'BODY',
+    get label() {
+      return __t('ui.settings', '身体')
+    },
+    help: '胸部、腰部与服装主体区域',
+  },
+  {
+    key: 'click.leg',
+    code: 'LEG',
+    get label() {
+      return __t('ui.settings', '腿部')
+    },
+    help: '腿、脚与鞋袜区域',
+  },
 ]
 const welcomeSlots = [
-  { key: 'welcome.midnight', label: '深夜', range: '00:00–04:00' },
-  { key: 'welcome.morningEarly', label: '清晨', range: '04:00–07:00' },
-  { key: 'welcome.morning', label: '早晨', range: '07:00–11:00' },
-  { key: 'welcome.noon', label: '中午', range: '11:00–13:00' },
-  { key: 'welcome.afternoon', label: '下午', range: '13:00–17:00' },
-  { key: 'welcome.eveningSunset', label: '傍晚', range: '17:00–19:00' },
-  { key: 'welcome.night', label: '夜晚', range: '19:00–24:00' },
+  {
+    key: 'welcome.midnight',
+    get label() {
+      return __t('ui.settings', '深夜')
+    },
+    range: '00:00–04:00',
+  },
+  {
+    key: 'welcome.morningEarly',
+    get label() {
+      return __t('ui.settings', '清晨')
+    },
+    range: '04:00–07:00',
+  },
+  {
+    key: 'welcome.morning',
+    get label() {
+      return __t('ui.settings', '早晨')
+    },
+    range: '07:00–11:00',
+  },
+  {
+    key: 'welcome.noon',
+    get label() {
+      return __t('ui.settings', '中午')
+    },
+    range: '11:00–13:00',
+  },
+  {
+    key: 'welcome.afternoon',
+    get label() {
+      return __t('ui.settings', '下午')
+    },
+    range: '13:00–17:00',
+  },
+  {
+    key: 'welcome.eveningSunset',
+    get label() {
+      return __t('ui.settings', '傍晚')
+    },
+    range: '17:00–19:00',
+  },
+  {
+    key: 'welcome.night',
+    get label() {
+      return __t('ui.settings', '夜晚')
+    },
+    range: '19:00–24:00',
+  },
 ]
 const fragmentCatalog = [
   {
     id: 'components/abilities/workspace',
     name: '工作区操作',
-    description: '让角色常驻了解工作区文件与编辑能力。',
+    get description() {
+      return __t('ui.settings', '让角色常驻了解工作区文件与编辑能力。')
+    },
   },
 ]
 const categoryOrder = [
@@ -145,11 +268,11 @@ function handleAvatarFile(event: Event): void {
   input.value = ''
   if (!file) return
   if (!file.type.startsWith('image/')) {
-    notif.toast('请选择图片文件', 'warning')
+    notif.toast(__t('ui.settings', '请选择图片文件'), 'warning')
     return
   }
   if (file.size > 10 * 1024 * 1024) {
-    notif.toast('原始图片不能超过 10MB', 'warning')
+    notif.toast(__t('ui.settings', '原始图片不能超过 10MB'), 'warning')
     return
   }
   releaseAvatarCropSource()
@@ -236,10 +359,15 @@ async function saveAvatarCrop(): Promise<void> {
       agent.id === form.value!.id ? { ...agent, avatarUrl } : agent,
     )
     cleanSnapshot.value = serializeState()
-    notif.toast('角色头像已更新', 'success')
+    notif.toast(__t('ui.settings', '角色头像已更新'), 'success')
     cancelAvatarCrop()
   } catch (error) {
-    notif.toast(`头像保存失败：${error instanceof Error ? error.message : '未知错误'}`, 'error')
+    notif.toast(
+      __t('ui.settings', '头像保存失败：{0}', [
+        error instanceof Error ? error.message : __t('ui.settings', '未知错误'),
+      ]),
+      'error',
+    )
   } finally {
     avatarUploading.value = false
   }
@@ -348,7 +476,13 @@ const configuredFragments = computed(() => {
   const catalog = [...fragmentCatalog]
   for (const id of configured) {
     if (!catalog.some((item) => item.id === id)) {
-      catalog.push({ id, name: '自定义能力片段', description: `现有配置：${id}` })
+      catalog.push({
+        id,
+        name: '自定义能力片段',
+        get description() {
+          return __t('ui.settings', '现有配置：{0}', [id])
+        },
+      })
     }
   }
   return catalog
@@ -360,14 +494,17 @@ function serializeState(): string {
 
 function classifyTool(tool: AgentTool): string {
   const value = `${tool.name} ${tool.description} ${tool.display?.style ?? ''}`.toLowerCase()
-  if (/read|search|glob|list|info|读取|搜索|查找|目录/.test(value)) return '文件读取'
-  if (/write|edit|save|写入|编辑/.test(value)) return '文件编辑'
-  if (/terminal|shell|command|exec|终端/.test(value)) return '终端执行'
-  if (/screen|image|vision|window|mouse|automation|截图|视觉/.test(value)) return '视觉交互'
-  if (/web|browser|http|url|网页/.test(value)) return '网页访问'
-  if (/system|device|application|系统|应用/.test(value)) return '系统操作'
-  if (/remind|diary|memory|schedule|提醒|日记|记忆/.test(value)) return '提醒记忆'
-  return '其他'
+  if (/read|search|glob|list|info|读取|搜索|查找|目录/.test(value))
+    return __t('ui.settings', '文件读取')
+  if (/write|edit|save|写入|编辑/.test(value)) return __t('ui.settings', '文件编辑')
+  if (/terminal|shell|command|exec|终端/.test(value)) return __t('ui.settings', '终端执行')
+  if (/screen|image|vision|window|mouse|automation|截图|视觉/.test(value))
+    return __t('ui.settings', '视觉交互')
+  if (/web|browser|http|url|网页/.test(value)) return __t('ui.settings', '网页访问')
+  if (/system|device|application|系统|应用/.test(value)) return __t('ui.settings', '系统操作')
+  if (/remind|diary|memory|schedule|提醒|日记|记忆/.test(value))
+    return __t('ui.settings', '提醒记忆')
+  return __t('ui.settings', '其他')
 }
 
 function getObjectRoot(): Record<string, unknown> {
@@ -519,7 +656,12 @@ async function fetchAgents(preferredId?: string): Promise<void> {
     if (next) await loadAgent(next)
     else form.value = null
   } catch (error) {
-    notif.toast(`加载角色图鉴失败：${error instanceof Error ? error.message : '未知错误'}`, 'error')
+    notif.toast(
+      __t('ui.settings', '加载角色图鉴失败：{0}', [
+        error instanceof Error ? error.message : __t('ui.settings', '未知错误'),
+      ]),
+      'error',
+    )
   } finally {
     loadingList.value = false
   }
@@ -549,7 +691,12 @@ async function loadAgent(id: string): Promise<void> {
     migrateReactionSchema()
     cleanSnapshot.value = serializeState()
   } catch (error) {
-    notif.toast(`读取角色档案失败：${error instanceof Error ? error.message : '未知错误'}`, 'error')
+    notif.toast(
+      __t('ui.settings', '读取角色档案失败：{0}', [
+        error instanceof Error ? error.message : __t('ui.settings', '未知错误'),
+      ]),
+      'error',
+    )
   } finally {
     loadingDetail.value = false
   }
@@ -608,9 +755,14 @@ async function saveAgent(): Promise<void> {
     cleanSnapshot.value = serializeState()
     const listResponse = await agentApi.list()
     agents.value = listResponse.data ?? []
-    notif.toast('角色档案已同步', 'success')
+    notif.toast(__t('ui.settings', '角色档案已同步'), 'success')
   } catch (error) {
-    notif.toast(`同步失败：${error instanceof Error ? error.message : '未知错误'}`, 'error')
+    notif.toast(
+      __t('ui.settings', '同步失败：{0}', [
+        error instanceof Error ? error.message : __t('ui.settings', '未知错误'),
+      ]),
+      'error',
+    )
   } finally {
     saving.value = false
   }
@@ -619,7 +771,7 @@ async function saveAgent(): Promise<void> {
 async function createAgent(id?: string): Promise<void> {
   const value = id?.trim().toLowerCase()
   if (!value || !/^[a-z0-9_-]+$/.test(value)) {
-    notif.toast('角色 ID 只能包含小写字母、数字、下划线和连字符', 'warning')
+    notif.toast(__t('ui.settings', '角色 ID 只能包含小写字母、数字、下划线和连字符'), 'warning')
     return
   }
   saving.value = true
@@ -633,9 +785,14 @@ async function createAgent(id?: string): Promise<void> {
     })
     newAgentId.value = ''
     await fetchAgents(value)
-    notif.toast('角色档案已初始化', 'success')
+    notif.toast(__t('ui.settings', '角色档案已初始化'), 'success')
   } catch (error) {
-    notif.toast(`创建失败：${error instanceof Error ? error.message : '未知错误'}`, 'error')
+    notif.toast(
+      __t('ui.settings', '创建失败：{0}', [
+        error instanceof Error ? error.message : __t('ui.settings', '未知错误'),
+      ]),
+      'error',
+    )
   } finally {
     saving.value = false
   }
@@ -644,11 +801,11 @@ async function createAgent(id?: string): Promise<void> {
 async function exportAgent(): Promise<void> {
   if (!form.value || exporting.value) return
   if (!isElectron()) {
-    notif.toast('角色包目录导出仅支持桌面客户端', 'warning')
+    notif.toast(__t('ui.settings', '角色包目录导出仅支持桌面客户端'), 'warning')
     return
   }
   if (isDirty.value) {
-    notif.toast('请先同步当前修改，再导出角色包', 'warning')
+    notif.toast(__t('ui.settings', '请先同步当前修改，再导出角色包'), 'warning')
     return
   }
   exporting.value = true
@@ -659,9 +816,15 @@ async function exportAgent(): Promise<void> {
       canceled: boolean
       path?: string
     } | null
-    if (result && !result.canceled) notif.toast(`角色包已导出到：${result.path}`, 'success')
+    if (result && !result.canceled)
+      notif.toast(__t('ui.settings', '角色包已导出到：{0}', [result.path]), 'success')
   } catch (error) {
-    notif.toast(`导出失败：${error instanceof Error ? error.message : '未知错误'}`, 'error')
+    notif.toast(
+      __t('ui.settings', '导出失败：{0}', [
+        error instanceof Error ? error.message : __t('ui.settings', '未知错误'),
+      ]),
+      'error',
+    )
   } finally {
     exporting.value = false
   }
@@ -673,9 +836,14 @@ async function deleteAgent(): Promise<void> {
   try {
     await agentApi.remove(form.value.id)
     await fetchAgents()
-    notif.toast('用户角色档案已删除', 'success')
+    notif.toast(__t('ui.settings', '用户角色档案已删除'), 'success')
   } catch (error) {
-    notif.toast(`删除失败：${error instanceof Error ? error.message : '未知错误'}`, 'error')
+    notif.toast(
+      __t('ui.settings', '删除失败：{0}', [
+        error instanceof Error ? error.message : __t('ui.settings', '未知错误'),
+      ]),
+      'error',
+    )
   } finally {
     deleting.value = false
   }
@@ -686,7 +854,12 @@ async function initialize(): Promise<void> {
     const response = await agentApi.listTools()
     tools.value = response.data ?? []
   } catch (error) {
-    notif.toast(`加载能力协议失败：${error instanceof Error ? error.message : '未知错误'}`, 'error')
+    notif.toast(
+      __t('ui.settings', '加载能力协议失败：{0}', [
+        error instanceof Error ? error.message : __t('ui.settings', '未知错误'),
+      ]),
+      'error',
+    )
   }
   await fetchAgents()
 }
@@ -703,10 +876,12 @@ onBeforeUnmount(() => {
     <aside class="atlas-index">
       <header class="index-head">
         <div>
-          <b class="index-head-title">角色管理</b>
-          <span>角色图鉴 / {{ agents.length.toString().padStart(2, '0') }}</span>
+          <b class="index-head-title">{{ __t('ui.settings', '角色管理') }}</b>
+          <span>
+            {{ __t('ui.settings', '角色图鉴 /') }} {{ agents.length.toString().padStart(2, '0') }}
+          </span>
         </div>
-        <button title="刷新角色图鉴" @click="fetchAgents(selectedId)">
+        <button :title="__t('ui.settings', '刷新角色图鉴')" @click="fetchAgents(selectedId)">
           <PixelIcon name="refresh" size="xs" :animation="loadingList ? 'spin' : undefined" />
         </button>
       </header>
@@ -733,7 +908,7 @@ onBeforeUnmount(() => {
           <span class="index-meta">
             <strong>{{ agent.name }}</strong>
             <small>{{ agent.id.toUpperCase() }}</small>
-            <em>{{ agent.description || '未记录角色简介' }}</em>
+            <em>{{ agent.description || __t('ui.settings', '未记录角色简介') }}</em>
           </span>
           <span class="index-card-foot">
             <i :class="{ online: selectedId === agent.id }" />
@@ -749,7 +924,10 @@ onBeforeUnmount(() => {
     </aside>
 
     <main class="atlas-workspace">
-      <PEmpty v-if="!loadingDetail && !form" description="角色图鉴暂无档案" />
+      <PEmpty
+        v-if="!loadingDetail && !form"
+        :description="__t('ui.settings', '角色图鉴暂无档案')"
+      />
       <div v-else-if="loadingDetail" class="atlas-loading">
         <PixelIcon name="refresh" size="lg" animation="spin" />
         <span>READING CHARACTER PROFILE</span>
@@ -764,19 +942,22 @@ onBeforeUnmount(() => {
           <div class="profile-identity">
             <span class="eyebrow">CHARACTER / {{ form.id.toUpperCase() }}</span>
             <h1>{{ form.name }}</h1>
-            <p>{{ form.description || '尚未记录角色简介。' }}</p>
+            <p>{{ form.description || __t('ui.settings', '尚未记录角色简介。') }}</p>
             <div class="profile-signals">
               <span>
                 <i />
-                {{ form.isUser ? '用户档案' : '内置档案' }}
+                {{ form.isUser ? __t('ui.settings', '用户档案') : __t('ui.settings', '内置档案') }}
               </span>
               <span>
                 <i />
-                {{ form.isActive ? '系统默认' : '可选角色' }}
+                {{
+                  form.isActive ? __t('ui.settings', '系统默认') : __t('ui.settings', '可选角色')
+                }}
               </span>
               <span>
                 <i />
-                {{ Object.keys(capabilities.channels).length }} 个能力通道
+                {{ Object.keys(capabilities.channels).length }}
+                {{ __t('ui.settings', '个能力通道') }}
               </span>
             </div>
           </div>
@@ -805,8 +986,8 @@ onBeforeUnmount(() => {
             <header class="section-title">
               <span>01</span>
               <div>
-                <h2>身份档案</h2>
-                <p>定义角色在 infOS 中被识别和呈现的方式，不改变核心人格行为。</p>
+                <h2>{{ __t('ui.settings', '身份档案') }}</h2>
+                <p>{{ __t('ui.settings', '设置角色名称、称呼与简介。') }}</p>
               </div>
             </header>
             <div class="identity-layout">
@@ -820,65 +1001,75 @@ onBeforeUnmount(() => {
                 <span v-else>{{ form.name?.[0] || '?' }}</span>
                 <small>
                   <PixelIcon name="image" size="xs" />
-                  {{ avatarUploading ? '头像保存中…' : '点击更换头像' }}
+                  {{
+                    avatarUploading
+                      ? __t('ui.settings', '头像保存中…')
+                      : __t('ui.settings', '点击更换头像')
+                  }}
                 </small>
               </button>
               <div class="data-fields">
                 <label>
-                  <span>角色 ID / IMMUTABLE</span>
+                  <span>{{ __t('ui.settings', '角色 ID / IMMUTABLE') }}</span>
                   <PInput :model-value="form.id" disabled />
                 </label>
                 <label>
-                  <span>角色名称</span>
-                  <PInput v-model="form.name" placeholder="角色显示名称" />
+                  <span>{{ __t('ui.settings', '角色名称') }}</span>
+                  <PInput v-model="form.name" :placeholder="__t('ui.settings', '角色显示名称')" />
                 </label>
                 <label>
-                  <span>对你的称呼</span>
-                  <PInput v-model="form.ownerAppellation" placeholder="例如：主人、老师" />
+                  <span>{{ __t('ui.settings', '对你的称呼') }}</span>
+                  <PInput
+                    v-model="form.ownerAppellation"
+                    :placeholder="__t('ui.settings', '例如：主人、老师')"
+                  />
                 </label>
                 <label class="wide">
-                  <span>角色简介 / 仅用于展示</span>
+                  <span>{{ __t('ui.settings', '角色简介 / 仅用于展示') }}</span>
                   <PTextarea
                     v-model="form.description"
                     :rows="4"
-                    placeholder="简要介绍角色背景，不会注入人格提示词"
+                    :placeholder="__t('ui.settings', '角色背景简介（不作为人格提示词）')"
                   />
                 </label>
               </div>
             </div>
             <div class="subsection-head public-profile-head">
               <div>
-                <h3>对外公开档案</h3>
-                <p>仅供据点中同房间的其他 Agent 读取；不会公开下方完整人格、私聊、记忆或思考。</p>
+                <h3>{{ __t('ui.settings', '对外公开档案') }}</h3>
+                <p>{{ __t('ui.settings', '仅同房间角色可见，私聊与记忆保持私密。') }}</p>
               </div>
             </div>
             <div class="data-fields public-profile-fields">
               <label>
-                <span>性别 / GENDER</span>
-                <PInput v-model="form.publicProfile.gender" placeholder="可留空，例如：女" />
+                <span>{{ __t('ui.settings', '性别 / GENDER') }}</span>
+                <PInput
+                  v-model="form.publicProfile.gender"
+                  :placeholder="__t('ui.settings', '可留空，例如：女')"
+                />
               </label>
               <label>
-                <span>公开身份 / IDENTITY</span>
+                <span>{{ __t('ui.settings', '公开身份 / IDENTITY') }}</span>
                 <PInput
                   v-model="form.publicProfile.identity"
-                  placeholder="例如：AI数字生命体，主人的助手"
+                  :placeholder="__t('ui.settings', '例如：AI数字生命体，主人的助手')"
                 />
               </label>
               <label class="wide">
-                <span>外貌 / APPEARANCE</span>
+                <span>{{ __t('ui.settings', '外貌 / APPEARANCE') }}</span>
                 <PTextarea
                   :model-value="form.publicProfile.appearance ?? ''"
                   :rows="3"
-                  placeholder="其他角色可以观察到的稳定外貌特征"
+                  :placeholder="__t('ui.settings', '其他角色可以观察到的稳定外貌特征')"
                   @update:model-value="form.publicProfile.appearance = $event ?? ''"
                 />
               </label>
               <label class="wide">
-                <span>基本性格 / PERSONALITY</span>
+                <span>{{ __t('ui.settings', '基本性格 / PERSONALITY') }}</span>
                 <PTextarea
                   :model-value="form.publicProfile.personality ?? ''"
                   :rows="3"
-                  placeholder="对外可见的基本性格，不要填写私密设定"
+                  :placeholder="__t('ui.settings', '对外可见的基本性格，不要填写私密设定')"
                   @update:model-value="form.publicProfile.personality = $event ?? ''"
                 />
               </label>
@@ -889,8 +1080,8 @@ onBeforeUnmount(() => {
             <header class="section-title">
               <span>02</span>
               <div>
-                <h2>人格内核</h2>
-                <p>核心人格始终注入；场景表达只在对应主 Agent 通道追加。</p>
+                <h2>{{ __t('ui.settings', '人格内核') }}</h2>
+                <p>{{ __t('ui.settings', '核心人格通用，场景表达按场景生效。') }}</p>
               </div>
             </header>
             <div class="persona-console">
@@ -904,15 +1095,16 @@ onBeforeUnmount(() => {
               <textarea
                 v-model="form.systemPrompt"
                 spellcheck="false"
-                placeholder="描述角色身份、性格、边界、表达方式与长期行为准则。"
+                :placeholder="
+                  __t('ui.settings', '描述角色身份、性格、边界、表达方式与长期行为准则。')
+                "
               />
             </div>
             <div class="subsection-head">
               <div>
-                <h3>场景表达</h3>
+                <h3>{{ __t('ui.settings', '场景表达') }}</h3>
                 <p>
-                  只追加场景约束，不会替换上方核心人格。Social SubApp
-                  使用自己的社交规则，不在这里配置。
+                  {{ __t('ui.settings', '补充此场景的表达方式，保留核心人格。社交规则单独设置。') }}
                 </p>
               </div>
             </div>
@@ -929,7 +1121,11 @@ onBeforeUnmount(() => {
                 <PTextarea
                   :model-value="form.channelPatches[channel.value] ?? ''"
                   :rows="5"
-                  :placeholder="`${channel.label}下需要追加的说话方式或行为边界（可留空）`"
+                  :placeholder="
+                    __t('ui.settings', '{0}下需要追加的说话方式或行为边界（可留空）', [
+                      channel.label,
+                    ])
+                  "
                   @update:model-value="form.channelPatches[channel.value] = $event"
                 />
               </article>
@@ -940,8 +1136,8 @@ onBeforeUnmount(() => {
             <header class="section-title">
               <span>03</span>
               <div>
-                <h2>交互反应</h2>
-                <p>以下字段与 Pet3D 的真实事件枚举一致；动态状态台词会优先覆盖静态档案。</p>
+                <h2>{{ __t('ui.settings', '交互反应') }}</h2>
+                <p>{{ __t('ui.settings', '设置桌宠互动台词。') }}</p>
               </div>
             </header>
             <div class="reaction-grid">
@@ -949,7 +1145,7 @@ onBeforeUnmount(() => {
                 <header>
                   <span>{{ part.code }}</span>
                   <div>
-                    <b>点击{{ part.label }}</b>
+                    <b>{{ __t('ui.settings', '点击') }}{{ part.label }}</b>
                     <small>{{ part.help }}</small>
                   </div>
                   <button @click="addArrayItem(part.key)">+ ADD</button>
@@ -962,26 +1158,28 @@ onBeforeUnmount(() => {
                   <span>{{ String(index + 1).padStart(2, '0') }}</span>
                   <PInput
                     :model-value="line"
-                    placeholder="输入随机反应台词"
+                    :placeholder="__t('ui.settings', '输入随机反应台词')"
                     @update:model-value="updateArrayItem(part.key, index, $event)"
                   />
                   <button @click="removeArrayItem(part.key, index)">×</button>
                 </div>
-                <p v-if="!getStringArray(part.key).length">暂无静态反应，Pet3D 将使用默认台词。</p>
+                <p v-if="!getStringArray(part.key).length">
+                  {{ __t('ui.settings', '暂无静态反应，Pet3D 将使用默认台词。') }}
+                </p>
               </article>
             </div>
             <div class="subsection-head">
               <div>
-                <h3>环境反应</h3>
-                <p>闲置自语使用随机池；返回桌面问候为单条兜底，动态 backMessages 优先。</p>
+                <h3>{{ __t('ui.settings', '环境反应') }}</h3>
+                <p>{{ __t('ui.settings', '闲置时随机选用台词。') }}</p>
               </div>
             </div>
             <article class="reaction-module full">
               <header>
                 <span>IDLE</span>
                 <div>
-                  <b>闲置自语</b>
-                  <small>Pet3D 空闲 30–60 秒后随机显示</small>
+                  <b>{{ __t('ui.settings', '闲置自语') }}</b>
+                  <small>{{ __t('ui.settings', 'Pet3D 空闲 30–60 秒后随机显示') }}</small>
                 </div>
                 <button @click="addArrayItem('idleMessages')">+ ADD</button>
               </header>
@@ -1001,19 +1199,21 @@ onBeforeUnmount(() => {
             <article class="single-reaction">
               <span>BACK</span>
               <div>
-                <b>返回桌面问候</b>
-                <small>页面从后台重新可见时显示；动态状态问候优先。</small>
+                <b>{{ __t('ui.settings', '返回桌面问候') }}</b>
+                <small>
+                  {{ __t('ui.settings', '页面从后台重新可见时显示；动态状态问候优先。') }}
+                </small>
               </div>
               <PInput
                 :model-value="getString('visibilityBack')"
-                placeholder="例如：欢迎回来。"
+                :placeholder="__t('ui.settings', '例如：欢迎回来。')"
                 @update:model-value="setString('visibilityBack', $event)"
               />
             </article>
             <div class="subsection-head">
               <div>
-                <h3>时段问候</h3>
-                <p>进入 Pet3D 时按本机时间选择一条对应问候。</p>
+                <h3>{{ __t('ui.settings', '时段问候') }}</h3>
+                <p>{{ __t('ui.settings', '进入 Pet3D 时按本机时间选择一条对应问候。') }}</p>
               </div>
             </div>
             <div class="welcome-table">
@@ -1022,7 +1222,7 @@ onBeforeUnmount(() => {
                 <b>{{ slot.label }}</b>
                 <PInput
                   :model-value="getString(slot.key)"
-                  placeholder="可留空"
+                  :placeholder="__t('ui.settings', '可留空')"
                   @update:model-value="setString(slot.key, $event)"
                 />
               </label>
@@ -1033,8 +1233,8 @@ onBeforeUnmount(() => {
             <header class="section-title">
               <span>04</span>
               <div>
-                <h2>能力协议</h2>
-                <p>这里只控制主 Agent。Social SubApp 使用独立工具清单，不受此矩阵控制。</p>
+                <h2>{{ __t('ui.settings', '能力协议') }}</h2>
+                <p>{{ __t('ui.settings', '设置主助手的工具；社交工具单独管理。') }}</p>
               </div>
             </header>
             <div class="channel-rail">
@@ -1055,7 +1255,7 @@ onBeforeUnmount(() => {
             <div class="system-protocol">
               <span>SYS</span>
               <div>
-                <b>系统执行协议</b>
+                <b>{{ __t('ui.settings', '常驻工具') }}</b>
                 <p v-if="systemProtocolTools.length">
                   <span
                     v-for="tool in systemProtocolTools"
@@ -1065,14 +1265,14 @@ onBeforeUnmount(() => {
                     {{ tool.display?.label || tool.name }}
                   </span>
                 </p>
-                <p v-else>当前 Registry 尚未注册系统协议工具。</p>
+                <p v-else>{{ __t('ui.settings', '暂无常驻工具。') }}</p>
               </div>
               <strong>LOCKED / {{ systemProtocolTools.length }}</strong>
             </div>
             <div class="subsection-head">
               <div>
-                <h3>工具权限</h3>
-                <p>只显示 Registry 声明兼容当前场景的工具；角色能力是会话工具开关的上限。</p>
+                <h3>{{ __t('ui.settings', '工具权限') }}</h3>
+                <p>{{ __t('ui.settings', '勾选角色在此场景可用的工具。') }}</p>
               </div>
             </div>
             <div class="tool-table">
@@ -1102,8 +1302,8 @@ onBeforeUnmount(() => {
               <section>
                 <div class="subsection-head">
                   <div>
-                    <h3>专业技能</h3>
-                    <p>Agent 需要时通过“加载技能”读取完整工作流，并临时解锁所需工具。</p>
+                    <h3>{{ __t('ui.settings', '专业技能') }}</h3>
+                    <p>{{ __t('ui.settings', '角色按需加载技能与所需工具。') }}</p>
                   </div>
                 </div>
                 <label
@@ -1121,13 +1321,15 @@ onBeforeUnmount(() => {
                     <small>{{ skill.description || skill.id }}</small>
                   </span>
                 </label>
-                <p v-if="!skillOptions.length" class="empty-data">暂无已安装 Skill</p>
+                <p v-if="!skillOptions.length" class="empty-data">
+                  {{ __t('ui.settings', '暂无已安装 Skill') }}
+                </p>
               </section>
               <section>
                 <div class="subsection-head">
                   <div>
-                    <h3>常驻能力说明</h3>
-                    <p>每轮自动注入，适合简短能力认知；路径仅作为技术来源展示。</p>
+                    <h3>{{ __t('ui.settings', '常驻能力说明') }}</h3>
+                    <p>{{ __t('ui.settings', '供角色随时参考的简短能力说明。') }}</p>
                   </div>
                 </div>
                 <label
@@ -1154,8 +1356,8 @@ onBeforeUnmount(() => {
             <header class="section-title">
               <span>05</span>
               <div>
-                <h2>运行来源</h2>
-                <p>展示角色档案的加载来源、默认状态与资源状态。</p>
+                <h2>{{ __t('ui.settings', '运行来源') }}</h2>
+                <p>{{ __t('ui.settings', '查看角色来源与资源状态。') }}</p>
               </div>
             </header>
             <div class="runtime-grid">
@@ -1165,8 +1367,8 @@ onBeforeUnmount(() => {
                 <p>
                   {{
                     form.isUser
-                      ? '用户数据目录中的可写角色档案。'
-                      : '随 infOS 提供的内置角色资源；首次编辑会创建用户覆盖层。'
+                      ? __t('ui.settings', '自定义角色')
+                      : __t('ui.settings', '内置角色，可自定义修改。')
                   }}
                 </p>
               </article>
@@ -1176,28 +1378,25 @@ onBeforeUnmount(() => {
                 <p>
                   {{
                     form.isActive
-                      ? '无明确角色上下文时使用的系统默认角色。'
-                      : '可由窗口或 Thread 选择使用。'
+                      ? __t('ui.settings', '系统默认角色')
+                      : __t('ui.settings', '可在会话中选择')
                   }}
                 </p>
               </article>
               <article>
                 <span>PORTRAIT</span>
                 <b>{{ avatarSrc ? 'RESOURCE ONLINE' : 'NO RESOURCE' }}</b>
-                <p>头像由角色资源包提供，当前页面不伪造或上传替代资源。</p>
+                <p>{{ __t('ui.settings', '角色头像') }}</p>
               </article>
               <article>
                 <span>SOCIAL</span>
                 <b>SUBAPP ISOLATED</b>
-                <p>社交互动由 Social SubApp 独立承载，统一管理账号绑定、社交工具与贴纸发送。</p>
+                <p>{{ __t('ui.settings', '在「社交配置」中管理账号与社交功能。') }}</p>
               </article>
             </div>
             <div class="runtime-note">
               <span>CONFIG CONTRACT</span>
-              <p>
-                角色档案专注定义人格、称呼、视觉资源与 Pet3D
-                静态反应，其余系统能力由各自模块负责，保持档案轻量而专注。
-              </p>
+              <p>{{ __t('ui.settings', '工具、模型与社交账号可在对应页面设置。') }}</p>
             </div>
           </section>
         </div>
@@ -1207,7 +1406,11 @@ onBeforeUnmount(() => {
     <aside v-if="form" class="archive-rail" :class="{ open: archiveRailOpen }">
       <button
         class="rail-handle"
-        :aria-label="archiveRailOpen ? '收起档案状态栏' : '展开档案状态栏'"
+        :aria-label="
+          archiveRailOpen
+            ? __t('ui.settings', '收起档案状态栏')
+            : __t('ui.settings', '展开档案状态栏')
+        "
         @click="archiveRailOpen = !archiveRailOpen"
       >
         <PixelIcon :name="archiveRailOpen ? 'chevron-right' : 'chevron-left'" size="xs" />
@@ -1215,7 +1418,7 @@ onBeforeUnmount(() => {
       </button>
       <header class="rail-head">
         <span>ARCHIVE CONTROL</span>
-        <b>档案状态与同步</b>
+        <b>{{ __t('ui.settings', '档案状态与同步') }}</b>
       </header>
 
       <section class="rail-sync" :class="{ dirty: isDirty }">
@@ -1223,19 +1426,27 @@ onBeforeUnmount(() => {
           <i />
           <span>{{ isDirty ? 'UNSYNCED DATA' : 'ARCHIVE READY' }}</span>
         </div>
-        <h3>{{ isDirty ? '档案存在未同步修改' : '角色档案已同步' }}</h3>
+        <h3>
+          {{
+            isDirty
+              ? __t('ui.settings', '档案存在未同步修改')
+              : __t('ui.settings', '角色档案已同步')
+          }}
+        </h3>
         <p>
           {{
             isDirty
-              ? '修改只保留在当前编辑会话中。同步后才会写入角色档案。'
-              : '当前显示内容与角色资源中的配置一致。'
+              ? __t('ui.settings', '点击「同步档案」保存修改。')
+              : __t('ui.settings', '所有修改已保存。')
           }}
         </p>
         <div class="rail-sync__actions">
           <PButton variant="secondary" :disabled="!isDirty || saving" @click="discardChanges">
-            放弃修改
+            {{ __t('ui.settings', '放弃修改') }}
           </PButton>
-          <PButton :loading="saving" :disabled="!isDirty" @click="saveAgent">同步档案</PButton>
+          <PButton :loading="saving" :disabled="!isDirty" @click="saveAgent">
+            {{ __t('ui.settings', '同步档案') }}
+          </PButton>
         </div>
       </section>
 
@@ -1245,7 +1456,7 @@ onBeforeUnmount(() => {
           <b>{{ profileCompletion }}%</b>
         </header>
         <div><i :style="{ width: `${profileCompletion}%` }" /></div>
-        <p>根据头像、名称、简介、称呼和人格内核估算。</p>
+        <p>{{ __t('ui.settings', '根据头像、名称、简介、称呼和人格内核估算。') }}</p>
       </section>
 
       <section class="rail-stats">
@@ -1253,28 +1464,28 @@ onBeforeUnmount(() => {
           <PixelIcon name="thought" size="sm" />
           <span>
             <b>{{ promptStats.chars }}</b>
-            <small>人格字符</small>
+            <small>{{ __t('ui.settings', '人格字符') }}</small>
           </span>
         </article>
         <article>
           <PixelIcon name="chat" size="sm" />
           <span>
             <b>{{ reactionCount }}</b>
-            <small>交互反应</small>
+            <small>{{ __t('ui.settings', '交互反应') }}</small>
           </span>
         </article>
         <article>
           <PixelIcon name="tool" size="sm" />
           <span>
             <b>{{ capabilityCount }}</b>
-            <small>业务工具</small>
+            <small>{{ __t('ui.settings', '业务工具') }}</small>
           </span>
         </article>
         <article>
           <PixelIcon name="puzzle" size="sm" />
           <span>
             <b>{{ skillOptions.length }}</b>
-            <small>可选技能</small>
+            <small>{{ __t('ui.settings', '可选技能') }}</small>
           </span>
         </article>
       </section>
@@ -1299,16 +1510,20 @@ onBeforeUnmount(() => {
       <section class="rail-source">
         <span>ARCHIVE SOURCE</span>
         <b>{{ form.isUser ? 'USER DATA' : 'INFOS CORE' }}</b>
-        <p>{{ form.isUser ? '可写用户角色档案' : '编辑后创建用户覆盖层' }}</p>
+        <p>
+          {{
+            form.isUser ? __t('ui.settings', '自定义角色') : __t('ui.settings', '内置角色 · 可编辑')
+          }}
+        </p>
       </section>
 
       <button class="rail-export" :disabled="exporting || isDirty" @click="exportAgent">
         <PixelIcon name="download" size="xs" />
-        {{ exporting ? '正在生成角色包…' : '导出角色包' }}
+        {{ exporting ? __t('ui.settings', '正在生成角色包…') : __t('ui.settings', '导出角色包') }}
       </button>
       <button v-if="form.isUser" class="rail-danger" @click="deleteDialog = true">
         <PixelIcon name="trash" size="xs" />
-        删除用户档案
+        {{ __t('ui.settings', '删除用户档案') }}
       </button>
     </aside>
 
@@ -1321,13 +1536,13 @@ onBeforeUnmount(() => {
       >
         <header>
           <span>UNSYNCED CHARACTER DATA</span>
-          <button aria-label="关闭" @click="cancelAgentSwitch">×</button>
+          <button :aria-label="__t('ui.settings', '关闭')" @click="cancelAgentSwitch">×</button>
         </header>
         <div class="decision-body">
           <span class="decision-icon"><PixelIcon name="warning" size="lg" /></span>
           <div>
-            <h2 id="switch-decision-title">当前角色档案尚未同步</h2>
-            <p>切换到其他角色前，请决定如何处理当前修改。放弃后无法恢复。</p>
+            <h2 id="switch-decision-title">{{ __t('ui.settings', '当前角色档案尚未同步') }}</h2>
+            <p>{{ __t('ui.settings', '是否保存当前修改？') }}</p>
           </div>
         </div>
         <div class="decision-target">
@@ -1335,9 +1550,15 @@ onBeforeUnmount(() => {
           <b>{{ agents.find((item) => item.id === pendingAgentId)?.name || pendingAgentId }}</b>
         </div>
         <footer>
-          <PButton variant="danger" @click="discardAndSwitch">放弃并切换</PButton>
-          <PButton variant="secondary" @click="cancelAgentSwitch">继续编辑</PButton>
-          <PButton :loading="saving" @click="saveAndSwitch">先同步再切换</PButton>
+          <PButton variant="danger" @click="discardAndSwitch">
+            {{ __t('ui.settings', '放弃并切换') }}
+          </PButton>
+          <PButton variant="secondary" @click="cancelAgentSwitch">
+            {{ __t('ui.settings', '继续编辑') }}
+          </PButton>
+          <PButton :loading="saving" @click="saveAndSwitch">
+            {{ __t('ui.settings', '先同步再切换') }}
+          </PButton>
         </footer>
       </section>
     </div>
@@ -1354,9 +1575,13 @@ onBeforeUnmount(() => {
         <header>
           <div>
             <span>AVATAR RESOURCE</span>
-            <h2 id="avatar-crop-title">裁切角色头像</h2>
+            <h2 id="avatar-crop-title">{{ __t('ui.settings', '裁切角色头像') }}</h2>
           </div>
-          <button :disabled="avatarUploading" aria-label="关闭裁切窗口" @click="cancelAvatarCrop">
+          <button
+            :disabled="avatarUploading"
+            :aria-label="__t('ui.settings', '关闭裁切窗口')"
+            @click="cancelAvatarCrop"
+          >
             ×
           </button>
         </header>
@@ -1371,13 +1596,13 @@ onBeforeUnmount(() => {
             <img
               :src="avatarCropSource"
               :style="avatarCropImageStyle"
-              alt="待裁切头像"
+              :alt="__t('ui.settings', '待裁切头像')"
               @load="handleAvatarCropImageLoad"
             />
             <i class="avatar-crop-grid" />
           </div>
           <label class="avatar-crop-zoom">
-            <span>缩放</span>
+            <span>{{ __t('ui.settings', '缩放') }}</span>
             <input
               v-model.number="avatarCropScale"
               type="range"
@@ -1388,30 +1613,34 @@ onBeforeUnmount(() => {
             />
             <b>{{ Math.round(avatarCropScale * 100) }}%</b>
           </label>
-          <p>拖动图片调整位置。保存后将以 512×512 PNG 写入当前角色的资源目录。</p>
+          <p>{{ __t('ui.settings', '拖动调整位置，保存为 512×512 头像。') }}</p>
         </div>
         <footer>
           <PButton variant="secondary" :disabled="avatarUploading" @click="cancelAvatarCrop">
-            取消
+            {{ __t('ui.settings', '取消') }}
           </PButton>
-          <PButton :loading="avatarUploading" @click="saveAvatarCrop">保存头像</PButton>
+          <PButton :loading="avatarUploading" @click="saveAvatarCrop">
+            {{ __t('ui.settings', '保存头像') }}
+          </PButton>
         </footer>
       </section>
     </div>
 
     <PDialog
       v-model="createDialog"
-      title="初始化角色档案"
+      :title="__t('ui.settings', '初始化角色档案')"
       mode="prompt"
-      placeholder="唯一 ID，例如 my_agent"
-      confirm-text="创建"
+      :placeholder="__t('ui.settings', '唯一 ID，例如 my_agent')"
+      :confirm-text="__t('ui.settings', '创建')"
       @confirm="createAgent"
     />
     <PDialog
       v-model="deleteDialog"
-      title="删除角色档案"
-      :message="`确定删除「${form?.name ?? ''}」的用户档案吗？此操作无法撤销。`"
-      confirm-text="删除"
+      :title="__t('ui.settings', '删除角色档案')"
+      :message="
+        __t('ui.settings', '确定删除「{0}」的用户档案吗？此操作无法撤销。', [form?.name ?? ''])
+      "
+      :confirm-text="__t('ui.settings', '删除')"
       confirm-variant="danger"
       @confirm="deleteAgent"
     />

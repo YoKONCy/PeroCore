@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * 虚拟路径管理器
  *
@@ -81,11 +82,12 @@ export class PathResolver {
     this.ensureDir(env.dataDir)
     this.ensureDir(env.tempDir)
 
-    logger.info('虚拟路径管理器初始化完成', {
+    logger.info(__t('logs.core', '虚拟路径管理器初始化完成'), {
       '@app': env.appRoot,
       '@data': env.dataDir,
       '@temp': env.tempDir,
-      '@workshop': this.workshopRoots.length > 0 ? this.workshopRoots : '(不可用)',
+      '@workshop':
+        this.workshopRoots.length > 0 ? this.workshopRoots : __t('logs.core', '(不可用)'),
     })
   }
 
@@ -199,7 +201,7 @@ export class PathResolver {
         mkdirSync(dirPath, { recursive: true })
       }
     } catch (err) {
-      logger.warn(`无法创建目录: ${dirPath}`, { error: err })
+      logger.warn(__t('logs.core', '无法创建目录: {0}', [dirPath]), { error: err })
     }
   }
 }

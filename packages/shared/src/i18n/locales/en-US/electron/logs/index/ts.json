@@ -1,0 +1,17 @@
+{
+  "未处理的 Promise 拒绝: {0}": "Unhandled Promise rejection: {0}",
+  "Windows 任务栏身份：{0}；程序路径：{1}": "Windows taskbar identity: {0}; program path: {1}",
+  "通过 Steam 重启，当前进程退出...": "Restarted via Steam, the current process exited...",
+  "Steam 初始化: {0}": "Steam initialization: {0}",
+  "Steam 初始化异常 (已跳过): {0}": "Steam initialization exception (skipped): {0}",
+  "应用启动完成（Daemon 连接模式）": "application startup completed (Daemon connection mode)",
+  "App whenReady 失败: {0}": "App whenReady failed: {0}",
+  "关闭应用标签失败，已取消退出：{0}": "Failed to close application tab, exit canceled: {0}",
+  "正在执行退出清理...": "is executing exit cleanup...",
+  "停止托管 {0} 失败，继续退出清理：{1}": "failed to stop hosting {0}, continue to exit cleanup: {1}",
+  "退出清理失败: {0}": "exit cleanup failed: {0}",
+  "停止 NapCat 失败：{0}": "Stop NapCat failed: {0}",
+  "关闭 Pictoria 存活连接失败：{0}": "Shut down Pictoria Survival connection failed: {0}",
+  "关闭 Arca 存活连接失败：{0}": "Close Arca survival connection failed: {0}",
+  "第二个实例启动请求，激活现有窗口": "Second instance start request, activate existing window"
+}

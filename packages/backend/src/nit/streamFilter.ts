@@ -123,12 +123,12 @@ export class NitStreamFilter {
 /**
  * Thinking 块流式过滤器
  *
- * 隐藏 LLM 输出中的 `<think>...</think>` 块。
+ * 解析 `<selfMinding>...</selfMinding>` 碎碎念块，兼容旧 think / thinking / thought 标签。
  *
  * 流式处理要点：
- * - `<think>` 开始标签可能在 chunk 中间被截断，用"保留末尾"策略防止误判
- * - 进入块内后丢弃所有内容，直到找到 `</think>`
- * - 未闭合的块（流结束仍未遇到 `</think>`）整体丢弃（flush 处理）
+ * - 标签可能跨 chunk 拆分，保留可能尚未完整的开始标签
+ * - 块内内容通过独立事件发送，不混入可见正文
+ * - 未闭合的块在 flush 时结束，内容仍保留在碎碎念中
  */
 export type ThinkingStreamEvent =
   | { type: 'text'; text: string }
@@ -136,13 +136,15 @@ export type ThinkingStreamEvent =
   | { type: 'delta'; delta: string }
   | { type: 'end' }
 
+type ThinkingTag = 'selfminding' | 'think' | 'thinking' | 'thought'
+
 export class ThinkingStreamFilter {
   private buffer = ''
-  private activeTag: 'think' | 'thinking' | 'thought' | null = null
+  private activeTag: ThinkingTag | null = null
   private events: ThinkingStreamEvent[] = []
   private pendingDelta = ''
-  private readonly START_TAG = /<(think|thinking|thought)(?:\s[^>]*)?>/i
-  private readonly PARTIAL_TAG_RESERVE = '<thinking'.length - 1
+  private readonly START_TAG = /<(selfMinding|think|thinking|thought)(?:\s[^>]*)?>/i
+  private readonly PARTIAL_TAG_RESERVE = '<selfMinding>'.length - 1
 
   private pushDelta(delta: string, force = false): void {
     this.pendingDelta += delta
@@ -167,7 +169,14 @@ export class ThinkingStreamFilter {
       if (!this.activeTag) {
         const start = this.START_TAG.exec(this.buffer)
         if (!start || start.index === undefined) {
-          const safeLen = this.buffer.length - this.PARTIAL_TAG_RESERVE
+          let safeLen = this.buffer.length - this.PARTIAL_TAG_RESERVE
+          // 带属性的开始标签也可能跨块，不能提前把标签前半段发到正文。
+          const tagStart = this.buffer.lastIndexOf('<')
+          if (
+            tagStart >= 0 &&
+            /^<(selfMinding|think|thinking|thought)\s[^>]*$/i.test(this.buffer.slice(tagStart))
+          )
+            safeLen = Math.min(safeLen, tagStart)
           if (safeLen > 0) {
             const text = this.buffer.slice(0, safeLen)
             output += text
@@ -180,7 +189,7 @@ export class ThinkingStreamFilter {
         output += prefix
         this.pushText(prefix)
         this.buffer = this.buffer.slice(start.index + start[0].length)
-        this.activeTag = start[1]!.toLowerCase() as 'think' | 'thinking' | 'thought'
+        this.activeTag = start[1]!.toLowerCase() as ThinkingTag
         this.events.push({ type: 'start' })
       } else {
         const endTag = `</${this.activeTag}>`

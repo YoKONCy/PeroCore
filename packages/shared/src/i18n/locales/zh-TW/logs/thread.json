@@ -1,0 +1,17 @@
+{
+  "Thread 已创建: id={0}, agent={1}, channel={2}": "Thread 已創建: id={0}, agent={1}, channel={2}",
+  "Thread ContextPolicy 已更新: thread={0}, {1}": "Thread ContextPolicy 已更新: thread={0}, {1}",
+  "用户消息已追加: thread={0}, msgId={1}": "用戶消息已追加: thread={0}, msgId={1}",
+  "Agent 回复已追加: thread={0}, msgId={1}": "Agent 回覆已追加: thread={0}, msgId={1}",
+  "系统消息已追加: thread={0}, msgId={1}": "系統消息已追加: thread={0}, msgId={1}",
+  "Thread 已改名: thread={0}": "Thread 已改名: thread={0}",
+  "对话已链式回滚: thread={0}, pairs={1}, messages={2}": "對話已鏈式回滾: thread={0}, pairs={1}, messages={2}",
+  "Thread 已软删除，文件保持原样: thread={0}, pairs={1}": "Thread 已軟刪除，文件保持原樣: thread={0}, pairs={1}",
+  "已软删除退役 Channel 会话: channel={0}, count={1}": "已軟刪除退役 Channel 會話: channel={0}, count={1}",
+  "会话已删除，但酒馆变量清理失败": "會話已刪除，但酒館變量清理失敗",
+  "Thread 已软删除: thread={0}, messages={1}": "Thread 已軟刪除: thread={0}, messages={1}",
+  "消息已软删除: msgId={0}": "消息已軟刪除: msgId={0}",
+  "对话对已软删除: msgId={0}, count={1}": "對話對已軟刪除: msgId={0}, count={1}",
+  "消息已编辑: msgId={0}": "消息已編輯: msgId={0}",
+  "摘要已更新: thread={0}, covers={1} 条消息": "摘要已更新: thread={0}, covers={1} 條消息"
+}

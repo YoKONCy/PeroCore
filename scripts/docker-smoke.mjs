@@ -1,3 +1,4 @@
+import { t as __t } from './i18n.mjs'
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -102,5 +103,12 @@ function readFileOrDirectory(relative) {
   assert.ok(existsSync(path.join(root, relative)), `Docker 构建输入不存在：${relative}`)
 }
 
-console.log('Docker 模拟冒烟通过：构建定义、运行用户、卷、健康检查、代理与发布引用均已校准。')
-console.log('说明：本脚本不执行 Docker Build、Compose Up 或 Registry Push。')
+console.log(
+  __t(
+    'scripts.docker-smoke',
+    'Docker 模拟冒烟通过：构建定义、运行用户、卷、健康检查、代理与发布引用均已校准。',
+  ),
+)
+console.log(
+  __t('scripts.docker-smoke', '说明：本脚本不执行 Docker Build、Compose Up 或 Registry Push。'),
+)

@@ -1,3 +1,4 @@
+import { t as __t } from './i18n'
 /** 子应用兼容层组合自治内核、协议、页面与受控生命周期。 */
 import { randomUUID } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
@@ -80,7 +81,7 @@ export class ArcaApplicationHost {
           appId: 'infos.arca',
           instanceId: this.instanceId,
           name: 'Arca',
-          appVersion: '0.9.4',
+          appVersion: '0.9.5',
           adapterVersion: '1.0.0',
           state: 'ready',
           endpoints: arcaAdapterManifest.endpoints,
@@ -246,7 +247,7 @@ export class ArcaApplicationHost {
           : this.stop().then(() => this.options.onStopped?.())
       ).catch((error) => {
         this.stopRequested = false
-        console.error('Arca 停止失败：', error)
+        console.error(__t('apps.arca.logs', 'Arca 停止失败：'), error)
       })
     }, 150)
   }

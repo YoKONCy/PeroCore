@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 import { resourceFromToolResult } from '@infos/shared'
 import { splitSpokenReply } from '../nit/spokenReplyFilter'
 import type {
@@ -23,6 +24,30 @@ export class ConversationSurfaceProjector {
     const messageContent =
       message.role === 'assistant' ? splitSpokenReply(message.content).content : message.content
     const contentBlocks = message.contentBlocks ?? []
+    const auditCalls = message.toolCalls ?? []
+    const knownCalls = new Set(
+      contentBlocks.filter((block) => block.kind === 'tool').map((block) => block.callId),
+    )
+    const inferredParents = new Map<string, string>()
+    let pendingLegacyCalls: string[] = []
+    // 旧 NIT 已有真实内部审计记录，但缺少父调用关联；其完成记录紧邻外层脚本记录之前。
+    for (const call of auditCalls) {
+      if (call.callId?.startsWith('nit-') && !call.parentCallId)
+        pendingLegacyCalls.push(call.callId)
+      if (call.name === 'run_script' && call.callId) {
+        for (const id of pendingLegacyCalls) inferredParents.set(id, call.callId)
+        pendingLegacyCalls = []
+      }
+    }
+    const supplementalCalls = new Map<string, ConversationMessageProjection['toolCalls']>()
+    for (const call of auditCalls) {
+      if (!call.callId || knownCalls.has(call.callId)) continue
+      const parentCallId = call.parentCallId ?? inferredParents.get(call.callId)
+      if (!parentCallId || !knownCalls.has(parentCallId)) continue
+      const list = supplementalCalls.get(parentCallId) ?? []
+      if (!list.some((item) => item.callId === call.callId)) list.push({ ...call, parentCallId })
+      supplementalCalls.set(parentCallId, list)
+    }
     if (contentBlocks.length > 0) {
       for (const block of contentBlocks) {
         if (block.kind === 'model_retry') {
@@ -92,6 +117,18 @@ export class ConversationSurfaceProjector {
           continue
         }
         nodes.push(...this.projectToolBlock(surfaceId, message.revision, block))
+        for (const call of supplementalCalls.get(block.callId) ?? []) {
+          nodes.push(
+            ...this.projectToolBlock(surfaceId, message.revision, {
+              ...call,
+              blockId: `tool:${call.callId}`,
+              callId: call.callId!,
+              kind: 'tool',
+              sequence: block.sequence,
+              turn: block.turn,
+            }),
+          )
+        }
       }
     } else {
       const failureOnly =
@@ -112,7 +149,7 @@ export class ConversationSurfaceProjector {
           ),
         )
       }
-      for (const [index, call] of message.toolCalls.entries()) {
+      for (const [index, call] of auditCalls.entries()) {
         const callId = call.callId ?? `tool-${index}`
         nodes.push(
           ...this.projectToolBlock(surfaceId, message.revision, {
@@ -122,6 +159,7 @@ export class ConversationSurfaceProjector {
             turn: 0,
             callId,
             ...call,
+            parentCallId: call.parentCallId ?? inferredParents.get(callId),
           }),
         )
       }
@@ -149,7 +187,9 @@ export class ConversationSurfaceProjector {
       nodes.push(
         this.node(surfaceId, 'status', 'stable', message.revision, 'status', {
           state: 'paused',
-          message: `桌面操作已暂停：${message.executionPause.message}`,
+          message: __t('server.projections', '桌面操作已暂停：{0}', [
+            message.executionPause.message,
+          ]),
         } satisfies import('@infos/shared').StatusSurfaceProps),
       )
     } else if (message.status === 'failed' || message.status === 'interrupted') {
@@ -191,7 +231,7 @@ export class ConversationSurfaceProjector {
     block: Extract<import('@infos/shared').ConversationContentBlock, { kind: 'tool' }>,
   ): SurfaceNode[] {
     const resource = block.isError ? null : resourceFromToolResult(block.name, block.result)
-    if (resource)
+    if (resource && !block.parentCallId)
       return [
         this.node(
           surfaceId,
@@ -211,6 +251,7 @@ export class ConversationSurfaceProjector {
         block.blockId,
         {
           callId: block.callId,
+          parentCallId: block.parentCallId,
           name: block.name,
           args: block.args,
           state: block.result === undefined ? 'calling' : block.isError ? 'failed' : 'completed',

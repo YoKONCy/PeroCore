@@ -299,6 +299,52 @@ describe('AgentManager', () => {
     })
   })
 
+  it('旧默认头像副本应使用新官方头像，导出时也使用新图且不改写用户文件', () => {
+    createAgent(builtinDir, 'pero', { name: 'Pero' }, { 'avatar.png': '新版官方头像' })
+    createAgent(dataDir, 'pero', { name: '我的 Pero' })
+    const legacyAvatar = readFileSync(
+      new URL('../../../../../../.github/character-art/legacy-avatars/pero.jpg', import.meta.url),
+    )
+    const userAvatarPath = join(dataDir, 'pero', 'avatar.jpg')
+    writeFileSync(userAvatarPath, legacyAvatar)
+    const manager = new AgentManager(createResolver(builtinDir, dataDir))
+
+    expect(manager.getAgent('pero')?.name).toBe('我的 Pero')
+    expect(manager.getAvatarData('pero')?.buffer.toString()).toBe('新版官方头像')
+    expect(manager.getAvatarData('pero')?.mime).toBe('image/png')
+    expect(manager.getAvatarUrl('pero')).toMatch(/^\/agents\/pero\/avatar\?v=/)
+    expect(readFileSync(userAvatarPath).equals(legacyAvatar)).toBe(true)
+    const exported = manager.exportAgentPackage('pero')
+    expect(exported.files.some((file) => file.path === 'avatar.jpg')).toBe(false)
+    expect(
+      Buffer.from(
+        exported.files.find((file) => file.path === 'avatar.png')!.contentBase64,
+        'base64',
+      ).toString(),
+    ).toBe('新版官方头像')
+
+    // 新资源不可用时仍保留旧头像，避免回退逻辑导致头像消失。
+    rmSync(join(builtinDir, 'pero', 'avatar.png'))
+    manager.reloadAgents()
+    expect(manager.getAvatarData('pero')?.buffer.equals(legacyAvatar)).toBe(true)
+  })
+
+  it('用户上传的不同头像不得被官方头像更新覆盖', () => {
+    createAgent(builtinDir, 'pero', { name: 'Pero' }, { 'avatar.png': '新版官方头像' })
+    createAgent(dataDir, 'pero', { name: '我的 Pero' }, { 'avatar.png': '用户自选头像' })
+    const manager = new AgentManager(createResolver(builtinDir, dataDir))
+
+    expect(manager.getAvatarData('pero')?.buffer.toString()).toBe('用户自选头像')
+    expect(manager.getAvatarUrl('pero')).toBe('/agents/pero/avatar')
+    const exported = manager.exportAgentPackage('pero')
+    expect(
+      Buffer.from(
+        exported.files.find((file) => file.path === 'avatar.png')!.contentBase64,
+        'base64',
+      ).toString(),
+    ).toBe('用户自选头像')
+  })
+
   it('应当读取头像数据并识别用户 Agent', () => {
     createAgent(builtinDir, 'pero', { name: 'Pero' }, { 'avatar.webp': 'webp-data' })
     createAgent(dataDir, 'custom', { name: 'Custom' })

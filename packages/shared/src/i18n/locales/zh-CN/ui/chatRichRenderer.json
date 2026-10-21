@@ -1,0 +1,3 @@
+{
+  "<div class=\"chat-code-block\"><div class=\"chat-code-head\"><span>{0}</span><button type=\"button\" data-copy-code>复制</button></div><pre><code class=\"hljs language-{1}\">{2}</code></pre></div>": "<div class=\"chat-code-block\"><div class=\"chat-code-head\"><span>{0}</span><button type=\"button\" data-copy-code>复制</button></div><pre><code class=\"hljs language-{1}\">{2}</code></pre></div>"
+}

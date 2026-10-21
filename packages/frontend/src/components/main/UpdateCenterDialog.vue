@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { getDisplayLocale } from '../../i18n/index'
+
+import { t as __t } from '../../i18n/index'
+
 /**
  * UpdateCenterDialog — Electron Release 更新二级页面
  *
@@ -57,11 +61,36 @@ const selectedRelease = computed(
 )
 
 const channelMeta: Record<ReleaseChannel, { label: string; className: string }> = {
-  stable: { label: '正式版', className: 'channel-stable' },
-  rc: { label: '预发版', className: 'channel-rc' },
-  alpha: { label: '构建版', className: 'channel-alpha' },
-  beta: { label: '测试版', className: 'channel-beta' },
-  hotfix: { label: '热补丁', className: 'channel-hotfix' },
+  stable: {
+    get label() {
+      return __t('ui.navigation', '正式版')
+    },
+    className: 'channel-stable',
+  },
+  rc: {
+    get label() {
+      return __t('ui.navigation', '预发版')
+    },
+    className: 'channel-rc',
+  },
+  alpha: {
+    get label() {
+      return __t('ui.navigation', '构建版')
+    },
+    className: 'channel-alpha',
+  },
+  beta: {
+    get label() {
+      return __t('ui.navigation', '测试版')
+    },
+    className: 'channel-beta',
+  },
+  hotfix: {
+    get label() {
+      return __t('ui.navigation', '热补丁')
+    },
+    className: 'channel-hotfix',
+  },
 }
 
 const canUpdate = computed(
@@ -72,9 +101,9 @@ const isDownloaded = computed(
   () => state.value?.phase === 'downloaded' && state.value.selectedTag === selectedTag.value,
 )
 const actionLabel = computed(() => {
-  if (isDownloading.value) return '下载中'
-  if (isDownloaded.value) return '安装'
-  return '下载'
+  if (isDownloading.value) return __t('ui.navigation', '下载中')
+  if (isDownloaded.value) return __t('ui.navigation', '安装')
+  return __t('ui.navigation', '下载')
 })
 
 function close(): void {
@@ -83,11 +112,13 @@ function close(): void {
 }
 
 function formatDate(value: string): string {
-  return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '未知'
+  return value
+    ? new Date(value).toLocaleString(getDisplayLocale(), { hour12: false })
+    : __t('ui.navigation', '未知')
 }
 
 function formatBytes(bytes = 0): string {
-  if (!bytes) return '未知大小'
+  if (!bytes) return __t('ui.navigation', '未知大小')
   if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GB`
   return `${(bytes / 1024 ** 2).toFixed(1)} MB`
 }
@@ -98,7 +129,7 @@ function releaseSummary(body: string): string {
     .replace(/[#>*_`[\]()~-]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-  return plain || '该版本没有填写更新说明。'
+  return plain || __t('ui.navigation', '该版本没有填写更新说明。')
 }
 
 async function loadCachedReleases(): Promise<void> {
@@ -142,7 +173,9 @@ async function initialize(): Promise<void> {
     deployment: 'unsupported',
     currentVersion: props.currentVersion,
     progress: 0,
-    message: '正在获取更新状态…',
+    get message() {
+      return __t('ui.navigation', '正在获取更新状态…')
+    },
   }
   try {
     state.value = (await invoke('get-update-state')) as UpdateState
@@ -154,7 +187,11 @@ async function initialize(): Promise<void> {
     state.value = {
       ...state.value,
       phase: 'error',
-      message: `获取更新失败：${error instanceof Error ? error.message : String(error)}`,
+      get message() {
+        return __t('ui.navigation', '获取更新失败：{0}', [
+          error instanceof Error ? error.message : String(error),
+        ])
+      },
     }
   }
 }
@@ -181,46 +218,56 @@ onUnmounted(() => stopUpdateListener?.())
   <Teleport to="body">
     <Transition name="update-center">
       <div v-if="modelValue" class="update-overlay" @mousedown.self="close">
-        <section class="update-page" role="dialog" aria-modal="true" aria-label="应用更新中心">
+        <section
+          class="update-page"
+          role="dialog"
+          aria-modal="true"
+          :aria-label="__t('ui.navigation', '应用更新中心')"
+        >
           <header class="update-head">
             <div class="update-head-mark">
               <PixelIcon name="download" size="lg" />
             </div>
             <div class="update-head-title">
               <span class="font-pixel">SYSTEM UPDATE</span>
-              <h2 class="font-pixel">应用更新中心</h2>
-              <p>选择 Release 版本并更新客户端本体</p>
+              <h2 class="font-pixel">{{ __t('ui.navigation', '应用更新中心') }}</h2>
+              <p>{{ __t('ui.navigation', '选择 Release 版本并更新客户端本体') }}</p>
             </div>
-            <button class="update-close" :disabled="isDownloading" title="关闭" @click="close">
+            <button
+              class="update-close"
+              :disabled="isDownloading"
+              :title="__t('ui.navigation', '关闭')"
+              @click="close"
+            >
               <PixelIcon name="close" size="sm" />
             </button>
           </header>
 
           <div class="version-strip">
             <div class="version-cell">
-              <span>当前版本</span>
+              <span>{{ __t('ui.navigation', '当前版本') }}</span>
               <strong class="font-pixel">v{{ state?.currentVersion ?? currentVersion }}</strong>
             </div>
             <PixelIcon name="chevron-right" size="sm" class="version-arrow" />
             <div class="version-cell version-cell-latest">
-              <span>可用版本</span>
+              <span>{{ __t('ui.navigation', '可用版本') }}</span>
               <strong class="font-pixel">
                 {{
                   releases.length
-                    ? `${releases.length} 个`
+                    ? __t('ui.navigation', '{0} 个', [releases.length])
                     : state?.phase === 'up-to-date'
-                      ? '已是最新'
-                      : '待检查'
+                      ? __t('ui.navigation', '已是最新')
+                      : __t('ui.navigation', '待检查')
                 }}
               </strong>
             </div>
             <div class="deployment-badge">
               {{
                 state?.deployment === 'portable'
-                  ? '便携版更新'
+                  ? __t('ui.navigation', '便携版更新')
                   : state?.deployment === 'installed'
-                    ? '安装版更新'
-                    : '当前形态不支持'
+                    ? __t('ui.navigation', '安装版更新')
+                    : __t('ui.navigation', '当前形态不支持')
               }}
             </div>
             <PButton
@@ -230,7 +277,7 @@ onUnmounted(() => stopUpdateListener?.())
               @click="checkUpdates"
             >
               <PixelIcon name="refresh" size="xs" />
-              重新检查
+              {{ __t('ui.navigation', '重新检查') }}
             </PButton>
           </div>
 
@@ -239,9 +286,12 @@ onUnmounted(() => stopUpdateListener?.())
               <div class="release-list-title">
                 <span class="font-pixel">AVAILABLE RELEASES</span>
                 <small>
-                  仅显示适用于当前{{
-                    state?.deployment === 'portable' ? '便携版' : '安装版'
-                  }}的更新包
+                  {{ __t('ui.navigation', '仅显示适用于当前')
+                  }}{{
+                    state?.deployment === 'portable'
+                      ? __t('ui.navigation', '便携版')
+                      : __t('ui.navigation', '安装版')
+                  }}{{ __t('ui.navigation', '的更新包') }}
                 </small>
               </div>
 
@@ -278,7 +328,7 @@ onUnmounted(() => stopUpdateListener?.())
                   size="lg"
                   :animation="state?.phase === 'checking' ? 'spin' : ''"
                 />
-                <span>{{ state?.message ?? '尚未检查更新' }}</span>
+                <span>{{ state?.message ?? __t('ui.navigation', '尚未检查更新') }}</span>
               </div>
             </div>
 
@@ -300,17 +350,17 @@ onUnmounted(() => stopUpdateListener?.())
                 </div>
                 <p class="detail-summary">{{ releaseSummary(selectedRelease.body) }}</p>
                 <dl class="asset-info">
-                  <dt>更新包</dt>
+                  <dt>{{ __t('ui.navigation', '更新包') }}</dt>
                   <dd>{{ selectedRelease.assetName }}</dd>
-                  <dt>文件大小</dt>
+                  <dt>{{ __t('ui.navigation', '文件大小') }}</dt>
                   <dd>{{ formatBytes(selectedRelease.assetSize) }}</dd>
-                  <dt>发布时间</dt>
+                  <dt>{{ __t('ui.navigation', '发布时间') }}</dt>
                   <dd>{{ formatDate(selectedRelease.publishedAt) }}</dd>
                 </dl>
               </template>
               <div v-else class="detail-placeholder">
                 <PixelIcon name="inbox" size="2xl" />
-                <span>没有可用更新</span>
+                <span>{{ __t('ui.navigation', '没有可用更新') }}</span>
               </div>
             </div>
           </div>
@@ -318,7 +368,7 @@ onUnmounted(() => stopUpdateListener?.())
           <footer class="update-footer">
             <div class="update-status">
               <span class="status-light" :class="`status-${state?.phase ?? 'idle'}`" />
-              <span>{{ state?.message ?? '更新服务初始化中' }}</span>
+              <span>{{ state?.message ?? __t('ui.navigation', '更新服务初始化中') }}</span>
             </div>
 
             <div v-if="isDownloading || isDownloaded" class="download-progress">

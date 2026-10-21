@@ -1,0 +1,11 @@
+{
+  "据点状态：{0} 个设施，{1} 个房间。{2}": "base status: {0} facilities, {1} rooms. {2}",
+  "当前房间「{0}」环境：{1}": "Current room \"{0}\" environment: {1}",
+  "已将所有已启用 Agent 叫到当前房间：{0}": "has called all enabled Agents to the current room: {0}",
+  "已将 {0} 叫到「{1}」。": "has called {0} to \"{1}\".",
+  "已创建房间「{0}」。": "has created room \"{0}\".",
+  "已将「{0}」的 {1} 修改为 {2}。": "has changed {1} of \"{0}\" to {2}.",
+  "已删除房间「{0}」，其中的角色已转移到客厅。": "The room \"{0}\" has been deleted and the characters in it have been moved to the living room.",
+  "温馨的家": "warm home",
+  "宽敞明亮的公共区域，适合大家聚在一起。": "The spacious and bright public area is suitable for everyone to gather together."
+}

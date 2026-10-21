@@ -1,3 +1,4 @@
+import { t as __t } from '../../i18n/index'
 import { onMounted, readonly, ref } from 'vue'
 import type {
   ApiResponse,
@@ -48,7 +49,7 @@ export function useIntegrations() {
       const response = await action()
       if (response.data) state.value = response.data
       window.dispatchEvent(new Event('infos:integrations-changed'))
-      notify.toast(response.message || '配置已保存', { type: 'success' })
+      notify.toast(response.message || __t('ui.tools', '配置已保存'), { type: 'success' })
       return true
     } catch (cause) {
       error.value = cause instanceof Error ? cause.message : '配置保存失败'

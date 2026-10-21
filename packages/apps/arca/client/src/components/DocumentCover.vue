@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { DocumentSnapshot, SemanticDocument } from '@infos/document-engine'
 import { nodeText, orderedDocumentNodes } from '../services/documentDisplay'
@@ -93,7 +95,11 @@ onBeforeUnmount(() => {
               />
               <template v-else>
                 <ArcaIcon name="image" :size="25" />
-                <span>{{ node.attributes.caption || node.attributes.alt || '图片' }}</span>
+                <span>
+                  {{
+                    node.attributes.caption || node.attributes.alt || __t('apps.arca.ui', '图片')
+                  }}
+                </span>
               </template>
             </div>
             <h3 v-else-if="node.type === 'heading'">{{ nodeText(node) }}</h3>
@@ -111,7 +117,11 @@ onBeforeUnmount(() => {
         </template>
         <p v-else class="cover-empty">
           {{
-            state === 'loading' ? '读取中…' : state === 'unavailable' ? '预览暂不可用' : '空白文稿'
+            state === 'loading'
+              ? __t('apps.arca.ui', '读取中…')
+              : state === 'unavailable'
+                ? __t('apps.arca.ui', '预览暂不可用')
+                : __t('apps.arca.ui', '空白文稿')
           }}
         </p>
       </div>
@@ -121,11 +131,15 @@ onBeforeUnmount(() => {
         <span class="book-imprint">Arca</span>
         <span class="book-cover-rule" />
         <h2>{{ document.title }}</h2>
-        <span class="book-cover-type">文稿</span>
+        <span class="book-cover-type">{{ __t('apps.arca.ui', '文稿') }}</span>
         <div class="book-cover-footer">
           <span>
             {{
-              state === 'loading' ? '读取中…' : state === 'unavailable' ? '预览不可用' : dateLabel
+              state === 'loading'
+                ? __t('apps.arca.ui', '读取中…')
+                : state === 'unavailable'
+                  ? __t('apps.arca.ui', '预览不可用')
+                  : dateLabel
             }}
           </span>
           <ArcaIcon name="file" :size="15" />

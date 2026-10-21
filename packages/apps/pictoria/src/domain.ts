@@ -1,3 +1,4 @@
+import { t as __t } from './i18n'
 import { z } from 'zod'
 
 export const identifier = z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$/)
@@ -78,7 +79,7 @@ export const bindingSchema = z.unknown().transform((value, context): Binding => 
   } catch (error) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
-      message: error instanceof Error ? error.message : '输入引用格式无效',
+      message: error instanceof Error ? error.message : __t('apps.pictoria.ui', '输入引用格式无效'),
     })
     return z.NEVER
   }

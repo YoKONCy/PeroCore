@@ -1,10 +1,11 @@
+import { t as __t } from './i18n'
 /**
  * SocialSessionManager — 平台无关的社交回合与消息批次管理。
  *
  * 程序只管理节奏、批次和可靠性；是否回复始终由当前角色自己的 Agent 决定。
  */
 import type { InboundMessage } from './types'
-import { createLogger } from '@infos/backend/applicationHostAbi'
+import { createLogger, safeModelDiagnostic } from '@infos/backend/applicationHostAbi'
 import { socialFailure } from './socialRecovery'
 
 const logger = createLogger('SocialSessionManager')
@@ -34,6 +35,7 @@ export interface DeferredSocialIntent {
 }
 
 export type SocialTurnOutcome =
+  | { type: 'orchestration'; wakeAt: number; expiresAt: number }
   | {
       type: 'reply'
       content: string
@@ -69,6 +71,8 @@ export interface SocialSession {
   lastError?: string
   turnId?: string
   waitingTurnId?: string
+  /** 托管编排期间，普通群消息仍收集，但不另起同会话的并行回复。 */
+  orchestrationTurnId?: string
 }
 
 export type FlushReason =
@@ -178,13 +182,14 @@ export class SocialSessionManager {
 
   async handleInbound(msg: InboundMessage): Promise<void> {
     const session = this.getOrCreate(msg)
+    this.checkActiveExpiry(session)
     const now = Date.now()
     const rawEvent = msg.rawEvent as Record<string, unknown> | undefined
     const directlyTriggered =
       rawEvent?._isMentioned === true ||
       msg.isMentioned === true ||
       msg.channelType === 'private' ||
-      rawEvent?._infosQueuedForReply === true
+      (rawEvent?._infosQueuedForReply === true && rawEvent?._infosContinuation !== true)
 
     const msgId = rawEvent?.message_id
     if (
@@ -211,7 +216,20 @@ export class SocialSessionManager {
     }
 
     // running 期间的新消息只进入下一批，绝不悄悄并入正在推理的上下文。
-    if (session.phase === 'running' || session.phase === 'retrying') return
+    if (
+      session.phase === 'running' ||
+      session.phase === 'retrying' ||
+      session.orchestrationTurnId
+    ) {
+      if (directlyTriggered)
+        logger.info(__t('apps.social.logs', '新消息已排队，等待当前社交回合结束'), {
+          channelId: session.channelId,
+          turnId: session.turnId,
+          phase: session.phase,
+          pendingMessages: session.pendingMessages.length,
+        })
+      return
+    }
 
     const directCollection = directlyTriggered || session.isMentioned
     const engagedContinuation = session.participation === 'engaged'
@@ -237,7 +255,7 @@ export class SocialSessionManager {
 
     if (session.pendingMessages.length >= this.config.maxBufferSize) {
       void this.triggerFlush(session, 'buffer_full').catch((error) =>
-        logger.warn(`社交批次触发失败: ${String(error)}`),
+        logger.warn(__t('apps.social.logs', '社交批次触发失败: {0}', [String(error)])),
       )
       return
     }
@@ -261,6 +279,7 @@ export class SocialSessionManager {
   }
 
   markReplied(session: SocialSession): void {
+    // 此处仅冷却自主观察；明确触发与续聊保留各自窗口，跨回合防循环由宿主预算负责。
     session.participation = 'engaged'
     session.phase = 'cooldown'
     session.lastActiveTime = Date.now()
@@ -273,6 +292,15 @@ export class SocialSessionManager {
     if (Date.now() - session.lastActiveTime > this.config.engagedDuration * 1000) {
       session.participation = 'idle'
       if (session.phase === 'cooldown') session.phase = 'ready'
+      if (
+        session.channelType === 'group' &&
+        !session.isMentioned &&
+        !session.orchestrationTurnId &&
+        session.phase === 'collecting'
+      ) {
+        this.clearTimer(session)
+        session.phase = 'ready'
+      }
     }
   }
 
@@ -287,8 +315,20 @@ export class SocialSessionManager {
   }
 
   private async triggerFlush(session: SocialSession, reason: FlushReason): Promise<void> {
+    this.checkActiveExpiry(session)
     this.clearTimer(session)
-    if (session.phase === 'running' || session.phase === 'retrying') return
+    if (session.phase === 'running' || session.phase === 'retrying' || session.orchestrationTurnId)
+      return
+    if (
+      session.channelType === 'group' &&
+      session.participation !== 'engaged' &&
+      !session.isMentioned &&
+      ['buffer_timeout', 'buffer_full'].includes(reason) &&
+      !session.retryMessages?.length
+    ) {
+      session.phase = 'ready'
+      return
+    }
 
     if (reason === 'intent_due' && session.deferredIntent) {
       session.pendingMessages.unshift(...session.deferredIntent.sourceMessages)
@@ -306,13 +346,27 @@ export class SocialSessionManager {
     session.controller = controller
     session.inFlightMessages = messages
     session.phase = 'running'
-    logger.info(`[${session.channelId}] 社交批次开始: reason=${reason}, msgs=${messages.length}`)
+    logger.info(
+      __t('apps.social.logs', '[{0}] 社交批次开始: reason={1}, msgs={2}', [
+        session.channelId,
+        reason,
+        messages.length,
+      ]),
+    )
 
     try {
       const outcome = await this.flushCallback(session, messages, reason, controller.signal)
       controller.signal.throwIfAborted()
       session.retryCount = 0
       await this.applyOutcome(session, messages, outcome)
+      logger.info(__t('apps.social.logs', '社交批次处理完成'), {
+        channelId: session.channelId,
+        turnId: session.turnId,
+        outcome: outcome.type,
+        phase: session.phase,
+        pendingMessages: session.pendingMessages.length,
+        nextWakeAt: outcome.type === 'orchestration' ? outcome.wakeAt : undefined,
+      })
     } catch (error) {
       if (controller.signal.aborted) return
       const failure = socialFailure(error)
@@ -331,7 +385,21 @@ export class SocialSessionManager {
         session.nextScanTime = Date.now() + 5 * 60_000
       }
       logger.warn(
-        `[${session.channelId}] 社交批次${session.phase === 'retrying' ? '等待有限重试' : '已结束失败'}: ${failure.message}`,
+        __t('apps.social.logs', '[{0}] 社交批次{1}: {2}', [
+          session.channelId,
+          session.phase === 'retrying' ? '等待有限重试' : '已结束失败',
+          safeModelDiagnostic(failure.message),
+        ]),
+        {
+          turnId: session.turnId,
+          retryCount: session.retryCount,
+          retryable: failure.retryable,
+          retryAfterSeconds:
+            session.phase === 'retrying'
+              ? Math.round((session.nextScanTime - Date.now()) / 1000)
+              : undefined,
+          pendingMessages: session.pendingMessages.length,
+        },
       )
     } finally {
       if (session.controller === controller) {
@@ -341,7 +409,11 @@ export class SocialSessionManager {
           !controller.signal.aborted &&
           !session.flushTimer &&
           session.pendingMessages.length &&
-          session.phase !== 'retrying'
+          !session.orchestrationTurnId &&
+          session.phase !== 'retrying' &&
+          (session.channelType === 'private' ||
+            session.isMentioned ||
+            session.participation === 'engaged')
         ) {
           session.phase = 'collecting'
           session.collectionStartedAt = Date.now()
@@ -374,6 +446,7 @@ export class SocialSessionManager {
     session.inFlightMessages = []
     session.deferredIntent = undefined
     session.waitingTurnId = undefined
+    session.orchestrationTurnId = undefined
     session.turnId = undefined
     const cancelled = new Set(msgIds)
     session.pendingMessages = session.pendingMessages.filter(
@@ -392,12 +465,22 @@ export class SocialSessionManager {
     outcome: SocialTurnOutcome,
   ): Promise<void> {
     session.inFlightMessages = []
+    if (outcome.type === 'orchestration') {
+      session.orchestrationTurnId = session.turnId
+      session.phase = 'ready'
+      session.isMentioned = false
+      session.nextScanTime = outcome.wakeAt
+      return
+    }
+    session.orchestrationTurnId = undefined
     if (outcome.type === 'reply') {
+      session.waitingTurnId = undefined
       session.deferredIntent = undefined
       this.markReplied(session)
       return
     }
     if (outcome.type === 'pass') {
+      session.waitingTurnId = undefined
       session.deferredIntent = undefined
       session.phase = 'ready'
       session.isMentioned = false
@@ -448,7 +531,12 @@ export class SocialSessionManager {
     session.flushTimer = setTimeout(
       () => {
         this.triggerFlush(session, reason).catch((error) =>
-          logger.error(`[${session.channelId}] 社交计时触发失败: ${String(error)}`),
+          logger.error(
+            __t('apps.social.logs', '[{0}] 社交计时触发失败: {1}', [
+              session.channelId,
+              String(error),
+            ]),
+          ),
         )
       },
       Math.max(0, seconds * 1000),

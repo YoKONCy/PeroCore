@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { Asset, AssetReference, CanvasItem } from '../types'
 import Icon from './PictoriaIcon.vue'
@@ -88,7 +90,11 @@ onBeforeUnmount(() => {
 
 <template>
   <div ref="root" class="reference-input" data-ui @keydown="key" @keydown.esc.stop="open = false">
-    <div class="reference-strip" role="list" aria-label="按顺序排列的参考素材">
+    <div
+      class="reference-strip"
+      role="list"
+      :aria-label="__t('apps.pictoria.ui', '按顺序排列的参考素材')"
+    >
       <div
         v-for="(reference, index) in references"
         :key="reference.assetId"
@@ -116,8 +122,8 @@ onBeforeUnmount(() => {
         <b class="reference-number">{{ index + 1 }}</b>
         <button
           class="reference-remove"
-          :aria-label="`移除参考 ${index + 1}：${reference.name}`"
-          title="移除引用"
+          :aria-label="__t('apps.pictoria.ui', '移除参考 {0}：{1}', [index + 1, reference.name])"
+          :title="__t('apps.pictoria.ui', '移除引用')"
           @click="emit('remove', reference.assetId)"
         >
           <Icon name="close" :size="11" />
@@ -125,16 +131,16 @@ onBeforeUnmount(() => {
         <div v-if="multiple && references.length > 1" class="reference-order">
           <button
             :disabled="!index"
-            :aria-label="`前移参考 ${index + 1}`"
-            title="前移"
+            :aria-label="__t('apps.pictoria.ui', '前移参考 {0}', [index + 1])"
+            :title="__t('apps.pictoria.ui', '前移')"
             @click="emit('move', reference.assetId, -1)"
           >
             ←
           </button>
           <button
             :disabled="index === references.length - 1"
-            :aria-label="`后移参考 ${index + 1}`"
-            title="后移"
+            :aria-label="__t('apps.pictoria.ui', '后移参考 {0}', [index + 1])"
+            :title="__t('apps.pictoria.ui', '后移')"
             @click="emit('move', reference.assetId, 1)"
           >
             →
@@ -143,7 +149,7 @@ onBeforeUnmount(() => {
       </div>
       <span v-if="!references.length" class="reference-empty">
         <Icon name="link" :size="14" />
-        连接或添加素材
+        {{ __t('apps.pictoria.ui', '连接或添加素材') }}
       </span>
     </div>
     <div class="reference-toolbar">
@@ -159,7 +165,13 @@ onBeforeUnmount(() => {
       >
         <Icon name="plus" :size="12" />
         {{
-          full ? '查看素材' : multiple ? '添加参考' : references.length ? '更换素材' : '添加素材'
+          full
+            ? __t('apps.pictoria.ui', '查看素材')
+            : multiple
+              ? __t('apps.pictoria.ui', '添加参考')
+              : references.length
+                ? __t('apps.pictoria.ui', '更换素材')
+                : __t('apps.pictoria.ui', '添加素材')
         }}
       </button>
       <button
@@ -174,9 +186,11 @@ onBeforeUnmount(() => {
         "
       >
         <Icon name="image" :size="12" />
-        资源库
+        {{ __t('apps.pictoria.ui', '资源库') }}
       </button>
-      <small>{{ references.length }} / {{ limit }}{{ full ? ' · 已满' : '' }}</small>
+      <small>
+        {{ references.length }} / {{ limit }}{{ full ? __t('apps.pictoria.ui', ' · 已满') : '' }}
+      </small>
     </div>
     <AssetLibraryPicker
       v-if="libraryOpen && owner"
@@ -192,7 +206,11 @@ onBeforeUnmount(() => {
       <div v-if="open" class="reference-picker floating-panel">
         <label class="reference-search">
           <Icon name="search" :size="13" />
-          <input v-model="query" placeholder="搜索画布素材…" aria-label="搜索画布素材" />
+          <input
+            v-model="query"
+            :placeholder="__t('apps.pictoria.ui', '搜索画布素材…')"
+            :aria-label="__t('apps.pictoria.ui', '搜索画布素材')"
+          />
         </label>
         <div class="reference-choices">
           <button
@@ -213,12 +231,20 @@ onBeforeUnmount(() => {
               "
               :size="14"
             />
-            <span>{{ item.content.name || '未命名素材' }}</span>
+            <span>{{ item.content.name || __t('apps.pictoria.ui', '未命名素材') }}</span>
             <Icon :name="picked(item.content.assetId!) ? 'check' : 'plus'" :size="13" />
           </button>
-          <p v-if="!choices.length">{{ query ? '没有匹配的素材' : '先导入素材到画布' }}</p>
+          <p v-if="!choices.length">
+            {{
+              query
+                ? __t('apps.pictoria.ui', '没有匹配的素材')
+                : __t('apps.pictoria.ui', '先导入素材到画布')
+            }}
+          </p>
         </div>
-        <small v-if="full">最多 {{ limit }} 份</small>
+        <small v-if="full">
+          {{ __t('apps.pictoria.ui', '最多') }} {{ limit }} {{ __t('apps.pictoria.ui', '份') }}
+        </small>
       </div>
     </Transition>
   </div>

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import ProviderSettings from './ProviderSettings.vue'
 import Icon from './PictoriaIcon.vue'
@@ -41,13 +43,17 @@ function trap(event: KeyboardEvent) {
       tabindex="-1"
       role="dialog"
       aria-modal="true"
-      aria-label="模型供应商"
+      :aria-label="__t('apps.pictoria.ui', '模型供应商')"
       @keydown.esc.stop="emit('close')"
       @keydown.tab="trap"
     >
       <header>
-        <strong>模型供应商</strong>
-        <button class="icon-button" aria-label="关闭" @click="emit('close')">
+        <strong>{{ __t('apps.pictoria.ui', '模型供应商') }}</strong>
+        <button
+          class="icon-button"
+          :aria-label="__t('apps.pictoria.ui', '关闭')"
+          @click="emit('close')"
+        >
           <Icon name="close" :size="18" />
         </button>
       </header>

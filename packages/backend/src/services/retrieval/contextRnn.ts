@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * ContextRNN — 对话轨迹感知 (minGRU)
  *
@@ -137,7 +138,10 @@ export class ContextRnn {
     this.minGruWeights = this.loadOrInitMinGruWeights()
 
     logger.info(
-      `ContextRNN 初始化完成 (inputDim=${this.config.inputDim}, hiddenDim=${this.config.hiddenDim})`,
+      __t('logs.retrieval', 'ContextRNN 初始化完成 (inputDim={0}, hiddenDim={1})', [
+        this.config.inputDim,
+        this.config.hiddenDim,
+      ]),
     )
   }
 
@@ -257,7 +261,9 @@ export class ContextRnn {
 
     writeFileSync(filePath, buffer)
     this.dirtyStates.delete(key)
-    logger.debug(`RNN 隐状态已保存: ${filePath} (updates=${state.updateCount})`)
+    logger.debug(
+      __t('logs.retrieval', 'RNN 隐状态已保存: {0} (updates={1})', [filePath, state.updateCount]),
+    )
   }
 
   /**
@@ -284,10 +290,12 @@ export class ContextRnn {
       this.states.set(key, { hidden, lastUpdatedAt, updateCount })
       this.dirtyStates.delete(key)
 
-      logger.debug(`RNN 隐状态已恢复: ${filePath} (updates=${updateCount})`)
+      logger.debug(
+        __t('logs.retrieval', 'RNN 隐状态已恢复: {0} (updates={1})', [filePath, updateCount]),
+      )
       return true
     } catch (err) {
-      logger.warn(`RNN 隐状态恢复失败: ${filePath}`, { error: err })
+      logger.warn(__t('logs.retrieval', 'RNN 隐状态恢复失败: {0}', [filePath]), { error: err })
       return false
     }
   }
@@ -305,7 +313,12 @@ export class ContextRnn {
     }
     this.saveWeights()
     this.saveMinGruWeights()
-    logger.info(`ContextRNN 已保存变更（隐状态 ${stateCount} 项，权重 ${weightCount} 项）`)
+    logger.info(
+      __t('logs.retrieval', 'ContextRNN 已保存变更（隐状态 {0} 项，权重 {1} 项）', [
+        stateCount,
+        weightCount,
+      ]),
+    )
   }
 
   /**
@@ -414,7 +427,9 @@ export class ContextRnn {
     const loss = trainMinGruStep(state.hidden, projected, this.minGruWeights, label, learningRate)
     if (learningRate !== 0) this.dirtyWeights.add('mingru')
 
-    logger.debug(`minGRU 训练: loss=${loss.toFixed(4)}, label=${label}`)
+    logger.debug(
+      __t('logs.retrieval', 'minGRU 训练: loss={0}, label={1}', [loss.toFixed(4), label]),
+    )
     return loss
   }
 
@@ -459,7 +474,7 @@ export class ContextRnn {
       try {
         const buffer = readFileSync(filePath)
         if (buffer.length === size * 4) {
-          logger.debug(`RNN 权重已加载: ${name} (${size} 元素)`)
+          logger.debug(__t('logs.retrieval', 'RNN 权重已加载: {0} ({1} 元素)', [name, size]))
           return new Float32Array(
             buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength),
           )
@@ -470,7 +485,13 @@ export class ContextRnn {
     }
 
     // Xavier 均匀初始化
-    logger.info(`RNN 权重 Xavier 初始化: ${name} (fanIn=${fanIn}, fanOut=${fanOut})`)
+    logger.info(
+      __t('logs.retrieval', 'RNN 权重 Xavier 初始化: {0} (fanIn={1}, fanOut={2})', [
+        name,
+        fanIn,
+        fanOut,
+      ]),
+    )
     this.dirtyWeights.add(name)
     return xavierUniform(fanIn, fanOut, size)
   }
@@ -486,7 +507,7 @@ export class ContextRnn {
       writeFileSync(this.resolveWeightsPath(name), Buffer.from(weights.buffer))
       this.dirtyWeights.delete(name)
     }
-    logger.debug('RNN 权重已保存')
+    logger.debug(__t('logs.retrieval', 'RNN 权重已保存'))
   }
 
   /**
@@ -520,17 +541,24 @@ export class ContextRnn {
           const wH = float32.slice(wZSize + bZSize, wZSize + bZSize + wHSize)
           const bH = float32.slice(wZSize + bZSize + wHSize, totalSize)
 
-          logger.info(`minGRU 权重已加载: ${filePath} (${totalSize} 元素)`)
+          logger.info(
+            __t('logs.retrieval', 'minGRU 权重已加载: {0} ({1} 元素)', [filePath, totalSize]),
+          )
           return { wZ, bZ, wH, bH }
         }
-        logger.warn(`minGRU 权重文件大小不匹配: 期望 ${totalSize * 4}, 实际 ${buffer.length}`)
+        logger.warn(
+          __t('logs.retrieval', 'minGRU 权重文件大小不匹配: 期望 {0}, 实际 {1}', [
+            totalSize * 4,
+            buffer.length,
+          ]),
+        )
       } catch (err) {
-        logger.warn(`minGRU 权重加载失败: ${filePath}`, { error: err })
+        logger.warn(__t('logs.retrieval', 'minGRU 权重加载失败: {0}', [filePath]), { error: err })
       }
     }
 
     // Xavier 初始化（偏置 0.1，不再是 0）
-    logger.info(`minGRU 权重 Xavier 初始化 (W_z/W_h: Xavier, b_z/b_h: 0.1)`)
+    logger.info(__t('logs.retrieval', 'minGRU 权重 Xavier 初始化 (W_z/W_h: Xavier, b_z/b_h: 0.1)'))
     this.dirtyWeights.add('mingru')
     return xavierInitMinGruWeights(HIDDEN_DIM)
   }
@@ -560,6 +588,6 @@ export class ContextRnn {
 
     writeFileSync(this.resolveWeightsPath('mingru'), Buffer.from(combined.buffer))
     this.dirtyWeights.delete('mingru')
-    logger.debug('minGRU 权重已保存')
+    logger.debug(__t('logs.retrieval', 'minGRU 权重已保存'))
   }
 }

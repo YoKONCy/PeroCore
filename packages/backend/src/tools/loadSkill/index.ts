@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * load_skill — 技能加载工具
  *
@@ -34,7 +35,7 @@ export const loadSkillTool: BuiltinTool = {
       skill_id: skillId,
       params: args.params ?? {},
       status: 'loaded',
-      message: `技能 ${skillId} 的详细指令已加载，请按步骤执行。`,
+      message: __t('server.tools', '技能 {0} 的详细指令已加载，请按步骤执行。', [skillId]),
     })
   },
 }

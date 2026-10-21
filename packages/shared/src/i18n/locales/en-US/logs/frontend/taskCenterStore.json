@@ -1,0 +1,6 @@
+{
+  "系统通知失败": "system notification failed",
+  "刷新进行中任务失败": "Refresh task in progress failed",
+  "刷新历史任务失败": "Refresh history task failed",
+  "刷新任务Projection失败: {0}": "Refresh task Projection failed: {0}"
+}

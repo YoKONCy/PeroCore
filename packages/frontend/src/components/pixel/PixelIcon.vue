@@ -131,6 +131,12 @@ const icons: Record<string, string> = {
   // ── 对话 & 交互 ──
   chat: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10z',
   send: 'M22 2L11 13 M22 2l-7 20-4-9-9-4 20-7z',
+  pause: 'M7 4v16 M17 4v16',
+  play: 'M8 4l12 8-12 8V4z',
+  rewind: 'M11 5L2 12l9 7V5z M22 5l-9 7 9 7V5z',
+  forward: 'M2 5l9 7-9 7V5z M13 5l9 7-9 7V5z',
+  repeat: 'M17 2l4 4-4 4 M3 11V8a2 2 0 0 1 2-2h16 M7 22l-4-4 4-4 M21 13v3a2 2 0 0 1-2 2H3',
+  'volume-off': 'M11 5L6 9H2v6h4l5 4V5z M17 9l6 6 M23 9l-6 6',
   mic: 'M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z M19 10v2a7 7 0 0 1-14 0v-2 M12 19v4 M8 23h8',
   volume: 'M11 5L6 9H2v6h4l5 4V5z M19.07 4.93a10 10 0 0 1 0 14.14 M15.54 8.46a5 5 0 0 1 0 7.07',
   headphones:
@@ -165,6 +171,9 @@ const icons: Record<string, string> = {
   'chevron-right': 'M9 18l6-6-6-6',
   'chevron-left': 'M15 18l-6-6 6-6',
   square: 'M3 3h18v18H3V3z',
+  maximize: 'M8 3H3v5 M16 3h5v5 M3 16v5h5 M21 16v5h-5',
+  minimize: 'M3 8h5V3 M16 3v5h5 M8 21v-5H3 M21 16h-5v5',
+  'external-link': 'M15 3h6v6 M10 14L21 3 M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5',
   copy: 'M20 9H11a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2z M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1',
   refresh:
     'M23 4v6h-6 M1 20v-6h6 M3.51 9a9 9 0 0 1 14.85-3.36L23 10 M1 14l4.64 4.36A9 9 0 0 0 20.49 15',

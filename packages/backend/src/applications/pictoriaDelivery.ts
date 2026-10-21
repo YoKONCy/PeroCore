@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { and, eq, sql } from 'drizzle-orm'
@@ -212,11 +213,20 @@ export class PictoriaDelivery {
     await this.deps.gatewayHub.pushNotification({
       notificationId: `application:${call.id}`,
       createdAt: run.updatedAt,
-      title: run.state === 'completed' ? '作品已完成' : '创作状态更新',
+      title:
+        run.state === 'completed'
+          ? __t('server.applications', '作品已完成')
+          : __t('server.applications', '创作状态更新'),
       body: run.name,
       source: 'task',
       principalId: call.agentId,
       important: true,
+      target: {
+        kind: 'application',
+        agentId: call.agentId,
+        threadId: call.threadId ?? undefined,
+        applicationCallId: call.id,
+      },
       level: run.state === 'failed' ? 'error' : 'success',
     })
   }

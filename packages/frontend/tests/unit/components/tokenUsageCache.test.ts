@@ -4,9 +4,9 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import type { TokenUsageStatistics, TokenUsageTotals } from '@infos/shared'
 import TokenUsageCard from '../../../src/components/usage/TokenUsageCard.vue'
 
-const mocks = vi.hoisted(() => ({ statistics: vi.fn() }))
+const mocks = vi.hoisted(() => ({ statistics: vi.fn(), filters: vi.fn() }))
 vi.mock('../../../src/api/modules/tokenUsageApi', () => ({
-  tokenUsageApi: { statistics: mocks.statistics },
+  tokenUsageApi: { statistics: mocks.statistics, filters: mocks.filters },
 }))
 vi.mock('../../../src/stores', () => ({ useAgentStore: () => ({ agents: [] }) }))
 
@@ -47,6 +47,12 @@ function statistics(overrides: Partial<TokenUsageTotals> = {}): TokenUsageStatis
 }
 async function card(data: TokenUsageStatistics) {
   mocks.statistics.mockResolvedValue({ data })
+  mocks.filters.mockResolvedValue({
+    data: {
+      threads: [{ id: 'thread-a', title: '制作网页' }],
+      models: [{ provider: 'deepseek', modelId: 'deepseek-flash' }],
+    },
+  })
   const wrapper = mount(TokenUsageCard, {
     global: {
       stubs: {
@@ -69,6 +75,29 @@ afterEach(() => {
 })
 
 describe('用量卡片的缓存统计', () => {
+  it('Thread 和模型选项来自实际调用，组合选择后传给后台统计', async () => {
+    const wrapper = await card(statistics())
+    await wrapper.get('.usage-summary').trigger('click')
+    await flushPromises()
+    const selects = wrapper.findAllComponents({ name: 'PSelect' })
+    const thread = selects.find((item) => item.attributes('aria-label') === '筛选会话')!
+    const model = selects.find((item) => item.attributes('aria-label') === '筛选模型')!
+    thread.vm.$emit('update:modelValue', 'thread-a')
+    model.vm.$emit('update:modelValue', JSON.stringify(['deepseek', 'deepseek-flash']))
+    await flushPromises()
+    expect(mocks.statistics).toHaveBeenLastCalledWith(
+      'today',
+      expect.any(String),
+      undefined,
+      expect.any(AbortSignal),
+      {
+        threadId: 'thread-a',
+        provider: 'deepseek',
+        modelId: 'deepseek-flash',
+      },
+    )
+    expect(wrapper.get('.usage-summary-footer').text()).toContain('已筛选')
+  })
   it('用有效上报的输入计算命中率，展开后显示计数与统计覆盖量', async () => {
     const wrapper = await card(statistics())
     expect(wrapper.get('.usage-cache-summary').text()).toContain('81.82%')

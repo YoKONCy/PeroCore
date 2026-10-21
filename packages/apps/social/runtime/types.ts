@@ -60,6 +60,8 @@ export interface InboundMessage {
    * 用于图片收集优先级判断：@消息的图片优先级最高。
    */
   isMentioned?: boolean
+  /** 由宿主按已连接账号或明确登记的机器人名单识别，昵称不能作为依据。 */
+  senderKind?: 'human' | 'bot' | 'unknown'
   /** 原始平台事件 (调试用, 可选) */
   rawEvent?: unknown
   /**
@@ -98,11 +100,28 @@ export interface OutboundMessage {
   attachments?: Attachment[]
   /** 回复某条消息 ID */
   replyTo?: string
+  /** 结构化提及，不接受正文中的平台控制码。 */
+  mentions?: string[]
+}
+
+export interface SocialDeliveryReceipt {
+  messageId?: string
+  sentAt: number
+  /** 部分平台的文件上传接口不返回消息 ID。 */
+  platformMessageIds?: string[]
 }
 
 /** 附件 */
 export interface Attachment {
-  type: 'image' | 'file' | 'audio' | 'video' | 'sticker' | 'forward'
+  type: 'image' | 'file' | 'audio' | 'video' | 'sticker' | 'forward' | 'native_emoji'
+  /** 平台原生表情元数据只在服务端流转，模型使用来源引用。 */
+  nativeEmoji?: {
+    kind: 'face' | 'market'
+    faceId?: string
+    packageId?: string
+    emojiId?: string
+    key?: string
+  }
   /** 远程 URL */
   url?: string
   /** 本地文件路径 */

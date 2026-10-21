@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * CapabilityGate 共享持有器
  *
@@ -25,7 +26,7 @@ let capabilityGate: CapabilityGate | null = null
  */
 export function setCapabilityGate(gate: CapabilityGate): void {
   capabilityGate = gate
-  logger.info('CapabilityGate 已注入 (共享持有器)')
+  logger.info(__t('logs.tools', 'CapabilityGate 已注入 (共享持有器)'))
 }
 
 /** 获取 CapabilityGate，未注入时返回 null */

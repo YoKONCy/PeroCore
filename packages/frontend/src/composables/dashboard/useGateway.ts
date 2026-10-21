@@ -15,6 +15,8 @@ export function useGateway() {
 
   return {
     isConnected: gateway.isConnected,
+    state: gateway.state,
+    retryCount: gateway.retryCount,
     lastError: gateway.lastError,
     onPush: gateway.onPush,
     offPush: gateway.offPush,

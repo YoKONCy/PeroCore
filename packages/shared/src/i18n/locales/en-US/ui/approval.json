@@ -1,0 +1,22 @@
+{
+  "轻度提醒": "Mild reminder",
+  "请核对参数后决定是否继续。": "Please check the parameters before deciding whether to continue.",
+  "需要留意": "needs attention",
+  "此操作会改变应用或系统状态。": "This action changes the application or system state.",
+  "高风险": "High risk",
+  "此操作可能造成明显副作用，请仔细确认。": "This operation may cause obvious side effects, please confirm carefully.",
+  "严重风险": "serious risk",
+  "此操作可能造成不可逆影响，请逐项核对。": "This operation may cause irreversible effects, please check item by item.",
+  "确认前不会执行这项操作": "This operation will not be performed until confirmed",
+  "请求执行一项操作": "requests an operation",
+  "等待操作": "Waiting for operation",
+  "收起详情": "Collapse details",
+  "参数与审计": "Parameters and Audit",
+  "审批记录": "approval record",
+  "正在读取…": "is reading...",
+  "暂无记录": "No record yet",
+  "可以补充要求，例如“只执行这一步，不要改动其他内容”": "can add requirements, such as \"Only perform this step, do not change other content\"",
+  "允许本次": "allows this",
+  "本轮对话允许": "Allowed for this round of dialogue",
+  "拒绝": "rejected"
+}

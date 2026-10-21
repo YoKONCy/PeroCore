@@ -1,0 +1,18 @@
+{
+  "暂停": "Pause",
+  "播放": "Play",
+  "播放进度": "playback progress",
+  "不可播放": "is not playable",
+  "查看{0}": "View {0}",
+  "下载": "Download",
+  "下载文件": "download file",
+  "源文件": "source file",
+  "来源": "source",
+  "PDF 预览": "PDF Preview",
+  "读取中…": "Reading...",
+  "部分预览": "partial preview",
+  "关闭": "Close",
+  "无法打开资源": "cannot open the resource",
+  "无法打开 HTML 页面": "cannot open HTML page",
+  "文件": "file"
+}

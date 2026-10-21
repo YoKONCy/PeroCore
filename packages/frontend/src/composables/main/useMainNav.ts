@@ -1,3 +1,4 @@
+import { t as __t } from '../../i18n/index'
 /**
  * useMainNav — MainView 导航状态管理
  *
@@ -77,11 +78,15 @@ const navWidth = computed(() => {
 const navGroups: MainNavGroup[] = [
   {
     id: 'interaction',
-    title: '交互',
+    get title() {
+      return __t('ui.navigation', '交互')
+    },
     items: [
       {
         id: 'chat',
-        label: '对话',
+        get label() {
+          return __t('ui.navigation', '对话')
+        },
         labelEn: 'Chat',
         icon: 'chat',
         ambient: {
@@ -91,7 +96,9 @@ const navGroups: MainNavGroup[] = [
       },
       {
         id: 'workspace',
-        label: '工作区',
+        get label() {
+          return __t('ui.navigation', '工作区')
+        },
         labelEn: 'Workspace',
         icon: 'code',
         ambient: {
@@ -101,7 +108,9 @@ const navGroups: MainNavGroup[] = [
       },
       {
         id: 'stronghold',
-        label: '据点',
+        get label() {
+          return __t('ui.navigation', '据点')
+        },
         labelEn: 'Stronghold',
         icon: 'users',
         ambient: {
@@ -113,11 +122,15 @@ const navGroups: MainNavGroup[] = [
   },
   {
     id: 'daily',
-    title: '工作台',
+    get title() {
+      return __t('ui.navigation', '工作台')
+    },
     items: [
       {
         id: 'overview',
-        label: '总览',
+        get label() {
+          return __t('ui.navigation', '总览')
+        },
         labelEn: 'Overview',
         icon: 'desktop',
         ambient: {
@@ -127,7 +140,9 @@ const navGroups: MainNavGroup[] = [
       },
       {
         id: 'logs',
-        label: '对话日志',
+        get label() {
+          return __t('ui.navigation', '对话日志')
+        },
         labelEn: 'Logs',
         icon: 'chat',
         ambient: {
@@ -137,7 +152,9 @@ const navGroups: MainNavGroup[] = [
       },
       {
         id: 'memories',
-        label: '核心记忆',
+        get label() {
+          return __t('ui.navigation', '核心记忆')
+        },
         labelEn: 'Memories',
         icon: 'brain',
         ambient: {
@@ -147,7 +164,9 @@ const navGroups: MainNavGroup[] = [
       },
       {
         id: 'knowledge',
-        label: '知识库',
+        get label() {
+          return __t('ui.navigation', '知识库')
+        },
         labelEn: 'Knowledge',
         icon: 'database',
         ambient: {
@@ -157,7 +176,9 @@ const navGroups: MainNavGroup[] = [
       },
       {
         id: 'tasks',
-        label: '任务中心',
+        get label() {
+          return __t('ui.navigation', '任务中心')
+        },
         labelEn: 'Tasks',
         icon: 'bell',
         ambient: {
@@ -169,26 +190,90 @@ const navGroups: MainNavGroup[] = [
   },
   {
     id: 'settings',
-    title: '设置',
+    get title() {
+      return __t('ui.navigation', '设置')
+    },
     collapsible: true,
     items: [
-      { id: 'agent_config', label: '角色管理', icon: 'users' },
-      { id: 'user_settings', label: '用户设定', icon: 'user' },
-      { id: 'model_config', label: '模型配置', icon: 'settings' },
-      { id: 'prompts', label: '提示词', icon: 'edit' },
-      { id: 'voice_config', label: '语音功能', icon: 'mic' },
-      { id: 'mcp_config', label: '工具与扩展', icon: 'terminal' },
-      { id: 'distributed', label: '分布式', icon: 'network' },
-      { id: 'social', label: '社交配置', icon: 'chat' },
+      {
+        id: 'agent_config',
+        get label() {
+          return __t('ui.navigation', '角色管理')
+        },
+        icon: 'users',
+      },
+      {
+        id: 'user_settings',
+        get label() {
+          return __t('ui.navigation', '系统设定')
+        },
+        icon: 'settings',
+      },
+      {
+        id: 'model_config',
+        get label() {
+          return __t('ui.navigation', '模型配置')
+        },
+        icon: 'cpu',
+      },
+      {
+        id: 'prompts',
+        get label() {
+          return __t('ui.navigation', '提示词')
+        },
+        icon: 'edit',
+      },
+      {
+        id: 'voice_config',
+        get label() {
+          return __t('ui.navigation', '语音功能')
+        },
+        icon: 'mic',
+      },
+      {
+        id: 'mcp_config',
+        get label() {
+          return __t('ui.navigation', '工具与扩展')
+        },
+        icon: 'terminal',
+      },
+      {
+        id: 'distributed',
+        get label() {
+          return __t('ui.navigation', '分布式')
+        },
+        icon: 'network',
+      },
+      {
+        id: 'social',
+        get label() {
+          return __t('ui.navigation', '社交配置')
+        },
+        icon: 'chat',
+      },
     ],
   },
   {
     id: 'advanced',
-    title: '高级',
+    get title() {
+      return __t('ui.navigation', '高级')
+    },
     collapsible: true,
     items: [
-      { id: 'terminal', label: '系统终端', icon: 'desktop' },
-      { id: 'system_reset', label: '危险区域', icon: 'alert' },
+      {
+        id: 'terminal',
+        get label() {
+          return __t('ui.navigation', '系统终端')
+        },
+        icon: 'desktop',
+      },
+      {
+        id: 'system_reset',
+        get label() {
+          return __t('ui.navigation', '危险区域')
+        },
+        icon: 'alert',
+      },
     ],
   },
 ]
@@ -214,9 +299,12 @@ async function setTab(id: string): Promise<void> {
     if (sequence === tabRequestSequence) currentTab.value = id
   } catch (error) {
     if (sequence === tabRequestSequence)
-      useNotificationStore().toast(error instanceof Error ? error.message : '页面加载失败', {
-        type: 'error',
-      })
+      useNotificationStore().toast(
+        error instanceof Error ? error.message : __t('ui.navigation', '页面加载失败'),
+        {
+          type: 'error',
+        },
+      )
   } finally {
     if (sequence === tabRequestSequence) pendingTab.value = ''
   }

@@ -1,0 +1,20 @@
+{
+  "队列草稿暂未取回": "queue draft has not been retrieved yet",
+  "消息编辑保存失败": "Message editing and saving failed",
+  "删除对话对失败": "Failed to delete conversation pair",
+  "朗读消息失败": "Failed to read message aloud",
+  "消息已复制到剪贴板": "Message copied to clipboard",
+  "复制失败": "copy failed",
+  "恢复聊天会话失败": "Failed to restore chat session",
+  "计算下一轮 Token 预算失败": "failed to calculate the next round of Token budget.",
+  "加载本会话工具配置失败": "Failed to load this session tool configuration",
+  "加载会话心流失败": "Failed to load session flow",
+  "读取输入能力状态失败": "Failed to read input capability status",
+  "保存本地输入历史失败": "failed to save local input history",
+  "待发送附件已移除，后台清理未完成": "The attachment to be sent has been removed and the background cleanup has not been completed.",
+  "流结束后的会话同步暂时失败，稍后重试": "Session synchronization after the end of the stream failed temporarily, try again later",
+  "消息队列同步暂时失败，将自动重连": "Message queue synchronization fails temporarily and will automatically reconnect.",
+  "消息提交暂未确认": "message submission not yet confirmed",
+  "队列操作失败": "queue operation failed",
+  "无法解析文件工具结果，跳过工作区自动刷新": "Unable to parse file tool results, skip automatic refresh of workspace"
+}

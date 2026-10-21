@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /**
  * ToolCallCard.vue — 界面组件
  *
@@ -19,26 +21,16 @@ import type { AgentToolDisplay } from '../../api/modules/agentApi'
 import { getToolStyleRenderer } from './toolRenderers'
 import { resolveToolSignature } from './toolSignatures'
 import { parseToolSearchResult, toolSearchSummary } from '../../lib/toolSearchResult'
-import type { FileWritePreviewBaseline } from '@infos/shared'
+import type { ToolCallView } from './toolCallView'
 import { IMAGE_PREVIEW_TOOLS, imagePreviewsFromToolResult } from '@infos/shared'
 import { useFileMutationPreview } from '../../composables/tools/useFileMutationPreview'
 import ToolCardEdit from './renderers/ToolCardEdit.vue'
 import ToolCardImage from './renderers/ToolCardImage.vue'
 
 interface Props {
-  tool: {
-    automaticApproval?: import('@infos/shared').AutomaticApprovalRecord
-    name: string
-    args: string
-    result?: string
-    isError?: boolean
-    durationMs?: number
-    receivedChars?: number
-    assembling?: boolean
-    interrupted?: boolean
-    fileBaseline?: FileWritePreviewBaseline
-    previewTruncated?: boolean
-  }
+  tool: ToolCallView
+  children?: ToolCallView[]
+  nested?: boolean
   expanded?: boolean | null
   active?: boolean
   chainStart?: boolean
@@ -49,6 +41,8 @@ const props = withDefaults(defineProps<Props>(), {
   active: true,
   chainStart: true,
   chainEnd: true,
+  children: () => [],
+  nested: false,
 })
 const emit = defineEmits<{ 'update:expanded': [value: boolean] }>()
 const imageTool = computed(
@@ -59,7 +53,7 @@ const imageTool = computed(
 )
 const display = ref<AgentToolDisplay>()
 const detailsRef = ref<HTMLDetailsElement>()
-const internalExpanded = ref(props.tool.result === undefined)
+const internalExpanded = ref(!props.nested && props.tool.result === undefined)
 const drawerOpen = ref(false)
 const userLocked = ref(false)
 let collapseTimer: number | undefined
@@ -100,8 +94,16 @@ const filePreview = useFileMutationPreview(
 )
 const fileStatsHint = computed(() => {
   const preview = filePreview.value
-  const phase = preview.committed ? '已写入' : state.value === 'error' ? '未写入的预览' : '变更预览'
-  return `${phase} · 新增 ${preview.insertions} 行，删除 ${preview.baselineUnknown ? '行数待确认' : `${preview.deletions} 行`}`
+  const phase = preview.committed
+    ? __t('ui.tools', '已写入')
+    : state.value === 'error'
+      ? __t('ui.tools', '未写入的预览')
+      : __t('ui.tools', '变更预览')
+  return __t('ui.tools', '{0} · 新增 {1} 行，删除 {2}', [
+    phase,
+    preview.insertions,
+    preview.baselineUnknown ? __t('ui.tools', '行数待确认') : `${preview.deletions} 行`,
+  ])
 })
 const label = computed(() => toolDisplayLabel(props.tool.name, display.value))
 const icon = computed(() => toolDisplayIcon(display.value))
@@ -133,11 +135,18 @@ const draftSummary = computed(() => {
   const agentIds = props.tool.args.match(/"agent_ids"\s*:\s*\[([^\]]*)/)
   if (agentIds?.[1]) {
     const ids = [...agentIds[1].matchAll(/"([^"\n]+)"/g)].map((match) => match[1])
-    if (ids.length) return `成员 · ${ids.join(' → ')}`
+    if (ids.length) return __t('ui.tools', '成员 · {0}', [ids.join(' → ')])
   }
   return ''
 })
 const summary = computed(() => {
+  if (props.children.length) {
+    const names = props.children.map((tool) => toolDisplayLabel(tool.name)).join(' → ')
+    const finished = props.children.filter(
+      (tool) => tool.result !== undefined || tool.interrupted,
+    ).length
+    return __t('ui.tools', '{0} · {1}/{2} 已结束', [names, finished, props.children.length])
+  }
   if (
     state.value === 'ok' &&
     ['search_files', 'glob_files', 'code_search'].includes(props.tool.name)
@@ -147,7 +156,9 @@ const summary = computed(() => {
   }
   if (state.value === 'running' && ['write_file', 'edit_file'].includes(props.tool.name)) {
     const path = String(argsObj.value.file_path ?? argsObj.value.path ?? '').trim()
-    const action = props.tool.assembling ? '正在生成修改' : '正在写入'
+    const action = props.tool.assembling
+      ? __t('ui.tools', '正在生成修改')
+      : __t('ui.tools', '正在写入')
     return path ? `${action} · ${path}` : action
   }
   for (const field of signature.value.summaryFields) {
@@ -159,11 +170,11 @@ const summary = computed(() => {
   if (state.value === 'running') {
     if (draftSummary.value) return draftSummary.value
     return props.tool.assembling
-      ? `正在组装参数 · ${props.tool.receivedChars ?? 0}字符`
-      : '动作正在进行'
+      ? __t('ui.tools', '正在组装参数 · {0}字符', [props.tool.receivedChars ?? 0])
+      : __t('ui.tools', '动作正在进行')
   }
-  if (state.value === 'error') return '动作未能完成'
-  return '动作已完成'
+  if (state.value === 'error') return __t('ui.tools', '动作未能完成')
+  return __t('ui.tools', '动作已完成')
 })
 const durationText = computed(() => {
   const ms = props.tool.durationMs
@@ -208,7 +219,7 @@ watch(
     window.clearTimeout(collapseTimer)
     if (result === undefined) {
       userLocked.value = false
-      setOpen(true)
+      setOpen(!props.nested)
       return
     }
     if (previous === undefined && !userLocked.value && !drawerOpen.value) {
@@ -232,7 +243,7 @@ watch(drawerOpen, (value) => {
       `ta-${signature.archetype}`,
       `ta-${signature.variant}`,
       `ta-state-${state}`,
-      { 'is-open': open, 'chain-start': chainStart, 'chain-end': chainEnd },
+      { 'is-open': open, 'is-nested': nested, 'chain-start': chainStart, 'chain-end': chainEnd },
     ]"
     :open="open"
     :data-chain="signature.chain"
@@ -249,6 +260,7 @@ watch(drawerOpen, (value) => {
       <span class="ta-copy">
         <strong>
           {{ label }}
+          <span v-if="children.length" class="ta-nit-badge">NIT · {{ children.length }}</span>
           <span
             v-if="fileMutation && filePreview.available"
             class="ta-diff-stats"
@@ -268,16 +280,39 @@ watch(drawerOpen, (value) => {
       <span class="ta-meta">
         <span
           class="ta-state-dot"
-          :title="state === 'running' ? '进行中' : state === 'error' ? '未完成' : '已完成'"
-          :aria-label="state === 'running' ? '进行中' : state === 'error' ? '未完成' : '已完成'"
+          :title="
+            state === 'running'
+              ? __t('ui.tools', '进行中')
+              : state === 'error'
+                ? __t('ui.tools', '未完成')
+                : __t('ui.tools', '已完成')
+          "
+          :aria-label="
+            state === 'running'
+              ? __t('ui.tools', '进行中')
+              : state === 'error'
+                ? __t('ui.tools', '未完成')
+                : __t('ui.tools', '已完成')
+          "
         >
           <span class="ta-state-text">
-            {{ state === 'running' ? '进行中' : state === 'error' ? '未完成' : '已完成' }}
+            {{
+              state === 'running'
+                ? __t('ui.tools', '进行中')
+                : state === 'error'
+                  ? __t('ui.tools', '未完成')
+                  : __t('ui.tools', '已完成')
+            }}
           </span>
         </span>
         <time v-if="durationText">{{ durationText }}</time>
-        <button class="ta-data-port" type="button" title="查看技术详情" @click="openDrawer">
-          详情
+        <button
+          class="ta-data-port"
+          type="button"
+          :title="__t('ui.tools', '查看技术详情')"
+          @click="openDrawer"
+        >
+          {{ __t('ui.tools', '详情') }}
         </button>
       </span>
     </summary>
@@ -287,11 +322,31 @@ watch(drawerOpen, (value) => {
         class="ta-approval-note"
         :title="tool.automaticApproval.modelId"
       >
-        自动审批员 · {{ tool.automaticApproval.decision === 'allow' ? '通过' : '拒绝'
-        }}{{ tool.automaticApproval.errorCode ? '（审批异常）' : '' }}
+        {{ __t('ui.tools', '自动审批员 ·') }}
+        {{
+          tool.automaticApproval.decision === 'allow'
+            ? __t('ui.tools', '通过')
+            : __t('ui.tools', '拒绝')
+        }}{{ tool.automaticApproval.errorCode ? __t('ui.tools', '（审批异常）') : '' }}
         <span>{{ tool.automaticApproval.reason }}</span>
       </p>
-      <template v-if="fileMutation">
+      <div
+        v-if="children.length"
+        class="ta-nested-tools"
+        :aria-label="__t('ui.tools', 'NIT 内部工具调用')"
+      >
+        <ToolCallCard
+          v-for="(child, index) in children"
+          :key="child.callId ?? index"
+          :tool="child"
+          :active="open && active"
+          :chain-start="index === 0"
+          :chain-end="index === children.length - 1"
+          nested
+        />
+        <pre v-if="tool.isError && tool.result" class="ta-nit-error">{{ tool.result }}</pre>
+      </div>
+      <template v-else-if="fileMutation">
         <ToolCardEdit
           v-if="open"
           :args="tool.args"
@@ -360,10 +415,40 @@ watch(drawerOpen, (value) => {
   --ta-highlight: color-mix(in srgb, var(--ui-text-inverse) 28%, transparent);
   --ta-shadow: color-mix(in srgb, var(--ta-accent) 18%, transparent);
   position: relative;
-  min-width: 0;
-  width: 96%;
-  max-width: 100%;
+  width: fit-content;
+  min-width: min(100%, 290px);
+  max-width: min(100%, 48rem);
   color: var(--ui-text-primary);
+}
+.ta-node[open] {
+  width: min(100%, 60rem);
+  max-width: 100%;
+}
+.ta-node.is-nested {
+  max-width: 100%;
+}
+.ta-nested-tools {
+  container-type: inline-size;
+  display: grid;
+  justify-items: start;
+  gap: 5px;
+  min-width: 0;
+  padding: 8px 10px;
+}
+.ta-nit-badge {
+  color: var(--ta-accent);
+  font:
+    600 9px var(--font-mono),
+    monospace;
+  white-space: nowrap;
+}
+.ta-nit-error {
+  max-width: 100%;
+  margin: 4px 0;
+  color: var(--ui-danger);
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .ta-node::before {
   position: absolute;
@@ -382,7 +467,7 @@ watch(drawerOpen, (value) => {
   position: relative;
   display: grid;
   min-height: 39px;
-  grid-template-columns: 40px minmax(0, 1fr) minmax(24px, 90px) auto;
+  grid-template-columns: 40px minmax(0, 1fr) 48px auto;
   align-items: center;
   gap: 7px;
   padding: 3px 5px 3px 1px;
@@ -411,6 +496,7 @@ watch(drawerOpen, (value) => {
 .ta-copy {
   display: grid;
   min-width: 0;
+  max-width: 54ch;
   gap: 1px;
 }
 .ta-copy strong {
@@ -481,6 +567,7 @@ watch(drawerOpen, (value) => {
   min-width: 95px;
 }
 .ta-summary time {
+  grid-column: 2;
   color: var(--ui-text-muted);
   font:
     8px var(--font-mono),
@@ -511,6 +598,7 @@ watch(drawerOpen, (value) => {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--ui-danger) 18%, transparent);
 }
 .ta-data-port {
+  grid-column: 3;
   width: 44px;
   height: 24px;
   border: 1px solid var(--ta-edge);
@@ -593,9 +681,6 @@ watch(drawerOpen, (value) => {
   }
 }
 @media (max-width: 700px) {
-  .ta-node {
-    width: 100%;
-  }
   .ta-summary {
     grid-template-columns: 40px minmax(0, 1fr) auto;
   }
@@ -609,6 +694,30 @@ watch(drawerOpen, (value) => {
   }
   .ta-data-port {
     width: 40px;
+  }
+}
+
+@container (max-width: 440px) {
+  .ta-summary {
+    grid-template-columns: 32px minmax(0, 1fr) auto;
+    gap: 5px;
+  }
+  .ta-progress {
+    display: none;
+  }
+  .ta-meta {
+    gap: 5px;
+    min-width: 86px;
+  }
+  .ta-copy strong {
+    font-size: 11px;
+    column-gap: 6px;
+  }
+  .ta-result-stage {
+    margin-left: 18px;
+  }
+  .ta-nested-tools {
+    padding: 6px;
   }
 }
 

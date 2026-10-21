@@ -17,6 +17,8 @@ export interface PromptDocument {
   role: PromptRole
   enabled: boolean
   builtin?: boolean
+  /** 保存时所依据的内置正文指纹，用于升级未改动的内置模板。 */
+  builtinBodyHash?: string
   variables: string[]
 }
 

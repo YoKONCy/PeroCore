@@ -1,6 +1,6 @@
 {
   "name": "@infos/social",
-  "version": "0.9.4",
+  "version": "0.9.5",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,10 +11,14 @@
     "@infos/shared": "workspace:*",
     "drizzle-orm": "^0.44.0",
     "hono": "^4.7.0",
+    "omggif": "1.0.10",
+    "pngjs": "7.0.0",
     "triviumdb": "0.8.9",
     "uuid": "^14.0.0"
   },
   "devDependencies": {
+    "@types/omggif": "^1.0.5",
+    "@types/pngjs": "^6.0.5",
     "@types/uuid": "^11.0.0"
   }
 }

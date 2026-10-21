@@ -25,7 +25,11 @@ export function socialMessageId(message: InboundMessage): string {
   return String((message.rawEvent as Record<string, unknown> | undefined)?.message_id ?? '')
 }
 
-export function formatSocialMessage(message: InboundMessage, ownerId?: string): string {
+export function formatSocialMessage(
+  message: InboundMessage,
+  ownerId?: string,
+  isBot?: (id: string) => boolean,
+): string {
   const identity =
     message.senderId === 'self'
       ? '自己'
@@ -34,7 +38,11 @@ export function formatSocialMessage(message: InboundMessage, ownerId?: string): 
         : '普通联系人'
   const id = socialMessageId(message)
   const reference = message.replyTo ? ` [引用:${message.replyTo}]` : ''
-  return `[${JSON.stringify(message.senderName)} QQ:${message.senderId} 身份:${identity}]${id ? ` [msg:${id}]` : ''}${reference}: ${message.content}`
+  const bot =
+    identity === '普通联系人' && (isBot ? isBot(message.senderId) : message.senderKind === 'bot')
+      ? ' [bot·无需刻意回应@]'
+      : ''
+  return `[${JSON.stringify(message.senderName)} QQ:${message.senderId} 身份:${identity}]${bot}${id ? ` [msg:${id}]` : ''}${reference}: ${message.content}`
 }
 
 /** 历史与恢复队列共用同一份规范化信息，也识别已保存的原始平台附件。 */
@@ -73,6 +81,7 @@ export function restoreSocialMessage(row: SocialMessageRecord): InboundMessage {
     replyTo: normalized?.replyTo ?? extractReplyId(segments),
     routeThreadId: normalized?.routeThreadId,
     isMentioned: normalized?.isMentioned === true || raw._isMentioned === true,
+    senderKind: normalized?.senderKind,
     rawEvent: { ...raw, self_id: row.accountId, message_id: row.msgId },
   }
 }

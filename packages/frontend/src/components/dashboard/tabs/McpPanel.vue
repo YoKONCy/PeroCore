@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../../i18n/index'
+
 /**
  * McpPanel — MCP 服务管理面板
  *
@@ -33,7 +35,9 @@ const emit = defineEmits<{
 
 /** 安全获取状态 meta */
 const STATUS_FALLBACK = {
-  label: '未知',
+  get label() {
+    return __t('ui.settings', '未知')
+  },
   dotClass: 'bg-slate-400',
   badgeClass: 'text-slate-400 border-slate-300 bg-slate-50',
 }
@@ -47,13 +51,13 @@ function getStatusMeta(status: string) {
   <div v-if="isLoading && servers.length === 0" class="flex-1 flex items-center justify-center">
     <div class="flex flex-col items-center gap-3 text-slate-400">
       <PixelIcon name="loader" size="lg" />
-      <span class="text-sm font-bold">正在加载 MCP 配置...</span>
+      <span class="text-sm font-bold">{{ __t('ui.settings', '正在加载 MCP 配置...') }}</span>
     </div>
   </div>
 
   <!-- 空状态 -->
   <div v-else-if="servers.length === 0" class="flex-1 flex items-center justify-center">
-    <PEmpty description="还没有配置 MCP 服务" />
+    <PEmpty :description="__t('ui.settings', '还没有配置 MCP 服务')" />
   </div>
 
   <!-- 服务列表 -->
@@ -89,7 +93,7 @@ function getStatusMeta(status: string) {
               v-if="!srv.enabled"
               class="text-[9px] font-bold text-[var(--ui-warning)] px-1.5 py-0.5 bg-[var(--ui-warning-soft)] border border-[color:var(--ui-warning)]"
             >
-              已禁用
+              {{ __t('ui.settings', '已禁用') }}
             </span>
           </div>
           <p class="text-[11px] text-slate-400 font-mono mt-1 truncate">
@@ -106,7 +110,7 @@ function getStatusMeta(status: string) {
           <PButton
             variant="ghost"
             size="sm"
-            title="切换启用/禁用"
+            :title="__t('ui.settings', '切换启用/禁用')"
             @click.stop="emit('toggle-enabled', srv.id)"
           >
             <PixelIcon name="eye" size="xs" />
@@ -114,13 +118,18 @@ function getStatusMeta(status: string) {
           <PButton
             variant="ghost"
             size="sm"
-            title="重新连接"
+            :title="__t('ui.settings', '重新连接')"
             :disabled="!srv.enabled"
             @click.stop="emit('reconnect', srv.id)"
           >
             <PixelIcon name="refresh" size="xs" />
           </PButton>
-          <PButton variant="ghost" size="sm" title="删除" @click.stop="emit('remove', srv.id)">
+          <PButton
+            variant="ghost"
+            size="sm"
+            :title="__t('ui.settings', '删除')"
+            @click.stop="emit('remove', srv.id)"
+          >
             <PixelIcon name="trash" size="xs" />
           </PButton>
         </div>
@@ -132,7 +141,7 @@ function getStatusMeta(status: string) {
         class="mt-3 pt-3 border-t border-[var(--ui-border-subtle)]"
       >
         <h5 class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2 font-pixel">
-          可用工具 ({{ srv.tools.length }})
+          {{ __t('ui.settings', '可用工具 (') }}{{ srv.tools.length }})
         </h5>
         <div
           v-for="tool in srv.tools"
@@ -149,7 +158,9 @@ function getStatusMeta(status: string) {
         v-if="expandedId === srv.id && srv.tools.length === 0 && srv.status === 'connected'"
         class="mt-3 pt-3 border-t border-slate-100"
       >
-        <p class="text-[11px] text-slate-400 italic">该服务未暴露任何工具</p>
+        <p class="text-[11px] text-slate-400 italic">
+          {{ __t('ui.settings', '该服务未暴露任何工具') }}
+        </p>
       </div>
     </PCard>
   </div>

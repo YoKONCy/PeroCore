@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { t as __t } from '../../../i18n/index'
+
+import { copyClientText } from '../../../lib/clientPlatform'
+
 import { computed, reactive, ref } from 'vue'
 import type { PromptRole, PromptFormat, PromptFramework } from '@infos/shared'
 import { PROMPT_FORMATS, PROMPT_GENERATION_TYPES, promptFormat } from '@infos/shared'
@@ -51,6 +55,7 @@ const {
   resources,
   frameworkOptions,
   sourceOptions,
+  displayBuiltinName,
   currentAssignment,
   setSection,
   select,
@@ -96,18 +101,54 @@ const stScope = reactive({ scope: 'later' as 'all' | 'range' | 'later', agentId:
 const isSt = computed(() =>
   Boolean(framework.value && promptFormat(framework.value) === 'sillytavern'),
 )
-const formatOptions = [{ value: '', label: '全部格式' }, ...PROMPT_FORMATS]
-const generationOptions = PROMPT_GENERATION_TYPES.map((item) => ({ ...item }))
+const formatOptions = computed(() => [
+  { value: '', label: __t('ui.settings', '全部格式') },
+  ...PROMPT_FORMATS.map((item) => ({ ...item, label: __t('common.interface', item.label) })),
+])
+const generationOptions = computed(() =>
+  PROMPT_GENERATION_TYPES.map((item) => ({
+    ...item,
+    label: __t('common.interface', item.label),
+  })),
+)
 const formatLabel = (item: PromptFramework) =>
-  PROMPT_FORMATS.find((format) => format.value === promptFormat(item))?.label ?? '自定义框架'
+  __t(
+    'common.interface',
+    PROMPT_FORMATS.find((format) => format.value === promptFormat(item))?.label ?? '自定义框架',
+  )
 const layoutOptions = [
-  { value: 'text', label: '完整正文' },
-  { value: 'blocks', label: '自由编排' },
+  {
+    value: 'text',
+    get label() {
+      return __t('ui.settings', '完整正文')
+    },
+  },
+  {
+    value: 'blocks',
+    get label() {
+      return __t('ui.settings', '自由编排')
+    },
+  },
 ]
 const activationOptions = [
-  { value: 'all', label: '全部对话' },
-  { value: 'range', label: '指定范围' },
-  { value: 'later', label: '稍后指派' },
+  {
+    value: 'all',
+    get label() {
+      return __t('ui.settings', '全部对话')
+    },
+  },
+  {
+    value: 'range',
+    get label() {
+      return __t('ui.settings', '指定范围')
+    },
+  },
+  {
+    value: 'later',
+    get label() {
+      return __t('ui.settings', '稍后指派')
+    },
+  },
 ]
 function openIndependent() {
   Object.assign(independent, {
@@ -135,42 +176,148 @@ function submitActivation() {
 }
 previewAgent.value = store.activeAgentId
 const sections: Array<{ id: PromptSection; label: string; icon: string }> = [
-  { id: 'framework', label: '框架', icon: 'settings' },
-  { id: 'slot', label: '槽位', icon: 'list' },
-  { id: 'component', label: '组件', icon: 'puzzle' },
-  { id: 'task', label: '任务', icon: 'terminal' },
-  { id: 'assignments', label: '指派', icon: 'users' },
-  { id: 'versions', label: '版本', icon: 'clock' },
+  {
+    id: 'framework',
+    get label() {
+      return __t('ui.settings', '框架')
+    },
+    icon: 'settings',
+  },
+  {
+    id: 'slot',
+    get label() {
+      return __t('ui.settings', '槽位')
+    },
+    icon: 'list',
+  },
+  {
+    id: 'component',
+    get label() {
+      return __t('ui.settings', '组件')
+    },
+    icon: 'puzzle',
+  },
+  {
+    id: 'task',
+    get label() {
+      return __t('ui.settings', '任务')
+    },
+    icon: 'terminal',
+  },
+  {
+    id: 'assignments',
+    get label() {
+      return __t('ui.settings', '指派')
+    },
+    icon: 'users',
+  },
+  {
+    id: 'versions',
+    get label() {
+      return __t('ui.settings', '版本')
+    },
+    icon: 'clock',
+  },
 ]
 const roleOptions = [
-  { value: 'system', label: '系统消息' },
-  { value: 'user', label: '用户消息' },
-  { value: 'assistant', label: '助手消息' },
+  {
+    value: 'system',
+    get label() {
+      return __t('ui.settings', '系统消息')
+    },
+  },
+  {
+    value: 'user',
+    get label() {
+      return __t('ui.settings', '用户消息')
+    },
+  },
+  {
+    value: 'assistant',
+    get label() {
+      return __t('ui.settings', '助手消息')
+    },
+  },
 ]
 const kindOptions = [
-  { value: 'template', label: '模板' },
-  { value: 'history', label: '原生历史' },
+  {
+    value: 'template',
+    get label() {
+      return __t('ui.settings', '模板')
+    },
+  },
+  {
+    value: 'history',
+    get label() {
+      return __t('ui.settings', '原生历史')
+    },
+  },
 ]
 const bindingKinds = [
-  { value: 'template', label: '模板' },
-  { value: 'persona', label: '角色人设' },
-  { value: 'capabilities', label: '能力片段' },
+  {
+    value: 'template',
+    get label() {
+      return __t('ui.settings', '模板')
+    },
+  },
+  {
+    value: 'persona',
+    get label() {
+      return __t('ui.settings', '角色人设')
+    },
+  },
+  {
+    value: 'capabilities',
+    get label() {
+      return __t('ui.settings', '能力片段')
+    },
+  },
 ]
 const channelOptions = [
-  { value: '', label: '所有频道' },
-  { value: 'desktop', label: '主对话' },
-  { value: 'group', label: '据点' },
-  { value: 'social', label: '社交' },
-  { value: 'task', label: '后台任务' },
+  {
+    value: '',
+    get label() {
+      return __t('ui.settings', '所有频道')
+    },
+  },
+  {
+    value: 'desktop',
+    get label() {
+      return __t('ui.settings', '主对话')
+    },
+  },
+  {
+    value: 'group',
+    get label() {
+      return __t('ui.settings', '据点')
+    },
+  },
+  {
+    value: 'social',
+    get label() {
+      return __t('ui.settings', '社交')
+    },
+  },
+  {
+    value: 'task',
+    get label() {
+      return __t('ui.settings', '后台任务')
+    },
+  },
 ]
 const agentOptions = computed(() => [
-  { label: '所有角色', value: '' },
+  {
+    get label() {
+      return __t('ui.settings', '所有角色')
+    },
+    value: '',
+  },
   ...store.agents.map((agent) => ({ label: agent.name, value: agent.id })),
 ])
 const overrideTargets = computed(() =>
   bundle.value.documents
     .filter((d) => d.kind === bundle.value.documents.find((d) => d.id === overrideFrom.value)?.kind)
-    .map((d) => ({ label: d.name, value: d.id })),
+    .map((d) => ({ label: displayBuiltinName(d), value: d.id })),
 )
 const dependencies = computed(() => [
   ...new Set(
@@ -201,7 +348,7 @@ function addOverride() {
   overrideTo.value = ''
 }
 function scopeLabel(agentId: string, channel: string) {
-  return `${store.agents.find((a) => a.id === agentId)?.name ?? (agentId || '全局')} · ${channelOptions.find((c) => c.value === channel)?.label ?? channel}`
+  return `${store.agents.find((a) => a.id === agentId)?.name ?? (agentId || __t('ui.settings', '全局'))} · ${channelOptions.find((c) => c.value === channel)?.label ?? channel}`
 }
 function onImport(event: Event) {
   const input = event.target as HTMLInputElement
@@ -212,10 +359,10 @@ function onImport(event: Event) {
 async function insertVariable(name: string) {
   const value = `{{ ${name} }}`
   try {
-    await navigator.clipboard.writeText(value)
-    notifications.toast('变量已复制', 'success')
+    await copyClientText(value)
+    notifications.toast(__t('ui.settings', '变量已复制'), 'success')
   } catch {
-    notifications.toast('无法复制变量', 'error')
+    notifications.toast(__t('ui.settings', '无法复制变量'), 'error')
   }
 }
 function setVariables(value: string) {
@@ -246,29 +393,35 @@ function addFrameworkOverride() {
       <div>
         <h2>
           <PixelIcon name="edit" />
-          提示词
+          {{ __t('ui.settings', '提示词') }}
           <span class="status-chip" :class="{ changed: dirty }">
-            {{ dirty ? '未保存' : '草稿' }}
+            {{ dirty ? __t('ui.settings', '未保存') : __t('ui.settings', '草稿') }}
           </span>
         </h2>
         <span class="eyebrow">PROMPT WORKSPACE</span>
       </div>
       <div class="actions">
         <PButton variant="secondary" size="sm" :disabled="busy || !view" @click="openIndependent">
-          ＋ 新建框架
+          {{ __t('ui.settings', '＋ 新建框架') }}
         </PButton>
         <PButton variant="ghost" size="sm" :disabled="busy" @click="fileInput?.click()">
-          导入
+          {{ __t('ui.settings', '导入') }}
         </PButton>
-        <PButton variant="ghost" size="sm" @click="exportBundle">导出</PButton>
+        <PButton variant="ghost" size="sm" @click="exportBundle">
+          {{ __t('ui.settings', '导出') }}
+        </PButton>
         <PButton variant="ghost" size="sm" :disabled="busy || !view" @click="restoreDefaults">
-          内置预设
+          {{ __t('ui.settings', '内置预设') }}
         </PButton>
-        <PButton variant="secondary" size="sm" :disabled="busy" @click="validate">校验</PButton>
+        <PButton variant="secondary" size="sm" :disabled="busy" @click="validate">
+          {{ __t('ui.settings', '校验') }}
+        </PButton>
         <PButton variant="secondary" size="sm" :disabled="busy || !view" @click="save()">
-          保存草稿
+          {{ __t('ui.settings', '保存草稿') }}
         </PButton>
-        <PButton size="sm" :disabled="busy || !view" @click="save(true)">发布</PButton>
+        <PButton size="sm" :disabled="busy || !view" @click="save(true)">
+          {{ __t('ui.settings', '发布') }}
+        </PButton>
       </div>
       <input
         ref="fileInput"
@@ -279,7 +432,7 @@ function addFrameworkOverride() {
       />
     </header>
 
-    <nav class="section-tabs" aria-label="提示词管理">
+    <nav class="section-tabs" :aria-label="__t('ui.settings', '提示词管理')">
       <button
         v-for="tab in sections"
         :key="tab.id"
@@ -290,19 +443,22 @@ function addFrameworkOverride() {
         {{ tab.label }}
       </button>
       <span class="release-label" :title="view?.activeReleaseId">
-        已发布 {{ activeVersion ? new Date(activeVersion.createdAt).toLocaleString() : '—' }}
+        {{ __t('ui.settings', '已发布') }}
+        {{ activeVersion ? new Date(activeVersion.createdAt).toLocaleString() : '—' }}
       </span>
     </nav>
     <div v-if="error" class="error-banner" role="alert">
       {{ error }}
-      <PButton size="sm" variant="ghost" :disabled="busy" @click="load">重新载入</PButton>
+      <PButton size="sm" variant="ghost" :disabled="busy" @click="load">
+        {{ __t('ui.settings', '重新载入') }}
+      </PButton>
     </div>
     <div v-if="view?.recoveryError" class="error-banner" role="alert">{{ view.recoveryError }}</div>
 
     <div v-if="view" class="prompt-body" :inert="busy">
       <template v-if="!['assignments', 'versions'].includes(section)">
         <aside class="resource-rail surface">
-          <PInput v-model="search" placeholder="搜索名称 / ID" size="sm" />
+          <PInput v-model="search" :placeholder="__t('ui.settings', '搜索名称 / ID')" size="sm" />
           <PSelect
             v-if="section === 'framework'"
             :model-value="formatFilter"
@@ -318,7 +474,12 @@ function addFrameworkOverride() {
               variant="secondary"
               @click="section === 'framework' ? openIndependent() : create()"
             >
-              ＋ {{ section === 'framework' ? '新建框架' : '新模板' }}
+              ＋
+              {{
+                section === 'framework'
+                  ? __t('ui.settings', '新建框架')
+                  : __t('ui.settings', '新模板')
+              }}
             </PButton>
           </div>
           <div class="resource-list">
@@ -329,20 +490,22 @@ function addFrameworkOverride() {
               :title="item.id"
               @click="select(item.id)"
             >
-              <span>{{ item.name }}</span>
+              <span>{{ displayBuiltinName(item) }}</span>
               <small>
                 {{
                   section === 'framework'
-                    ? { infos: '原生', sillytavern: '酒馆', custom: '自定义' }[
-                        promptFormat(item as PromptFramework)
-                      ]
+                    ? {
+                        infos: __t('ui.settings', '原生'),
+                        sillytavern: __t('ui.settings', '酒馆'),
+                        custom: __t('ui.settings', '自定义'),
+                      }[promptFormat(item as PromptFramework)]
                     : item.builtin
-                      ? '内置'
-                      : '自定义'
+                      ? __t('ui.settings', '内置')
+                      : __t('ui.settings', '自定义')
                 }}
               </small>
             </button>
-            <p v-if="!resources.length" class="empty">暂无条目</p>
+            <p v-if="!resources.length" class="empty">{{ __t('ui.settings', '暂无条目') }}</p>
           </div>
         </aside>
 
@@ -355,24 +518,28 @@ function addFrameworkOverride() {
                 <code>{{ selectedId }}</code>
               </div>
               <div class="actions">
-                <PButton size="sm" variant="ghost" @click="create(true)">复制</PButton>
-                <PButton v-if="hasBuiltin" size="sm" variant="ghost" @click="reset">
-                  恢复内置
+                <PButton size="sm" variant="ghost" @click="create(true)">
+                  {{ __t('ui.settings', '复制') }}
                 </PButton>
-                <PButton v-else size="sm" variant="danger" @click="remove">删除</PButton>
+                <PButton v-if="hasBuiltin" size="sm" variant="ghost" @click="reset">
+                  {{ __t('ui.settings', '恢复内置') }}
+                </PButton>
+                <PButton v-else size="sm" variant="danger" @click="remove">
+                  {{ __t('ui.settings', '删除') }}
+                </PButton>
               </div>
             </div>
             <div class="editor-tools">
               <div class="mode-tabs">
                 <button :class="{ active: mode === 'visual' }" @click="setMode('visual')">
-                  {{ framework ? '编排' : '编辑' }}
+                  {{ framework ? __t('ui.settings', '编排') : __t('ui.settings', '编辑') }}
                 </button>
                 <button :class="{ active: mode === 'source' }" @click="setMode('source')">
-                  源码
+                  {{ __t('ui.settings', '源码') }}
                 </button>
               </div>
               <PButton size="sm" variant="secondary" :disabled="busy" @click="renderPreview">
-                渲染预览
+                {{ __t('ui.settings', '渲染预览') }}
               </PButton>
             </div>
             <div v-if="framework" class="framework-entry">
@@ -385,9 +552,11 @@ function addFrameworkOverride() {
                   :disabled="busy"
                   @click="exportStPreset"
                 >
-                  导出酒馆预设
+                  {{ __t('ui.settings', '导出酒馆预设') }}
                 </PButton>
-                <PButton size="sm" variant="secondary" @click="openActivation">指派此框架</PButton>
+                <PButton size="sm" variant="secondary" @click="openActivation">
+                  {{ __t('ui.settings', '指派此框架') }}
+                </PButton>
               </div>
             </div>
 
@@ -396,13 +565,13 @@ function addFrameworkOverride() {
               v-model="source"
               class="code-editor source-editor"
               spellcheck="false"
-              aria-label="模板源码"
+              :aria-label="__t('ui.settings', '模板源码')"
               @keydown.ctrl.s.prevent="save()"
             />
             <template v-else-if="document">
               <div class="document-meta">
                 <label>
-                  启用
+                  {{ __t('ui.settings', '启用') }}
                   <PSwitch v-model="document.enabled" />
                 </label>
               </div>
@@ -410,20 +579,20 @@ function addFrameworkOverride() {
                 v-model="document.body"
                 class="code-editor source-editor"
                 spellcheck="false"
-                aria-label="模板正文"
+                :aria-label="__t('ui.settings', '模板正文')"
                 @keydown.ctrl.s.prevent="save()"
               />
               <label class="field">
-                自定义变量
+                {{ __t('ui.settings', '自定义变量') }}
                 <PInput
                   :model-value="document.variables.join(', ')"
-                  placeholder="逗号分隔"
+                  :placeholder="__t('ui.settings', '逗号分隔')"
                   size="sm"
                   @update:model-value="setVariables"
                 />
               </label>
               <div v-if="dependencies.length" class="dependency-list">
-                <span>引用</span>
+                <span>{{ __t('ui.settings', '引用') }}</span>
                 <button
                   v-for="key in dependencies"
                   :key="key"
@@ -448,7 +617,7 @@ function addFrameworkOverride() {
               <template v-else>
                 <details class="bindings-panel">
                   <summary>
-                    数据装配
+                    {{ __t('ui.settings', '数据装配') }}
                     <small>{{ framework.bindings.length }}</small>
                   </summary>
                   <div
@@ -457,7 +626,11 @@ function addFrameworkOverride() {
                     class="binding-row"
                   >
                     <div class="row">
-                      <PInput v-model="binding.name" placeholder="变量名" size="sm" />
+                      <PInput
+                        v-model="binding.name"
+                        :placeholder="__t('ui.settings', '变量名')"
+                        size="sm"
+                      />
                       <PSelect
                         :model-value="binding.kind"
                         :options="bindingKinds"
@@ -470,7 +643,7 @@ function addFrameworkOverride() {
                       <button
                         class="icon-button"
                         :disabled="index === 0"
-                        aria-label="上移装配"
+                        :aria-label="__t('ui.settings', '上移装配')"
                         @click="moveBinding(index, -1)"
                       >
                         ↑
@@ -478,14 +651,14 @@ function addFrameworkOverride() {
                       <button
                         class="icon-button"
                         :disabled="index === framework.bindings.length - 1"
-                        aria-label="下移装配"
+                        :aria-label="__t('ui.settings', '下移装配')"
                         @click="moveBinding(index, 1)"
                       >
                         ↓
                       </button>
                       <button
                         class="icon-button"
-                        aria-label="删除装配"
+                        :aria-label="__t('ui.settings', '删除装配')"
                         @click="framework.bindings.splice(index, 1)"
                       >
                         ×
@@ -503,11 +676,15 @@ function addFrameworkOverride() {
                         v-if="!binding.source"
                         v-model="binding.template"
                         class="code-editor compact-editor"
-                        placeholder="内联模板"
+                        :placeholder="__t('ui.settings', '内联模板')"
                         spellcheck="false"
                       />
                     </template>
-                    <PInput v-model="binding.when" placeholder="生效条件（可选）" size="sm" />
+                    <PInput
+                      v-model="binding.when"
+                      :placeholder="__t('ui.settings', '生效条件（可选）')"
+                      size="sm"
+                    />
                   </div>
                   <PButton
                     size="sm"
@@ -520,12 +697,12 @@ function addFrameworkOverride() {
                       })
                     "
                   >
-                    ＋ 数据装配
+                    {{ __t('ui.settings', '＋ 数据装配') }}
                   </PButton>
                 </details>
                 <details class="bindings-panel">
                   <summary>
-                    框架模板替换
+                    {{ __t('ui.settings', '框架模板替换') }}
                     <small>{{ Object.keys(framework.overrides ?? {}).length }}</small>
                   </summary>
                   <div
@@ -538,7 +715,7 @@ function addFrameworkOverride() {
                     <span>{{ bundle.documents.find((d) => d.id === target)?.name ?? target }}</span>
                     <button
                       class="icon-button"
-                      aria-label="移除替换"
+                      :aria-label="__t('ui.settings', '移除替换')"
                       @click="delete framework.overrides![origin]"
                     >
                       ×
@@ -548,14 +725,14 @@ function addFrameworkOverride() {
                     <PSelect
                       v-model="frameworkOverrideFrom"
                       :options="sourceOptions.filter((o) => o.value)"
-                      placeholder="原模板"
+                      :placeholder="__t('ui.settings', '原模板')"
                       size="sm"
                       teleport
                     />
                     <PSelect
                       v-model="frameworkOverrideTo"
                       :options="sourceOptions.filter((o) => o.value)"
-                      placeholder="替换为"
+                      :placeholder="__t('ui.settings', '替换为')"
                       size="sm"
                       teleport
                     />
@@ -565,7 +742,7 @@ function addFrameworkOverride() {
                       :disabled="!frameworkOverrideFrom || !frameworkOverrideTo"
                       @click="addFrameworkOverride"
                     >
-                      ＋ 替换
+                      {{ __t('ui.settings', '＋ 替换') }}
                     </PButton>
                   </div>
                 </details>
@@ -587,7 +764,7 @@ function addFrameworkOverride() {
                       <button
                         class="drag-handle"
                         draggable="true"
-                        aria-label="拖动排序"
+                        :aria-label="__t('ui.settings', '拖动排序')"
                         @dragstart="
                           ($event) => {
                             dragging = index
@@ -604,7 +781,7 @@ function addFrameworkOverride() {
                       <button
                         class="icon-button"
                         :disabled="index === 0"
-                        aria-label="上移"
+                        :aria-label="__t('ui.settings', '上移')"
                         @click="moveBlock(index, index - 1)"
                       >
                         ↑
@@ -612,14 +789,14 @@ function addFrameworkOverride() {
                       <button
                         class="icon-button"
                         :disabled="index === framework.blocks.length - 1"
-                        aria-label="下移"
+                        :aria-label="__t('ui.settings', '下移')"
                         @click="moveBlock(index, index + 1)"
                       >
                         ↓
                       </button>
                       <button
                         class="icon-button"
-                        aria-label="删除区块"
+                        :aria-label="__t('ui.settings', '删除区块')"
                         @click="framework.blocks.splice(index, 1)"
                       >
                         ×
@@ -640,7 +817,11 @@ function addFrameworkOverride() {
                         teleport
                         @update:model-value="block.role = $event as PromptRole"
                       />
-                      <PInput v-model="block.when" placeholder="生效条件（可选）" size="sm" />
+                      <PInput
+                        v-model="block.when"
+                        :placeholder="__t('ui.settings', '生效条件（可选）')"
+                        size="sm"
+                      />
                     </div>
                     <template v-if="block.kind === 'template'">
                       <PSelect
@@ -654,7 +835,7 @@ function addFrameworkOverride() {
                         v-if="!block.source"
                         v-model="block.template"
                         class="code-editor compact-editor"
-                        placeholder="模板正文"
+                        :placeholder="__t('ui.settings', '模板正文')"
                         spellcheck="false"
                       />
                       <button
@@ -668,22 +849,26 @@ function addFrameworkOverride() {
                           )
                         "
                       >
-                        编辑模板 ↗
+                        {{ __t('ui.settings', '编辑模板 ↗') }}
                       </button>
                     </template>
                   </article>
                 </TransitionGroup>
-                <p v-if="!framework.blocks.length" class="empty">添加消息区块，开始编写你的框架</p>
-                <PButton variant="secondary" size="sm" @click="addBlock">＋ 区块</PButton>
+                <p v-if="!framework.blocks.length" class="empty">
+                  {{ __t('ui.settings', '添加消息区块，开始编写你的框架') }}
+                </p>
+                <PButton variant="secondary" size="sm" @click="addBlock">
+                  {{ __t('ui.settings', '＋ 区块') }}
+                </PButton>
               </template>
             </template>
           </template>
-          <p v-else class="empty">选择一个条目</p>
+          <p v-else class="empty">{{ __t('ui.settings', '选择一个条目') }}</p>
         </main>
 
         <aside class="inspector surface">
           <template v-if="isSt">
-            <h3>常用宏</h3>
+            <h3>{{ __t('ui.settings', '常用宏') }}</h3>
             <div class="st-quick-macros">
               <button
                 v-for="name in [
@@ -703,37 +888,35 @@ function addFrameworkOverride() {
               />
             </div>
           </template>
-          <h3>变量</h3>
+          <h3>{{ __t('ui.settings', '变量') }}</h3>
           <div class="variable-list">
             <button
               v-for="variable in visibleVariables"
               :key="variable.name"
-              :title="variable.label"
+              :title="__t('common.prompts', variable.label)"
               @click="insertVariable(variable.name)"
             >
-              <span>{{ variable.label }}</span>
+              <span>{{ __t('common.prompts', variable.label) }}</span>
               <code>{{ variable.name }}</code>
             </button>
           </div>
           <details v-if="!isSt" class="tutorial">
-            <summary>模板教程</summary>
+            <summary>{{ __t('ui.settings', '模板教程') }}</summary>
             <p>
-              变量使用
+              {{ __t('ui.settings', '变量使用') }}
               <code v-pre>{{ owner_name }}</code>
-              。条件使用 Nunjucks 语法。
+              {{ __t('ui.settings', '。条件使用 Nunjucks 语法。') }}
             </p>
             <p>
-              组件需显式引用：
+              {{ __t('ui.settings', '组件需显式引用：') }}
               <code v-pre>{{ component('components/example') }}</code>
-              。插入的聊天和工具内容不会再次作为模板执行。
+              。
             </p>
+            <p>{{ __t('ui.settings', '按顺序排列变量和消息；system 区块放在对话之前。') }}</p>
             <p>
-              数据装配按顺序生成变量，区块按顺序生成消息。system
-              区块应放在对话之前；“原生历史”保留用户和角色消息。
+              {{ __t('ui.settings', '空白框架需自行编写人设与规则；任务模板在“指派”中启用。') }}
             </p>
-            <p>空白框架不附加内置人设或规则。权限、工具 Schema 和任务输出校验由运行时管理。</p>
-            <p>新任务模板可在“指派”中替换对应任务。审批出错仍按自动审批失败处理。</p>
-            <p>预览读取所选角色的人设，记忆和历史使用示例变量。</p>
+            <p>{{ __t('ui.settings', '预览读取所选角色的人设，记忆和历史使用示例变量。') }}</p>
           </details>
         </aside>
       </template>
@@ -741,27 +924,31 @@ function addFrameworkOverride() {
       <main v-else-if="section === 'assignments'" class="assignment-page surface">
         <div class="assignment-heading">
           <div>
-            <h3>生效范围</h3>
+            <h3>{{ __t('ui.settings', '生效范围') }}</h3>
             <div class="row">
               <PSelect v-model="scopeAgent" :options="agentOptions" teleport />
               <PSelect v-model="scopeChannel" :options="channelOptions" teleport />
             </div>
           </div>
-          <span class="muted-text">全局 → 频道 → 角色 → 角色频道</span>
+          <span class="muted-text">{{ __t('ui.settings', '全局 → 频道 → 角色 → 角色频道') }}</span>
         </div>
         <label class="field">
-          框架
+          {{ __t('ui.settings', '框架') }}
           <PSelect
             :model-value="currentAssignment?.frameworkId ?? ''"
             :options="[
-              { label: '继承', value: '', disabled: !scopeAgent && !scopeChannel },
+              {
+                label: __t('ui.settings', '继承'),
+                value: '',
+                disabled: !scopeAgent && !scopeChannel,
+              },
               ...frameworkOptions,
             ]"
             teleport
             @update:model-value="assignment().frameworkId = String($event)"
           />
         </label>
-        <h3>模板替换</h3>
+        <h3>{{ __t('ui.settings', '模板替换') }}</h3>
         <div
           v-for="(target, origin) in currentAssignment?.overrides ?? {}"
           :key="origin"
@@ -772,7 +959,7 @@ function addFrameworkOverride() {
           <span>{{ bundle.documents.find((d) => d.id === target)?.name ?? target }}</span>
           <button
             class="icon-button"
-            aria-label="移除替换"
+            :aria-label="__t('ui.settings', '移除替换')"
             @click="delete assignment().overrides[origin]"
           >
             ×
@@ -782,22 +969,27 @@ function addFrameworkOverride() {
           <PSelect
             v-model="overrideFrom"
             :options="sourceOptions.filter((o) => o.value)"
-            placeholder="原模板"
+            :placeholder="__t('ui.settings', '原模板')"
             teleport
           />
           <span>→</span>
-          <PSelect v-model="overrideTo" :options="overrideTargets" placeholder="替换为" teleport />
+          <PSelect
+            v-model="overrideTo"
+            :options="overrideTargets"
+            :placeholder="__t('ui.settings', '替换为')"
+            teleport
+          />
           <PButton
             size="sm"
             variant="secondary"
             :disabled="!overrideFrom || !overrideTo"
             @click="addOverride"
           >
-            添加
+            {{ __t('ui.settings', '添加') }}
           </PButton>
         </div>
         <div class="scope-list">
-          <h3>已有指派</h3>
+          <h3>{{ __t('ui.settings', '已有指派') }}</h3>
           <div
             v-for="(scope, index) in bundle.assignments"
             :key="`${scope.agentId}/${scope.channel}`"
@@ -814,12 +1006,15 @@ function addFrameworkOverride() {
               {{ scopeLabel(scope.agentId, scope.channel) }}
             </button>
             <span>
-              {{ bundle.frameworks.find((f) => f.id === scope.frameworkId)?.name ?? '继承' }}
+              {{
+                bundle.frameworks.find((f) => f.id === scope.frameworkId)?.name ??
+                __t('ui.settings', '继承')
+              }}
             </span>
             <button
               v-if="scope.agentId || scope.channel"
               class="icon-button"
-              aria-label="删除指派"
+              :aria-label="__t('ui.settings', '删除指派')"
               @click="bundle.assignments.splice(index, 1)"
             >
               ×
@@ -836,7 +1031,13 @@ function addFrameworkOverride() {
             :class="{ active: version.id === versionId }"
             @click="showVersion(version.id)"
           >
-            <strong>{{ version.id === view.activeReleaseId ? '当前版本' : '发布版本' }}</strong>
+            <strong>
+              {{
+                version.id === view.activeReleaseId
+                  ? __t('ui.settings', '当前版本')
+                  : __t('ui.settings', '发布版本')
+              }}
+            </strong>
             <span>{{ new Date(version.createdAt).toLocaleString() }}</span>
             <small>{{ version.note || version.id.slice(0, 8) }}</small>
           </button>
@@ -844,11 +1045,11 @@ function addFrameworkOverride() {
         <div class="version-content">
           <div class="row">
             <h3>
-              与当前草稿比较
-              <small>{{ changedEntries.length }} 项</small>
+              {{ __t('ui.settings', '与当前草稿比较') }}
+              <small>{{ changedEntries.length }} {{ __t('ui.settings', '项') }}</small>
             </h3>
             <PButton variant="secondary" size="sm" :disabled="!historical" @click="restoreVersion">
-              恢复到草稿
+              {{ __t('ui.settings', '恢复到草稿') }}
             </PButton>
           </div>
           <div v-if="historical" class="diff-pills">
@@ -863,27 +1064,37 @@ function addFrameworkOverride() {
           </div>
           <div v-if="activeDiff" class="diff-columns">
             <div>
-              <h4>历史版本</h4>
+              <h4>{{ __t('ui.settings', '历史版本') }}</h4>
               <pre>{{ activeDiff.before || '（不存在）' }}</pre>
             </div>
             <div>
-              <h4>当前草稿</h4>
+              <h4>{{ __t('ui.settings', '当前草稿') }}</h4>
               <pre>{{ activeDiff.after || '（不存在）' }}</pre>
             </div>
           </div>
-          <p v-else class="empty">{{ historical ? '内容一致' : '选择一个版本' }}</p>
+          <p v-else class="empty">
+            {{ historical ? __t('ui.settings', '内容一致') : __t('ui.settings', '选择一个版本') }}
+          </p>
         </div>
       </main>
     </div>
-    <p v-else-if="busy" class="empty">正在载入……</p>
-    <section v-if="issues.length" class="validation-panel" aria-label="校验结果">
+    <p v-else-if="busy" class="empty">{{ __t('ui.settings', '正在载入……') }}</p>
+    <section
+      v-if="issues.length"
+      class="validation-panel"
+      :aria-label="__t('ui.settings', '校验结果')"
+    >
       <div v-for="(issue, index) in issues" :key="index" :class="issue.level">
         <code>{{ issue.source }}</code>
         <span>{{ issue.message }}</span>
       </div>
     </section>
 
-    <PDialog v-model="activationOpen" title="指派框架" width="min(580px, calc(100vw - 48px))">
+    <PDialog
+      v-model="activationOpen"
+      :title="__t('ui.settings', '指派框架')"
+      width="min(580px, calc(100vw - 48px))"
+    >
       <p v-if="error" class="preview-issue error" role="alert">{{ error }}</p>
       <div class="independent-form">
         <strong>{{ framework?.name }}</strong>
@@ -895,17 +1106,25 @@ function addFrameworkOverride() {
             teleport
           />
         </div>
-        <p class="muted-text">发布后生效，更具体的已有指派仍优先。</p>
+        <p class="muted-text">{{ __t('ui.settings', '发布后生效，更具体的已有指派仍优先。') }}</p>
       </div>
       <template #footer>
-        <PButton size="sm" variant="secondary" @click="activationOpen = false">取消</PButton>
-        <PButton size="sm" :disabled="busy" @click="submitActivation">应用到草稿</PButton>
+        <PButton size="sm" variant="secondary" @click="activationOpen = false">
+          {{ __t('ui.settings', '取消') }}
+        </PButton>
+        <PButton size="sm" :disabled="busy" @click="submitActivation">
+          {{ __t('ui.settings', '应用到草稿') }}
+        </PButton>
       </template>
     </PDialog>
-    <PDialog v-model="independentOpen" title="新建框架" width="min(780px, calc(100vw - 48px))">
+    <PDialog
+      v-model="independentOpen"
+      :title="__t('ui.settings', '新建框架')"
+      width="min(780px, calc(100vw - 48px))"
+    >
       <p v-if="error" class="preview-issue error" role="alert">{{ error }}</p>
       <div class="independent-form">
-        <div class="format-choices" role="group" aria-label="框架格式">
+        <div class="format-choices" role="group" :aria-label="__t('ui.settings', '框架格式')">
           <button
             v-for="format in PROMPT_FORMATS"
             :key="format.value"
@@ -913,16 +1132,16 @@ function addFrameworkOverride() {
             :aria-pressed="independent.format === format.value"
             @click="independent.format = format.value"
           >
-            <strong>{{ format.label }}</strong>
+            <strong>{{ __t('common.interface', format.label) }}</strong>
             <small>{{ format.description }}</small>
           </button>
         </div>
         <label class="field">
-          名称
+          {{ __t('ui.settings', '名称') }}
           <PInput v-model="independent.name" maxlength="100" />
         </label>
         <label v-if="independent.format !== 'infos'" class="field">
-          写法
+          {{ __t('ui.settings', '写法') }}
           <PSelect
             :model-value="independent.layout"
             :options="layoutOptions"
@@ -931,24 +1150,24 @@ function addFrameworkOverride() {
           />
         </label>
         <label v-if="independent.format !== 'infos' && independent.layout === 'text'" class="field">
-          完整提示词
+          {{ __t('ui.settings', '完整提示词') }}
           <textarea
             v-model="independent.body"
             class="code-editor independent-body"
             spellcheck="false"
             :placeholder="
               independent.format === 'sillytavern'
-                ? '填写提示词，可使用 {{char}}、{{user}} 等酒馆宏。'
-                : '直接编写完整提示词，可使用变量与模板语法。'
+                ? __t('ui.settings', '填写提示词，可使用 {{char}}、{{user}} 等酒馆宏。')
+                : __t('ui.settings', '直接编写完整提示词，可使用变量与模板语法。')
             "
           />
         </label>
         <label v-if="independent.format !== 'infos'" class="history-toggle">
           <PSwitch v-model="independent.history" />
-          保留对话历史
+          {{ __t('ui.settings', '保留对话历史') }}
         </label>
         <label class="field">
-          生效范围
+          {{ __t('ui.settings', '生效范围') }}
           <PSelect
             :model-value="independent.scope"
             :options="activationOptions"
@@ -967,46 +1186,47 @@ function addFrameworkOverride() {
         <p class="muted-text">
           {{
             independent.scope === 'all'
-              ? '全部对话：替换现有角色与频道的框架指派，发布后生效。'
+              ? __t('ui.settings', '全部对话：替换现有角色与频道的框架指派，发布后生效。')
               : independent.scope === 'range'
-                ? '发布后生效，更具体的已有指派仍优先。'
-                : '创建后可在“指派”中启用。'
+                ? __t('ui.settings', '发布后生效，更具体的已有指派仍优先。')
+                : __t('ui.settings', '创建后可在“指派”中启用。')
           }}
         </p>
         <details class="tutorial">
-          <summary>框架教程</summary>
+          <summary>{{ __t('ui.settings', '框架教程') }}</summary>
           <p>
-            infOS 原生格式从内置编排开始。SillyTavern
-            格式使用酒馆宏和聊天历史标记，也可以通过顶部“导入”读取酒馆 JSON 预设。
+            {{ __t('ui.settings', '原生格式基于内置框架；酒馆格式支持宏，也可导入 JSON 预设。') }}
           </p>
-          <p>
-            自定义框架从完整正文或空白编排开始，不附加内置人设、规则、槽位或能力片段；按需引用变量与组件。
-          </p>
-          <p>
-            完整正文创建一条系统消息，之后可继续拆分编排。本次用户消息、工具协议和任务校验由运行时负责，后台任务提示词仍在“任务”中编辑。
-          </p>
+          <p>{{ __t('ui.settings', '自定义格式从空白开始，可引用变量与组件。') }}</p>
+          <p>{{ __t('ui.settings', '正文可拆分为多个区块；后台任务提示词在“任务”中编辑。') }}</p>
         </details>
       </div>
       <template #footer>
-        <PButton variant="secondary" size="sm" @click="independentOpen = false">取消</PButton>
+        <PButton variant="secondary" size="sm" @click="independentOpen = false">
+          {{ __t('ui.settings', '取消') }}
+        </PButton>
         <PButton
           size="sm"
           :disabled="busy || !independent.name.trim() || independent.name.trim().length > 100"
           @click="submitIndependent"
         >
-          创建框架
+          {{ __t('ui.settings', '创建框架') }}
         </PButton>
       </template>
     </PDialog>
-    <PDialog v-model="stImportOpen" title="导入酒馆预设" width="min(780px, calc(100vw - 48px))">
+    <PDialog
+      v-model="stImportOpen"
+      :title="__t('ui.settings', '导入酒馆预设')"
+      width="min(780px, calc(100vw - 48px))"
+    >
       <div v-if="stImport" class="independent-form">
         <p v-if="error" class="preview-issue error" role="alert">{{ error }}</p>
         <label class="field">
-          名称
+          {{ __t('ui.settings', '名称') }}
           <PInput v-model="stImport.framework.name" maxlength="100" />
         </label>
         <label v-if="stImport.orderProfiles.length > 1" class="field">
-          排序方案
+          {{ __t('ui.settings', '排序方案') }}
           <PSelect
             :model-value="stImport.framework.sillyTavern?.orderProfile ?? 0"
             :options="stImport.orderProfiles"
@@ -1016,9 +1236,12 @@ function addFrameworkOverride() {
           />
         </label>
         <div class="st-import-stats">
-          <span>{{ stImport.framework.blocks.length }} 条目</span>
-          <span>{{ stImport.framework.blocks.filter((block) => block.enabled).length }} 启用</span>
-          <span>{{ stImport.issues.length }} 项提示</span>
+          <span>{{ stImport.framework.blocks.length }} {{ __t('ui.settings', '条目') }}</span>
+          <span>
+            {{ stImport.framework.blocks.filter((block) => block.enabled).length }}
+            {{ __t('ui.settings', '启用') }}
+          </span>
+          <span>{{ stImport.issues.length }} {{ __t('ui.settings', '项提示') }}</span>
         </div>
         <div v-if="stImport.issues.length" class="st-import-issues">
           <p v-for="(issue, index) in stImport.issues" :key="index" :class="issue.level">
@@ -1026,7 +1249,7 @@ function addFrameworkOverride() {
           </p>
         </div>
         <label class="field">
-          生效范围
+          {{ __t('ui.settings', '生效范围') }}
           <PSelect
             :model-value="stScope.scope"
             :options="activationOptions"
@@ -1045,25 +1268,29 @@ function addFrameworkOverride() {
         <p class="muted-text">
           {{
             stScope.scope === 'all'
-              ? '替换已有角色与频道的框架指派，发布后生效。'
-              : '导入草稿后可编辑和预览，发布后生效。'
+              ? __t('ui.settings', '替换已有角色与频道的框架指派，发布后生效。')
+              : __t('ui.settings', '导入草稿后可编辑和预览，发布后生效。')
           }}
         </p>
       </div>
       <template #footer>
         <PButton size="sm" variant="secondary" :disabled="busy" @click="stImportOpen = false">
-          取消
+          {{ __t('ui.settings', '取消') }}
         </PButton>
         <PButton
           size="sm"
           :disabled="busy || !stImport || !stImport.framework.name.trim()"
           @click="commitStImport(stScope)"
         >
-          导入草稿
+          {{ __t('ui.settings', '导入草稿') }}
         </PButton>
       </template>
     </PDialog>
-    <PDialog v-model="previewOpen" title="渲染预览" width="min(1120px, calc(100vw - 48px))">
+    <PDialog
+      v-model="previewOpen"
+      :title="__t('ui.settings', '渲染预览')"
+      width="min(1120px, calc(100vw - 48px))"
+    >
       <div v-if="error" class="preview-issue error" role="alert">{{ error }}</div>
       <div class="preview-controls">
         <PSelect v-model="previewAgent" :options="agentOptions" size="sm" teleport />
@@ -1080,18 +1307,20 @@ function addFrameworkOverride() {
           size="sm"
           teleport
         />
-        <PButton size="sm" :disabled="busy" @click="renderPreview">刷新</PButton>
+        <PButton size="sm" :disabled="busy" @click="renderPreview">
+          {{ __t('ui.settings', '刷新') }}
+        </PButton>
         <span v-if="preview" class="token-count">
-          {{ preview.tokens.toLocaleString() }} 文本 Token · o200k_base
+          {{ preview.tokens.toLocaleString() }} {{ __t('ui.settings', '文本 Token · o200k_base') }}
         </span>
       </div>
       <details class="preview-variables">
-        <summary>示例变量</summary>
+        <summary>{{ __t('ui.settings', '示例变量') }}</summary>
         <textarea
           v-model="variablesText"
           class="code-editor compact-editor"
           spellcheck="false"
-          aria-label="示例变量 JSON"
+          :aria-label="__t('ui.settings', '示例变量 JSON')"
         />
       </details>
       <div class="preview-results">
@@ -1106,7 +1335,7 @@ function addFrameworkOverride() {
           <summary>
             <b>{{ segment.role }}</b>
             <small v-if="segment.originalRole" class="format-badge">
-              {{ segment.originalRole }} 适配
+              {{ segment.originalRole }} {{ __t('ui.settings', '适配') }}
             </small>
             <code>{{ segment.source }}</code>
             <span>{{ segment.tokens.toLocaleString() }}</span>
@@ -1114,11 +1343,13 @@ function addFrameworkOverride() {
           <pre>{{ segment.content }}</pre>
         </details>
         <p v-if="preview && !preview.segments.length && !preview.issues.length" class="empty">
-          没有渲染内容
+          {{ __t('ui.settings', '没有渲染内容') }}
         </p>
       </div>
       <template #footer>
-        <PButton variant="secondary" size="sm" @click="previewOpen = false">关闭</PButton>
+        <PButton variant="secondary" size="sm" @click="previewOpen = false">
+          {{ __t('ui.settings', '关闭') }}
+        </PButton>
       </template>
     </PDialog>
     <PDialog

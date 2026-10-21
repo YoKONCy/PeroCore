@@ -1,21 +1,33 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
-import type { PetControlSettings } from '@infos/shared'
+import type { PetControlSettings, MessageResource } from '@infos/shared'
+import '@infos/shared/i18n/catalogs/petActivity'
+import type { PetActivity, PetUiRect } from '../../composables/pet/usePetActivity'
 import type BedrockAvatar from '../avatar/BedrockAvatar.vue'
 import PetHudIcon from './PetHudIcon.vue'
 import PetToolbelt, { type PetPanel } from './PetToolbelt.vue'
 import PetSpeechBubble from './PetSpeechBubble.vue'
+import PetActivityTrace from './PetActivityTrace.vue'
+import PetDeliveries from './PetDeliveries.vue'
 import { useDesktopControl } from '../../composables/useDesktopControl'
 import { invoke } from '../../utils/ipcAdapter'
 
 interface Props {
   agentId?: string
+  threadId?: string | null
+  threadTitle?: string
+  switching?: boolean
   petName: string
   moodText?: string
   vibeText?: string
   mindText?: string
   stage?: string
   thinking?: boolean
+  activity?: PetActivity
+  deliveries?: MessageResource[]
+  deliveryKey?: string
   connected?: boolean
   unread?: boolean
   replyNotice?: boolean
@@ -58,9 +70,13 @@ function openDesktopTask() {
 }
 const emit = defineEmits<{
   (e: 'send-message', text: string, complete: (accepted: boolean) => void): void
+  (e: 'select-agent', id: string, complete: (success: boolean) => void): void
+  (e: 'select-thread', id: string, complete: (success: boolean) => void): void
+  (e: 'new-thread', complete: (success: boolean) => void): void
   (e: 'ui-enter'): void
   (e: 'ui-leave'): void
   (e: 'open-conversation'): void
+  (e: 'open-resource', resource: MessageResource): void
   (e: 'open-section', section: string): void
   (e: 'voice-mode', mode: PetControlSettings['voiceMode']): void
   (e: 'ptt-down'): void
@@ -73,7 +89,22 @@ const emit = defineEmits<{
 }>()
 const panel = ref<PetPanel>('chat')
 const expanded = ref(false)
+const deliveriesOpen = ref(true)
+const bubbleRect = ref<PetUiRect | null>(null)
+watch(
+  () => props.deliveryKey,
+  () => {
+    deliveriesOpen.value = true
+  },
+)
 const input = ref('')
+const drafts = new Map<string, string>()
+const inputTarget = computed(() => `${props.agentId || ''}:${props.threadId || ''}`)
+watch(inputTarget, (target, previous) => {
+  if (previous && input.value) drafts.set(previous, input.value)
+  else if (previous) drafts.delete(previous)
+  input.value = drafts.get(target) || ''
+})
 const root = ref<HTMLElement | null>(null)
 const dismissedAttention = ref(new Set<string>())
 let hideTimer: ReturnType<typeof setTimeout> | undefined
@@ -150,11 +181,20 @@ const noticePlacement = computed(() => {
   }
 })
 const occupied = computed(() => props.recording || props.recognizing || props.preparing)
+const showActivity = computed(
+  () => props.thinking && !expanded.value && !occupied.value && !props.speaking,
+)
+const currentActivity = computed<PetActivity>(() =>
+  props.activity && props.activity.phase !== 'idle'
+    ? props.activity
+    : { phase: 'thinking', steps: [], nit: false },
+)
+const showDeliveries = computed(() => !expanded.value && !occupied.value && deliveriesOpen.value)
 const bubbleText = computed(() => {
   if (expanded.value || occupied.value) return ''
   if (props.speaking && props.settings.subtitlesEnabled) return props.subtitle || ''
   if (props.speaking || props.thinking) return ''
-  if (props.replyNotice && props.unread) return props.replyText || '回复好了'
+  if (props.replyNotice && props.unread) return props.replyText || __t('ui.pet', '回复好了')
   if (props.attention) return ''
   return props.reaction || ''
 })
@@ -174,23 +214,23 @@ function dismissAttention() {
 }
 const voiceLabel = computed(() =>
   props.preparing
-    ? '正在准备麦克风'
+    ? __t('ui.pet', '正在准备麦克风')
     : props.recording
-      ? '正在听，松开发送'
+      ? __t('ui.pet', '正在听，松开发送')
       : props.recognizing
-        ? '正在识别'
+        ? __t('ui.pet', '正在识别')
         : props.voiceError || '',
 )
 const markTitle = computed(
   () =>
     props.attention ||
     (props.unread
-      ? '有新消息'
+      ? __t('ui.pet', '有新消息')
       : props.thinking
-        ? props.stage || '正在处理'
+        ? props.stage || __t('ui.pet', '正在处理')
         : props.connected
           ? props.petName
-          : '连接已断开'),
+          : __t('ui.pet', '连接已断开')),
 )
 function enter() {
   clearTimeout(hideTimer)
@@ -209,7 +249,7 @@ function leave() {
   hideTimer = setTimeout(() => {
     if (
       root.value?.contains(document.activeElement) &&
-      document.activeElement?.matches('textarea,input,select,[contenteditable=true]')
+      document.activeElement?.matches('textarea,input,select,[contenteditable=true],:focus-visible')
     )
       return
     close()
@@ -227,9 +267,12 @@ function selectPanel(id: PetPanel) {
 }
 function sendMessage() {
   const text = input.value.trim()
-  if (!text || props.thinking) return
+  const target = inputTarget.value
+  if (!text || props.thinking || props.switching) return
   emit('send-message', text, (accepted) => {
-    if (accepted && input.value.trim() === text) input.value = ''
+    if (!accepted) return
+    if (drafts.get(target)?.trim() === text) drafts.delete(target)
+    if (inputTarget.value === target && input.value.trim() === text) input.value = ''
   })
   close()
 }
@@ -246,19 +289,48 @@ onUnmounted(() => clearTimeout(hideTimer))
   <div ref="root" class="pet-hud" @focusin="enter" @focusout="leave" @keydown.esc.stop="close">
     <Transition name="pet-speech" :css="!expanded">
       <PetSpeechBubble
-        v-if="bubbleText"
+        v-if="bubbleText || showActivity || (!expanded && !occupied && deliveries?.length)"
         :text="bubbleText"
         :pet-name="petName"
         :bounds="bounds"
         :viewport="viewport"
         :speaking="speaking"
-        :conversation="speaking || (replyNotice && unread)"
+        :conversation="speaking || thinking || (replyNotice && unread)"
         @ui-enter="enter"
         @ui-leave="leave"
         @open-conversation="emit('open-conversation')"
         @stop-speech="emit('stop-speech')"
-      />
+        @placement="bubbleRect = $event"
+      >
+        <PetActivityTrace v-if="showActivity" :activity="currentActivity" />
+        <button
+          v-if="deliveries?.length"
+          type="button"
+          class="bubble-deliveries-toggle"
+          :title="__t('ui.pet-activity', deliveriesOpen ? '收起交付' : '展开交付')"
+          :aria-expanded="deliveriesOpen"
+          @click="deliveriesOpen = !deliveriesOpen"
+        >
+          <PetHudIcon name="sparkle" size="xs" />
+          {{ __t('ui.pet-activity', '交付 {0}', [deliveries.length]) }}
+          <PetHudIcon :name="deliveriesOpen ? 'chevron-down' : 'chevron-right'" size="xs" />
+        </button>
+      </PetSpeechBubble>
     </Transition>
+    <PetDeliveries
+      v-if="deliveries?.length"
+      :items="deliveries"
+      :delivery-key="deliveryKey || ''"
+      :active="showDeliveries"
+      :bounds="bounds"
+      :bubble="bubbleRect"
+      :viewport="viewport"
+      @open="emit('open-resource', $event)"
+      @collapse="deliveriesOpen = false"
+      @ui-enter="enter"
+      @ui-leave="leave"
+      @play-media="emit('stop-speech')"
+    />
     <div
       data-pet-ui
       class="hud-anchor"
@@ -271,7 +343,7 @@ onUnmounted(() => clearTimeout(hideTimer))
         class="floating-trigger"
         :class="{ active: expanded }"
         :title="markTitle"
-        :aria-label="markTitle + '，展开桌宠菜单'"
+        :aria-label="markTitle + __t('ui.pet', '，展开桌宠菜单')"
         :aria-expanded="expanded"
         @click="toggleMenu"
       >
@@ -305,6 +377,10 @@ onUnmounted(() => clearTimeout(hideTimer))
           v-model:message="input"
           :panel="panel"
           :pet-name="petName"
+          :agent-id="agentId"
+          :thread-id="threadId"
+          :thread-title="threadTitle"
+          :switching="switching"
           :thinking="thinking"
           :speaking="speaking"
           :voice-ready="voiceReady"
@@ -316,6 +392,9 @@ onUnmounted(() => clearTimeout(hideTimer))
           @select-panel="selectPanel"
           @close="close"
           @send-message="sendMessage"
+          @select-agent="(id, complete) => emit('select-agent', id, complete)"
+          @select-thread="(id, complete) => emit('select-thread', id, complete)"
+          @new-thread="(complete) => emit('new-thread', complete)"
           @voice-mode="emit('voice-mode', $event)"
           @ptt-down="emit('ptt-down')"
           @ptt-up="emit('ptt-up', $event)"
@@ -339,37 +418,30 @@ onUnmounted(() => clearTimeout(hideTimer))
         <div v-if="desktopVisible && !occupied" class="stage" role="status" aria-live="polite">
           <PetHudIcon name="thought" size="sm" />
           <button type="button" class="text-button" @click="openDesktopTask">
-            {{ desktop.state.value.phase === 'running' ? '正在操作桌面' : '桌面操作已暂停' }}
+            {{
+              desktop.state.value.phase === 'running'
+                ? __t('ui.pet', '正在操作桌面')
+                : __t('ui.pet', '桌面操作已暂停')
+            }}
           </button>
           <button
             v-if="desktop.state.value.phase === 'running'"
             type="button"
             class="icon-button"
-            title="暂停桌面操作"
+            :title="__t('ui.pet', '暂停桌面操作')"
             @click="desktop.control('pause')"
           >
             <PetHudIcon name="close" size="xs" />
           </button>
         </div>
       </Transition>
-      <Transition name="pet-status">
-        <div v-if="thinking && !occupied" class="stage" role="status" aria-live="polite">
-          <PetHudIcon name="thought" size="sm" />
-          <span>{{ stage || '正在思考' }}</span>
-          <span class="stage-pixels" aria-hidden="true">
-            <i />
-            <i />
-            <i />
-          </span>
-        </div>
-      </Transition>
       <div v-if="resizeMode && (!expanded || panel !== 'more')" class="resize-strip" role="status">
-        <span>{{ windowSize }}px · 滚轮调整大小，Esc 退出</span>
+        <span>{{ windowSize }}{{ __t('ui.pet', 'px · 滚轮调整大小，Esc 退出') }}</span>
         <button
           type="button"
           class="icon-button"
-          title="结束调节"
-          aria-label="结束调节"
+          :title="__t('ui.pet', '结束调节')"
+          :aria-label="__t('ui.pet', '结束调节')"
           @click="emit('toggle-resize')"
         >
           <PetHudIcon name="close" size="xs" />
@@ -394,7 +466,7 @@ onUnmounted(() => clearTimeout(hideTimer))
             v-if="recording || recognizing"
             type="button"
             class="icon-button"
-            title="丢弃这次语音"
+            :title="__t('ui.pet', '丢弃这次语音')"
             @click="emit('cancel-voice')"
           >
             <PetHudIcon name="close" size="xs" />
@@ -408,16 +480,16 @@ onUnmounted(() => clearTimeout(hideTimer))
             <strong>
               {{
                 attentionKind === 'approval'
-                  ? '需要你确认'
+                  ? __t('ui.pet', '需要你确认')
                   : attentionKind === 'question'
-                    ? '有事想问你'
-                    : '有待处理事项'
+                    ? __t('ui.pet', '有事想问你')
+                    : __t('ui.pet', '有待处理事项')
               }}
             </strong>
             <button
               class="icon-button"
               type="button"
-              aria-label="暂时收起，相同事项不再弹出"
+              :aria-label="__t('ui.pet', '暂时收起，相同事项不再弹出')"
               @click="dismissAttention"
             >
               <PetHudIcon name="close" size="xs" />
@@ -425,7 +497,7 @@ onUnmounted(() => clearTimeout(hideTimer))
           </div>
           <p class="attention-card__summary">{{ attention }}</p>
           <button type="button" class="text-button" @click="emit('open-section', 'tasks')">
-            在主应用中处理
+            {{ __t('ui.pet', '在主应用中处理') }}
             <PetHudIcon name="chevron-right" size="xs" />
           </button>
         </div>
@@ -435,7 +507,7 @@ onUnmounted(() => clearTimeout(hideTimer))
         <button
           type="button"
           class="icon-button"
-          aria-label="收起提示"
+          :aria-label="__t('ui.pet', '收起提示')"
           @click="emit('dismiss-hint')"
         >
           <PetHudIcon name="close" size="xs" />

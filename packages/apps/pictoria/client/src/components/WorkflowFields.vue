@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 import { ref } from 'vue'
 import type { FieldSchema } from '../types'
 import PictoriaSelect from './PictoriaSelect.vue'
@@ -13,12 +15,42 @@ const adding = ref(false),
   name = ref(''),
   problem = ref('')
 const options = [
-  { value: 'string', label: '文本' },
-  { value: 'image', label: '素材' },
-  { value: 'images', label: '多素材' },
-  { value: 'number', label: '数字' },
-  { value: 'integer', label: '整数' },
-  { value: 'boolean', label: '开关' },
+  {
+    value: 'string',
+    get label() {
+      return __t('apps.pictoria.ui', '文本')
+    },
+  },
+  {
+    value: 'image',
+    get label() {
+      return __t('apps.pictoria.ui', '素材')
+    },
+  },
+  {
+    value: 'images',
+    get label() {
+      return __t('apps.pictoria.ui', '多素材')
+    },
+  },
+  {
+    value: 'number',
+    get label() {
+      return __t('apps.pictoria.ui', '数字')
+    },
+  },
+  {
+    value: 'integer',
+    get label() {
+      return __t('apps.pictoria.ui', '整数')
+    },
+  },
+  {
+    value: 'boolean',
+    get label() {
+      return __t('apps.pictoria.ui', '开关')
+    },
+  },
   { value: 'object', label: 'JSON' },
 ]
 const asset = () => ({
@@ -103,15 +135,19 @@ function advanced(event: Event) {
             :checked="modelValue.required?.includes(String(key))"
             @change="required(String(key), ($event.target as HTMLInputElement).checked)"
           />
-          必填
+          {{ __t('apps.pictoria.ui', '必填') }}
         </label>
-        <button class="icon-button" aria-label="删除字段" @click="remove(String(key))">
+        <button
+          class="icon-button"
+          :aria-label="__t('apps.pictoria.ui', '删除字段')"
+          @click="remove(String(key))"
+        >
           <Icon name="close" :size="13" />
         </button>
       </header>
       <input
         :value="field.title || key"
-        aria-label="显示名称"
+        :aria-label="__t('apps.pictoria.ui', '显示名称')"
         @focus="emit('checkpoint')"
         @input="patch(String(key), { ...field, title: ($event.target as HTMLInputElement).value })"
       />
@@ -122,12 +158,17 @@ function advanced(event: Event) {
       />
     </div>
     <div v-if="adding" class="workflow-new-field">
-      <input v-model="name" placeholder="字段名" maxlength="128" @keydown.enter.prevent="add" />
-      <button class="text-button" @click="add">添加</button>
+      <input
+        v-model="name"
+        :placeholder="__t('apps.pictoria.ui', '字段名')"
+        maxlength="128"
+        @keydown.enter.prevent="add"
+      />
+      <button class="text-button" @click="add">{{ __t('apps.pictoria.ui', '添加') }}</button>
     </div>
     <button v-else class="text-button" @click="adding = true">
       <Icon name="plus" :size="13" />
-      添加字段
+      {{ __t('apps.pictoria.ui', '添加字段') }}
     </button>
     <details class="workflow-advanced">
       <summary>Schema</summary>

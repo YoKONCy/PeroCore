@@ -41,6 +41,104 @@ async function collectLoop(params: Parameters<typeof runReActLoop>[0]) {
 }
 
 describe('runReActLoop', () => {
+  it.each([false, true])(
+    'NIT 子调用进入实时事件和持久时间线，取消结果缺失时收口：%s',
+    async (missingReceipt) => {
+      const execute: ToolExecutor['execute'] = vi.fn(async (_name, _args, _source, context) => {
+        context?.onNestedToolCall?.({
+          callId: 'nit-child-1',
+          parentCallId: 'script',
+          name: 'read_file',
+          args: { path: 'a.ts' },
+        })
+        if (!missingReceipt) {
+          await context?.onToolObserved?.({
+            callId: 'nit-child-1',
+            name: 'read_file',
+            args: { path: 'a.ts' },
+            output: '源文件',
+            isError: false,
+            durationMs: 12,
+          })
+        }
+        return {
+          output: missingReceipt ? '脚本已取消' : '脚本已完成',
+          durationMs: 20,
+          isError: missingReceipt,
+          shouldTerminate: false,
+        }
+      })
+      let turn = 0
+      const chatStream = vi.fn(() =>
+        ++turn === 1
+          ? streamFrom([
+              {
+                choices: [
+                  {
+                    delta: {
+                      toolCalls: [
+                        {
+                          index: 0,
+                          id: 'script',
+                          type: 'function',
+                          function: {
+                            name: 'run_script',
+                            arguments: '{"code":"read_file({path: \'a.ts\'})"}',
+                          },
+                        },
+                      ],
+                    },
+                    finishReason: 'tool_calls',
+                  },
+                ],
+              },
+            ])
+          : streamFrom([{ choices: [{ delta: { content: '已处理' }, finishReason: 'stop' }] }]),
+      )
+      const { yields, result } = await collectLoop({
+        llmService: { chatStream } as never,
+        modelConfig,
+        messages: [{ role: 'user', content: '读取文件' }],
+        tools: [{ name: 'run_script', description: '脚本', parameters: {} }],
+        toolExecutor: { execute },
+        source: 'desktop',
+        config: { maxTurns: 2 },
+      })
+      expect(yields).toContainEqual({
+        event: 'tool_call',
+        data: {
+          callId: 'nit-child-1',
+          parentCallId: 'script',
+          name: 'read_file',
+          args: { path: 'a.ts' },
+        },
+      })
+      const child = result.contentBlocks.find(
+        (block) => block.kind === 'tool' && block.callId === 'nit-child-1',
+      )
+      expect(child).toMatchObject({
+        parentCallId: 'script',
+        name: 'read_file',
+        isError: missingReceipt,
+      })
+      expect(yields).toContainEqual(
+        expect.objectContaining({
+          event: 'tool_result',
+          data: expect.objectContaining({ callId: 'nit-child-1', isError: missingReceipt }),
+        }),
+      )
+      if (!missingReceipt)
+        expect(result.toolCalls).toContainEqual(
+          expect.objectContaining({
+            callId: 'nit-child-1',
+            parentCallId: 'script',
+            durationMs: 12,
+          }),
+        )
+      else expect(child).toMatchObject({ result: expect.stringContaining('未返回完成结果') })
+    },
+  )
+
   it('工作续接恢复已展开菜单，NIT 沿用恢复状态并过滤当前已撤销的工具', async () => {
     const messages: ChatMessage[] = [
       {
@@ -1452,17 +1550,17 @@ describe('runReActLoop', () => {
     expect(result.messages.at(-1)?.reasoningContent).toBe('第一段思考第二段思考')
   })
 
-  it('同一轮出现多个think块时应分别流式发布碎碎念', async () => {
+  it.each(['selfMinding', 'think'])('同一轮出现多个 %s 块时应分别流式发布碎碎念', async (tag) => {
     const { yields, result } = await collectLoop({
       llmService: {
         chatStream: vi
           .fn()
           .mockReturnValue(
             streamFrom([
-              { choices: [{ delta: { content: '<thi' } }] },
-              { choices: [{ delta: { content: 'nk>第一段' } }] },
-              { choices: [{ delta: { content: '碎碎念</think>正文' } }] },
-              { choices: [{ delta: { content: '<think>第二段</think>结束' } }] },
+              { choices: [{ delta: { content: `<${tag.slice(0, 3)}` } }] },
+              { choices: [{ delta: { content: `${tag.slice(3)}>第一段` } }] },
+              { choices: [{ delta: { content: `碎碎念</${tag}>正文` } }] },
+              { choices: [{ delta: { content: `<${tag}>第二段</${tag}>结束` } }] },
             ]),
           ),
       } as never,
@@ -1761,11 +1859,6 @@ describe('runReActLoop', () => {
     ])
     expect(messages).toEqual([
       { role: 'user', content: '查资料' },
-      expect.objectContaining({
-        role: 'user',
-        cacheControl: { kind: 'snapshot', key: 'infos.work.execution-state' },
-        content: expect.stringContaining('当前运行任务'),
-      }),
       {
         role: 'assistant',
         content: '需要查找',

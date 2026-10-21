@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { SqliteSocialStoragePort } from '@infos/backend/applications/sqliteSocialStoragePort'
 import { KernelOutboxRepository, runWithKernelExecution } from '@infos/backend/kernel'
+import type { SocialStoragePort, SocialTurnRecord } from '@infos/shared'
 
 let db: Database.Database
 let port: SqliteSocialStoragePort
@@ -28,6 +29,49 @@ beforeEach(() => {
 afterEach(() => db.close())
 
 describe('SqliteSocialStoragePort', () => {
+  it('终态只允许补存检查点中已确认的原发送消息，历史清理后不能复活', async () => {
+    const message: Parameters<SocialStoragePort['insert']>[0] = {
+      turnId: 'confirmed',
+      msgId: 'qq-confirmed',
+      platform: 'qq',
+      accountId: '123456789',
+      channelId: '987654321',
+      channelType: 'group',
+      senderId: 'self',
+      senderName: 'keromi',
+      agentId: 'keromi',
+      content: '平台已经送达',
+      timestamp: new Date().toISOString(),
+    }
+    const record: SocialTurnRecord = {
+      id: 'confirmed',
+      agentId: 'keromi',
+      accountId: '123456789',
+      channelId: '987654321',
+      channelType: 'group',
+      status: 'completed',
+      attempts: 1,
+      startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      deadline: new Date(Date.now() + 60000).toISOString(),
+      checkpoint: { deliveryDataVersion: 0, pendingHistory: { receipt: message } },
+    }
+    await port.saveTurn(record)
+    await expect(port.insert(message)).rejects.toThrow('已经取消或数据已经清理')
+    await expect(
+      port.insert({ ...message, content: '伪造内容', confirmedDeliveryKey: 'receipt' }),
+    ).rejects.toThrow('不一致')
+    await port.insert({ ...message, confirmedDeliveryKey: 'receipt' })
+    await port.insert({ ...message, confirmedDeliveryKey: 'receipt' })
+    expect(await port.getRecent('keromi', '987654321', 'group')).toHaveLength(1)
+    await port.deleteTurns('keromi', 'group', '987654321')
+    await port.deleteChannelMessages('keromi', 'group', '987654321')
+    await expect(port.insert({ ...message, confirmedDeliveryKey: 'receipt' })).rejects.toThrow(
+      '不能恢复已删除',
+    )
+    expect(await port.getRecent('keromi', '987654321', 'group')).toHaveLength(0)
+  })
+
   it('Execution内消息与Durable Event应同事务提交并继承因果身份', async () => {
     const outbox = new KernelOutboxRepository(drizzle(db) as never)
     const transactional = new SqliteSocialStoragePort(db, outbox)

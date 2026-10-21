@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 import { WEB_PAGE_OPERATIONS } from '@infos/shared'
 import { BrowserActionCoordinator } from '../../applications/browserActionCoordinator'
 import { BrowserInteractionRuntime } from '../../applications/browserInteractionRuntime'
@@ -59,7 +60,7 @@ export function createBrowserToolContributions(
         if (image?.base64) {
           return JSON.stringify({
             success: true,
-            message: '已截取当前网页',
+            message: __t('server.tools', '已截取当前网页'),
             screenshots: [
               {
                 index: 0,

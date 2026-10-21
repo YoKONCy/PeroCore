@@ -1,11 +1,13 @@
 <script setup lang="ts">
+import { t as __t } from '../../../i18n/index'
+
 /**
  * MemoriesTab — 核心记忆 Tab
  *
  * 档案工作台布局：统计头 + 过滤工作台 + (列表|图谱) × 常驻详情检查器。
  * 数据全部走后端 archiveQuery / graphSnapshot，前端不做全量拉取。
  */
-import { computed, onMounted, onUnmounted, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import type { EventNote } from '@infos/shared'
 import { MEMORY_BACKGROUND_ENABLED_KEY } from '@infos/shared'
 import { PixelIcon, PButton, PCard, PDialog } from '../../pixel'
@@ -20,6 +22,7 @@ import MemoryList from '../memories/MemoryList.vue'
 import MemoryInspector from '../memories/MemoryInspector.vue'
 import MemoryGraphView from '../memories/MemoryGraphView.vue'
 import PrivacyCleanupPanel from '../PrivacyCleanupPanel.vue'
+import RagConfigPage from '../memories/RagConfigPage.vue'
 
 const ctx = useDashboardContext()
 const {
@@ -30,6 +33,20 @@ const {
 } = useConfigSwitch(MEMORY_BACKGROUND_ENABLED_KEY, '后台记忆')
 const notif = useNotificationStore()
 const agentStore = useAgentStore()
+const showingRagConfig = ref(false)
+let ragTrigger: HTMLElement | null = null
+
+function openRagConfig(event: MouseEvent): void {
+  ragTrigger = event.currentTarget as HTMLElement
+  showingRagConfig.value = true
+}
+
+async function closeRagConfig(): Promise<void> {
+  showingRagConfig.value = false
+  await nextTick()
+  ragTrigger?.focus()
+}
+
 const view = ref<'list' | 'graph'>('list')
 const archiveTarget = ref<EventNote | null>(null)
 const archiveSaving = ref(false)
@@ -45,7 +62,12 @@ const archive = useMemoryArchive(
   () => agentStore.enabledAgents.map((agent) => agent.id),
 )
 const agentOptions = computed(() => [
-  { label: '全部角色', value: 'all' },
+  {
+    get label() {
+      return __t('ui.settings', '全部角色')
+    },
+    value: 'all',
+  },
   ...agentStore.enabledAgents.map((agent) => ({ label: agent.name || agent.id, value: agent.id })),
 ])
 
@@ -86,7 +108,7 @@ async function loadArchive(): Promise<void> {
   try {
     await archive.fetchArchive()
   } catch (error) {
-    notif.toast('记忆档案加载失败：' + (error as Error).message, 'error')
+    notif.toast(__t('ui.settings', '记忆档案加载失败：') + (error as Error).message, 'error')
   }
 }
 
@@ -180,9 +202,9 @@ async function confirmArchive(): Promise<void> {
     archive.selectedId.value = null
     await loadArchive()
     if (view.value === 'graph') await loadGraph()
-    notif.toast('核心记忆已移入归档，关系图结构保持不变', 'success')
+    notif.toast(__t('ui.settings', '记忆已归档'), 'success')
   } catch (error) {
-    notif.toast('归档失败：' + (error as Error).message, 'error')
+    notif.toast(__t('ui.settings', '归档失败：') + (error as Error).message, 'error')
   } finally {
     archiveSaving.value = false
   }
@@ -195,7 +217,7 @@ async function restoreNote(note: EventNote): Promise<void> {
     archive.selectedId.value = null
     await loadArchive()
     if (view.value === 'graph') await loadGraph()
-    notif.toast('记忆已恢复', 'success')
+    notif.toast(__t('ui.settings', '记忆已恢复'), 'success')
   } catch (error) {
     notif.toast((error as Error).message, 'error')
   }
@@ -210,7 +232,7 @@ async function confirmDelete(): Promise<void> {
     archive.selectedId.value = null
     await loadArchive()
     if (view.value === 'graph') await loadGraph()
-    notif.toast('记忆已永久删除', 'success')
+    notif.toast(__t('ui.settings', '记忆已永久删除'), 'success')
   } catch (error) {
     notif.toast((error as Error).message, 'error')
     deleteTarget.value = null
@@ -235,256 +257,298 @@ function setSection(status: 'active' | 'archived'): void {
 
 const statBadges = computed(() => [
   {
-    label: archive.status.value === 'archived' ? '归档' : '有效',
+    label:
+      archive.status.value === 'archived' ? __t('ui.settings', '归档') : __t('ui.settings', '有效'),
     value:
       archive.status.value === 'archived'
         ? archive.stats.value.archived
         : archive.stats.value.active,
     tone: 'sky',
   },
-  { label: '平均重要度', value: archive.stats.value.averageImportance, tone: 'violet' },
-  { label: '主题', value: archive.stats.value.topicCount, tone: 'emerald' },
+  {
+    get label() {
+      return __t('ui.settings', '平均重要度')
+    },
+    value: archive.stats.value.averageImportance,
+    tone: 'violet',
+  },
+  {
+    get label() {
+      return __t('ui.settings', '主题')
+    },
+    value: archive.stats.value.topicCount,
+    tone: 'emerald',
+  },
 ])
 </script>
 
 <template>
-  <div class="memories-page">
-    <!-- 档案头 -->
-    <header class="archive-head">
-      <div class="archive-title-wrap">
-        <h2 class="archive-title font-pixel">
-          <PixelIcon name="brain" size="md" class="archive-title-icon" />
-          核心记忆
-        </h2>
-        <p class="archive-subtitle">长期记忆档案 · LONG-TERM MEMORY ARCHIVE</p>
-      </div>
-
-      <div class="archive-stats">
-        <div
-          v-for="badge in statBadges"
-          :key="badge.label"
-          :class="['stat-badge', `stat-${badge.tone}`]"
-        >
-          <span class="stat-value font-pixel">{{ badge.value }}</span>
-          <span class="stat-label">{{ badge.label }}</span>
+  <div class="memories-shell">
+    <RagConfigPage v-if="showingRagConfig" @back="closeRagConfig" />
+    <!-- 返回时保留档案筛选、选中项和滚动位置。 -->
+    <div v-show="!showingRagConfig" class="memories-page">
+      <!-- 档案头 -->
+      <header class="archive-head">
+        <div class="archive-title-wrap">
+          <h2 class="archive-title font-pixel">
+            <PixelIcon name="brain" size="md" class="archive-title-icon" />
+            {{ __t('ui.settings', '核心记忆') }}
+          </h2>
+          <p class="archive-subtitle">
+            {{ __t('ui.settings', '长期记忆档案 · LONG-TERM MEMORY ARCHIVE') }}
+          </p>
         </div>
-      </div>
 
-      <div class="archive-view-switch">
-        <PButton size="sm" :variant="view === 'list' ? 'primary' : 'ghost'" @click="view = 'list'">
-          <PixelIcon name="list" size="xs" />
-          档案列表
+        <div class="archive-stats">
+          <div
+            v-for="badge in statBadges"
+            :key="badge.label"
+            :class="['stat-badge', `stat-${badge.tone}`]"
+          >
+            <span class="stat-value font-pixel">{{ badge.value }}</span>
+            <span class="stat-label">{{ badge.label }}</span>
+          </div>
+        </div>
+
+        <div class="archive-view-switch">
+          <PButton
+            size="sm"
+            :variant="view === 'list' ? 'primary' : 'ghost'"
+            @click="view = 'list'"
+          >
+            <PixelIcon name="list" size="xs" />
+            {{ __t('ui.settings', '档案列表') }}
+          </PButton>
+          <PButton
+            size="sm"
+            :variant="view === 'graph' ? 'primary' : 'ghost'"
+            @click="view = 'graph'"
+          >
+            <PixelIcon name="link" size="xs" />
+            {{ __t('ui.settings', '关系图谱') }}
+          </PButton>
+        </div>
+      </header>
+
+      <nav
+        class="archive-view-switch archive-toolbar"
+        :aria-label="__t('ui.settings', '记忆分类与设置')"
+      >
+        <PButton
+          size="sm"
+          :variant="archive.status.value === 'active' ? 'primary' : 'ghost'"
+          @click="setSection('active')"
+        >
+          {{ __t('ui.settings', '记忆') }}
         </PButton>
         <PButton
           size="sm"
-          :variant="view === 'graph' ? 'primary' : 'ghost'"
-          @click="view = 'graph'"
+          :variant="archive.status.value === 'archived' ? 'primary' : 'ghost'"
+          @click="setSection('archived')"
         >
-          <PixelIcon name="link" size="xs" />
-          关系图谱
+          {{ __t('ui.settings', '归档') }}
+        </PButton>
+        <button
+          type="button"
+          role="switch"
+          class="memory-background-toggle"
+          :aria-checked="memoryBackgroundEnabled"
+          :aria-busy="memorySwitchSaving"
+          :disabled="!memorySwitchReady || memorySwitchSaving"
+          :title="__t('ui.settings', '自动整理记忆与日记')"
+          @click="setMemoryBackgroundEnabled(!memoryBackgroundEnabled)"
+        >
+          <span class="memory-background-indicator" aria-hidden="true" />
+          {{ __t('ui.settings', '后台记忆') }}
+          <span class="memory-background-state" aria-hidden="true">
+            {{
+              memorySwitchSaving
+                ? __t('ui.settings', '保存中')
+                : memoryBackgroundEnabled
+                  ? __t('ui.settings', '开')
+                  : __t('ui.settings', '关')
+            }}
+          </span>
+        </button>
+        <PButton size="sm" variant="secondary" class="memory-rag-entry" @click="openRagConfig">
+          <PixelIcon name="settings" size="xs" />
+          {{ __t('ui.rag', 'RAG 配置') }}
+        </PButton>
+      </nav>
+      <PrivacyCleanupPanel />
+      <div v-if="view === 'list' && archive.items.value.length" class="archive-view-switch">
+        <PButton
+          size="sm"
+          variant="ghost"
+          @click="
+            checkedIds =
+              checkedIds.length === archive.items.value.length
+                ? []
+                : archive.items.value.map((note) => note.id)
+          "
+        >
+          {{ __t('ui.settings', '选择本页') }}
+        </PButton>
+        <span v-if="checkedIds.length">
+          {{ __t('ui.settings', '已选') }} {{ checkedIds.length }} {{ __t('ui.settings', '条') }}
+        </span>
+        <PButton
+          v-if="checkedIds.length"
+          size="sm"
+          variant="ghost"
+          @click="batchAction = archive.status.value === 'archived' ? 'restore' : 'archive'"
+        >
+          {{
+            archive.status.value === 'archived'
+              ? __t('ui.settings', '恢复')
+              : __t('ui.settings', '归档')
+          }}
+        </PButton>
+        <PButton
+          v-if="checkedIds.length"
+          size="sm"
+          variant="danger"
+          @click="
+            () => {
+              deleteSource = false
+              batchAction = 'delete'
+            }
+          "
+        >
+          {{ __t('ui.settings', '永久删除') }}
         </PButton>
       </div>
-    </header>
 
-    <nav class="archive-view-switch archive-toolbar" aria-label="记忆分类与设置">
-      <PButton
-        size="sm"
-        :variant="archive.status.value === 'active' ? 'primary' : 'ghost'"
-        @click="setSection('active')"
-      >
-        记忆
-      </PButton>
-      <PButton
-        size="sm"
-        :variant="archive.status.value === 'archived' ? 'primary' : 'ghost'"
-        @click="setSection('archived')"
-      >
-        归档
-      </PButton>
-      <button
-        type="button"
-        role="switch"
-        class="memory-background-toggle"
-        :aria-checked="memoryBackgroundEnabled"
-        :aria-busy="memorySwitchSaving"
-        :disabled="!memorySwitchReady || memorySwitchSaving"
-        title="自动整理记忆与日记"
-        @click="setMemoryBackgroundEnabled(!memoryBackgroundEnabled)"
-      >
-        <span class="memory-background-indicator" aria-hidden="true" />
-        后台记忆
-        <span class="memory-background-state" aria-hidden="true">
-          {{ memorySwitchSaving ? '保存中' : memoryBackgroundEnabled ? '开' : '关' }}
-        </span>
-      </button>
-    </nav>
-    <PrivacyCleanupPanel />
-    <div v-if="view === 'list' && archive.items.value.length" class="archive-view-switch">
-      <PButton
-        size="sm"
-        variant="ghost"
-        @click="
-          checkedIds =
-            checkedIds.length === archive.items.value.length
-              ? []
-              : archive.items.value.map((note) => note.id)
-        "
-      >
-        选择本页
-      </PButton>
-      <span v-if="checkedIds.length">已选 {{ checkedIds.length }} 条</span>
-      <PButton
-        v-if="checkedIds.length"
-        size="sm"
-        variant="ghost"
-        @click="batchAction = archive.status.value === 'archived' ? 'restore' : 'archive'"
-      >
-        {{ archive.status.value === 'archived' ? '恢复' : '归档' }}
-      </PButton>
-      <PButton
-        v-if="checkedIds.length"
-        size="sm"
-        variant="danger"
-        @click="
-          () => {
-            deleteSource = false
-            batchAction = 'delete'
-          }
-        "
-      >
-        永久删除
-      </PButton>
-    </div>
-
-    <!-- 过滤工作台 -->
-    <PCard pixel padding="sm" overflow-visible class="archive-filter-card">
-      <MemoryFilterBar
-        v-model:search-query="archive.searchQuery.value"
-        v-model:agent="archive.agent.value"
-        v-model:channel="archive.channel.value"
-        v-model:status="archive.status.value"
-        v-model:mode="archive.mode.value"
-        v-model:importance-min="archive.importanceMin.value"
-        v-model:importance-max="archive.importanceMax.value"
-        v-model:tones="archive.tones.value"
-        v-model:participants="archive.participants.value"
-        v-model:places="archive.places.value"
-        v-model:objects="archive.objects.value"
-        v-model:topics="archive.topics.value"
-        v-model:event-at-from="archive.eventAtFrom.value"
-        v-model:event-at-to="archive.eventAtTo.value"
-        v-model:created-at-from="archive.createdAtFrom.value"
-        v-model:created-at-to="archive.createdAtTo.value"
-        v-model:sort="archive.sort.value"
-        v-model:order="archive.order.value"
-        :facets="archive.facets.value"
-        :agent-options="agentOptions"
-        :chips="archive.chips.value"
-        :total="archive.total.value"
-        :is-loading="archive.isLoading.value"
-        @refresh="loadArchive"
-        @clear="setSection(archive.status.value === 'archived' ? 'archived' : 'active')"
-      />
-    </PCard>
-
-    <!-- 主区域：左内容 + 右检查器 -->
-    <div class="archive-main">
-      <div class="archive-content">
-        <MemoryList
-          v-if="view === 'list'"
-          :items="archive.items.value"
-          :selected-id="archive.selectedId.value"
-          :is-loading="archive.isLoading.value"
-          :page="archive.page.value"
-          :page-count="archive.pageCount.value"
-          :page-size="archive.pageSize.value"
+      <!-- 过滤工作台 -->
+      <PCard pixel padding="sm" overflow-visible class="archive-filter-card">
+        <MemoryFilterBar
+          v-model:search-query="archive.searchQuery.value"
+          v-model:agent="archive.agent.value"
+          v-model:channel="archive.channel.value"
+          v-model:status="archive.status.value"
+          v-model:mode="archive.mode.value"
+          v-model:importance-min="archive.importanceMin.value"
+          v-model:importance-max="archive.importanceMax.value"
+          v-model:tones="archive.tones.value"
+          v-model:participants="archive.participants.value"
+          v-model:places="archive.places.value"
+          v-model:objects="archive.objects.value"
+          v-model:topics="archive.topics.value"
+          v-model:event-at-from="archive.eventAtFrom.value"
+          v-model:event-at-to="archive.eventAtTo.value"
+          v-model:created-at-from="archive.createdAtFrom.value"
+          v-model:created-at-to="archive.createdAtTo.value"
+          v-model:sort="archive.sort.value"
+          v-model:order="archive.order.value"
+          :facets="archive.facets.value"
+          :agent-options="agentOptions"
+          :chips="archive.chips.value"
           :total="archive.total.value"
-          :checked-ids="checkedIds"
-          @toggle="toggleChecked"
-          @select="onSelectNote"
-          @page="archive.goToPage"
+          :is-loading="archive.isLoading.value"
+          @refresh="loadArchive"
+          @clear="setSection(archive.status.value === 'archived' ? 'archived' : 'active')"
         />
-        <MemoryGraphView
-          v-else
-          :nodes="archive.graph.value.nodes"
-          :edges="archive.graph.value.edges"
-          :selected-id="archive.selectedId.value"
-          :loading="archive.graphLoading.value"
-          :error="archive.graphError.value"
-          :truncated="archive.graph.value.truncated"
-          @select="onSelectNote"
-        />
+      </PCard>
+
+      <!-- 主区域：左内容 + 右检查器 -->
+      <div class="archive-main">
+        <div class="archive-content">
+          <MemoryList
+            v-if="view === 'list'"
+            :items="archive.items.value"
+            :selected-id="archive.selectedId.value"
+            :is-loading="archive.isLoading.value"
+            :page="archive.page.value"
+            :page-count="archive.pageCount.value"
+            :page-size="archive.pageSize.value"
+            :total="archive.total.value"
+            :checked-ids="checkedIds"
+            @toggle="toggleChecked"
+            @select="onSelectNote"
+            @page="archive.goToPage"
+          />
+          <MemoryGraphView
+            v-else
+            :nodes="archive.graph.value.nodes"
+            :edges="archive.graph.value.edges"
+            :selected-id="archive.selectedId.value"
+            :loading="archive.graphLoading.value"
+            :error="archive.graphError.value"
+            :truncated="archive.graph.value.truncated"
+            @select="onSelectNote"
+          />
+        </div>
+
+        <aside class="archive-inspector">
+          <MemoryInspector
+            :selected="archive.selected.value"
+            :detail-loading="archive.detailLoading.value"
+            :detail-error="archive.detailError.value"
+            :source="archive.source.value"
+            :source-loading="archive.sourceLoading.value"
+            :source-error="archive.sourceError.value"
+            @load-source="archive.loadSource"
+            @archive="archiveTarget = $event"
+            @restore="restoreNote"
+            @delete="openDelete"
+            @select="onSelectNote"
+          />
+        </aside>
       </div>
 
-      <aside class="archive-inspector">
-        <MemoryInspector
-          :selected="archive.selected.value"
-          :detail-loading="archive.detailLoading.value"
-          :detail-error="archive.detailError.value"
-          :source="archive.source.value"
-          :source-loading="archive.sourceLoading.value"
-          :source-error="archive.sourceError.value"
-          @load-source="archive.loadSource"
-          @archive="archiveTarget = $event"
-          @restore="restoreNote"
-          @delete="openDelete"
-          @select="onSelectNote"
-        />
-      </aside>
+      <PDialog
+        :model-value="Boolean(archiveTarget)"
+        :title="__t('ui.settings', '归档这条记忆？')"
+        :message="__t('ui.settings', '归档后仅在归档页可见，退出自动召回。')"
+        :confirm-text="__t('ui.settings', '归档')"
+        confirm-variant="danger"
+        :loading="archiveSaving"
+        :auto-close="false"
+        @update:model-value="!$event && (archiveTarget = null)"
+        @confirm="confirmArchive"
+      />
+      <PDialog
+        :model-value="Boolean(deleteTarget)"
+        :title="__t('ui.settings', '永久删除记忆？')"
+        :message="__t('ui.settings', '将删除记忆及关联日记，无法恢复。')"
+        :confirm-text="__t('ui.settings', '永久删除')"
+        confirm-variant="danger"
+        :loading="deleting"
+        :auto-close="false"
+        @update:model-value="!$event && (deleteTarget = null)"
+        @confirm="confirmDelete"
+      >
+        <label class="flex items-center gap-2 text-ui-text-secondary">
+          <input v-model="deleteSource" type="checkbox" />
+          {{ __t('ui.settings', '同时删除来源对话') }}
+        </label>
+      </PDialog>
+      <PDialog
+        :model-value="Boolean(batchAction)"
+        :title="
+          batchAction === 'delete'
+            ? __t('ui.settings', '永久删除所选记忆？')
+            : batchAction === 'restore'
+              ? __t('ui.settings', '恢复所选记忆？')
+              : __t('ui.settings', '归档所选记忆？')
+        "
+        :message="
+          batchAction === 'delete'
+            ? __t('ui.settings', '将删除记忆及关联日记，无法恢复。')
+            : __t('ui.settings', '将处理当前选中的记忆。')
+        "
+        :confirm-variant="batchAction === 'delete' ? 'danger' : 'primary'"
+        :loading="batchSaving"
+        :auto-close="false"
+        @update:model-value="!$event && (batchAction = null)"
+        @confirm="confirmBatch"
+      >
+        <label v-if="batchAction === 'delete'" class="flex items-center gap-2">
+          <input v-model="deleteSource" type="checkbox" />
+          {{ __t('ui.settings', '同时删除来源对话') }}
+        </label>
+      </PDialog>
     </div>
-
-    <PDialog
-      :model-value="Boolean(archiveTarget)"
-      title="归档这条记忆？"
-      message="归档后仅在归档页可见，退出自动召回。"
-      confirm-text="归档"
-      confirm-variant="danger"
-      :loading="archiveSaving"
-      :auto-close="false"
-      @update:model-value="!$event && (archiveTarget = null)"
-      @confirm="confirmArchive"
-    />
-    <PDialog
-      :model-value="Boolean(deleteTarget)"
-      title="永久删除记忆？"
-      message="正文、修订记录、关系、索引及关联日记副本将被清理，无法恢复。"
-      confirm-text="永久删除"
-      confirm-variant="danger"
-      :loading="deleting"
-      :auto-close="false"
-      @update:model-value="!$event && (deleteTarget = null)"
-      @confirm="confirmDelete"
-    >
-      <label class="flex items-center gap-2 text-ui-text-secondary">
-        <input v-model="deleteSource" type="checkbox" />
-        同时删除来源对话
-      </label>
-    </PDialog>
-    <PDialog
-      :model-value="Boolean(batchAction)"
-      :title="
-        batchAction === 'delete'
-          ? '永久删除所选记忆？'
-          : batchAction === 'restore'
-            ? '恢复所选记忆？'
-            : '归档所选记忆？'
-      "
-      :message="
-        batchAction === 'delete'
-          ? '正文、修订、关系、索引和关联日记将被清理，无法恢复。'
-          : '将处理当前选中的记忆。'
-      "
-      :confirm-variant="batchAction === 'delete' ? 'danger' : 'primary'"
-      :loading="batchSaving"
-      :auto-close="false"
-      @update:model-value="!$event && (batchAction = null)"
-      @confirm="confirmBatch"
-    >
-      <label v-if="batchAction === 'delete'" class="flex items-center gap-2">
-        <input v-model="deleteSource" type="checkbox" />
-        同时删除来源对话
-      </label>
-    </PDialog>
   </div>
 </template>
 
@@ -494,6 +558,19 @@ export default { name: 'MemoriesTab' }
 </script>
 
 <style scoped>
+.memories-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.memory-rag-entry {
+  margin-left: auto;
+}
+
 .memories-page {
   display: flex;
   flex-direction: column;

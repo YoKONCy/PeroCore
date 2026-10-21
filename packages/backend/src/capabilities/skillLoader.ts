@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * Skill Loader — Skill 文件加载器
  *
@@ -62,7 +63,7 @@ export class SkillLoader {
       this.scanDir(dir)
     }
 
-    logger.info(`已加载 ${this.manifests.size} 个 Skill 清单`)
+    logger.info(__t('logs.capabilities', '已加载 {0} 个 Skill 清单', [this.manifests.size]))
   }
 
   /**
@@ -83,7 +84,10 @@ export class SkillLoader {
     }
     if (added > 0) {
       logger.info(
-        `追加扫描 ${added} 个 Extension skills 目录，当前共 ${this.manifests.size} 个 Skill`,
+        __t('logs.capabilities', '追加扫描 {0} 个 Extension skills 目录，当前共 {1} 个 Skill', [
+          added,
+          this.manifests.size,
+        ]),
       )
     }
   }
@@ -193,10 +197,10 @@ export class SkillLoader {
         const match = RE_FRONTMATTER.exec(raw)
         const body = match?.[2]?.trim() ?? raw.trim()
         this.contentCache.set(skillId, body)
-        logger.debug(`Skill 内容已加载: ${skillId}`)
+        logger.debug(__t('logs.capabilities', 'Skill 内容已加载: {0}', [skillId]))
         return body
       } catch {
-        logger.warn(`加载 Skill 内容失败: ${skillId}`)
+        logger.warn(__t('logs.capabilities', '加载 Skill 内容失败: {0}', [skillId]))
       }
     }
 
@@ -262,7 +266,10 @@ export class SkillLoader {
 
     // 递归复制
     cpSync(sourcePath, destPath, { recursive: true })
-    logger.info(`Skill 已导入: ${folderName}`, { sourcePath, destPath })
+    logger.info(__t('logs.capabilities', 'Skill 已导入: {0}', [folderName]), {
+      sourcePath,
+      destPath,
+    })
 
     // 重新扫描
     this.reloadAll()
@@ -285,7 +292,7 @@ export class SkillLoader {
     }
 
     rmSync(skillPath, { recursive: true, force: true })
-    logger.info(`Skill 已删除: ${skillId}`)
+    logger.info(__t('logs.capabilities', 'Skill 已删除: {0}', [skillId]))
 
     // 重新扫描
     this.reloadAll()
@@ -307,7 +314,7 @@ export class SkillLoader {
           this.manifests.set(manifest.id, manifest)
         }
       } catch (err) {
-        logger.warn(`解析 Skill ${entry} 失败: ${err}`)
+        logger.warn(__t('logs.capabilities', '解析 Skill {0} 失败: {1}', [entry, err]))
       }
     }
   }
@@ -317,7 +324,7 @@ export class SkillLoader {
     const raw = readFileSync(filePath, 'utf-8')
     const match = RE_FRONTMATTER.exec(raw)
     if (!match) {
-      logger.warn(`Skill ${skillId} 缺少 frontmatter`)
+      logger.warn(__t('logs.capabilities', 'Skill {0} 缺少 frontmatter', [skillId]))
       return null
     }
 

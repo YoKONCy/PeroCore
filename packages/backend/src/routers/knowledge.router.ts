@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { bodyLimit } from 'hono/body-limit'
@@ -30,16 +31,16 @@ export function createKnowledgeRouter(ctx: AppContext) {
   router.get('/facts', zValidator('query', archiveQuerySchema), async (c) => {
     const { query } = c.req.valid('query')
     const data = await ctx.factsRepo.archive(query)
-    return c.json({ code: 'OK', message: '获取成功', data })
+    return c.json({ code: 'OK', message: __t('server.routers', '获取成功'), data })
   })
 
   router.post('/facts/:id/retract', async (c) => {
     await ctx.factsRepo.retractFact(c.req.param('id'))
-    return c.json({ code: 'OK', message: '事实已撤回' })
+    return c.json({ code: 'OK', message: __t('server.routers', '事实已撤回') })
   })
   router.delete('/facts/:id', async (c) => {
     await ctx.privacyDeletionService.deleteFact(c.req.param('id'))
-    return c.json({ code: 'OK', message: '事实已永久删除' })
+    return c.json({ code: 'OK', message: __t('server.routers', '事实已永久删除') })
   })
 
   router.get(
@@ -56,7 +57,7 @@ export function createKnowledgeRouter(ctx: AppContext) {
       const { query, page, pageSize } = c.req.valid('query')
       return c.json({
         code: 'OK',
-        message: '获取成功',
+        message: __t('server.routers', '获取成功'),
         data: ctx.knowledgeService.repo.list(query, page, pageSize),
       })
     },
@@ -64,7 +65,7 @@ export function createKnowledgeRouter(ctx: AppContext) {
   router.get('/documents/:id', (c) =>
     c.json({
       code: 'OK',
-      message: '获取成功',
+      message: __t('server.routers', '获取成功'),
       data: ctx.knowledgeService.detail(c.req.param('id')),
     }),
   )
@@ -101,13 +102,16 @@ export function createKnowledgeRouter(ctx: AppContext) {
         }
       }
       const data = await ctx.knowledgeService.import({
-        title: input.title || page?.title || '未命名资料',
+        title: input.title || page?.title || __t('server.routers', '未命名资料'),
         content: page?.content ?? input.content!,
         sourceKind: input.kind,
         source: page?.source,
         replaceId: input.replaceId,
       })
-      return c.json({ code: 'ACCEPTED', message: '资料已加入整理队列', data }, 202)
+      return c.json(
+        { code: 'ACCEPTED', message: __t('server.routers', '资料已加入整理队列'), data },
+        202,
+      )
     },
   )
 
@@ -127,13 +131,16 @@ export function createKnowledgeRouter(ctx: AppContext) {
       source: file.name.slice(0, 512),
       replaceId,
     })
-    return c.json({ code: 'ACCEPTED', message: '资料已加入整理队列', data }, 202)
+    return c.json(
+      { code: 'ACCEPTED', message: __t('server.routers', '资料已加入整理队列'), data },
+      202,
+    )
   })
   router.post('/documents/:id/retry', async (c) =>
     c.json(
       {
         code: 'ACCEPTED',
-        message: '已重新排队',
+        message: __t('server.routers', '已重新排队'),
         data: await ctx.knowledgeService.retry(c.req.param('id')),
       },
       202,
@@ -141,16 +148,16 @@ export function createKnowledgeRouter(ctx: AppContext) {
   )
   router.delete('/documents/:id', async (c) => {
     await ctx.knowledgeService.delete(c.req.param('id'))
-    return c.json({ code: 'OK', message: '资料已删除' })
+    return c.json({ code: 'OK', message: __t('server.routers', '资料已删除') })
   })
   router.post('/reindex', async (c) => {
     await ctx.knowledgeService.reindex(true)
-    return c.json({ code: 'ACCEPTED', message: '索引重建已安排' }, 202)
+    return c.json({ code: 'ACCEPTED', message: __t('server.routers', '索引重建已安排') }, 202)
   })
   router.post('/search', zValidator('json', knowledgeSearchSchema), async (c) => {
     try {
       const data = await ctx.knowledgeService.index.search(c.req.valid('json'), c.req.raw.signal)
-      return c.json({ code: 'OK', message: '检索完成', data })
+      return c.json({ code: 'OK', message: __t('server.routers', '检索完成'), data })
     } catch (cause) {
       throw new AppError('BAD_REQUEST', { message: (cause as Error).message })
     }

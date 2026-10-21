@@ -1,0 +1,11 @@
+{
+  "正在连接数据库 → {0}": "is connecting to the database → {0}",
+  "已在启动前恢复 Steam Cloud 数据库快照，旧库备份: {0}": "has restored the Steam Cloud database snapshot before startup, old database backup: {0}",
+  "恢复 Steam Cloud 数据库快照失败: {0}": "Failed to restore Steam Cloud database snapshot: {0}",
+  "检测到首次启动，正在执行数据库迁移...": "first startup detected, database migration is being performed...",
+  "数据库结构迁移完成": "database structure migration completed",
+  "数据库结构迁移失败: {0}": "Database structure migration failed: {0}",
+  "数据库连接成功": "database connection successful",
+  "数据库 WAL已收口，连接已关闭": "database WAL has closed the connection and the connection has been closed",
+  "数据库结构迁移完成：{0}": "database structure migration completed: {0}"
+}

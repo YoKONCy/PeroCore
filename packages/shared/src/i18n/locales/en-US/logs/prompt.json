@@ -1,0 +1,9 @@
+{
+  "已加载 {0} 个 MDP 模板": "{0} MDP templates loaded",
+  "模板根目录已注册，跳过: {0} (prefix={1})": "template root directory has been registered, skip: {0} (prefix={1})",
+  "已注册额外模板根目录: {0} (prefix={1}, 当前共 {2} 个额外根)": "Registered additional template root directory: {0} (prefix={1}, currently there are {2} additional roots)",
+  "模板未找到: {0}": "template not found: {0}",
+  "预设已保存: {0} → {1}": "preset saved: {0} → {1}",
+  "加载预设失败: {0}": "failed to load preset: {0}",
+  "加载模板失败: {0}": "failed to load template: {0}"
+}

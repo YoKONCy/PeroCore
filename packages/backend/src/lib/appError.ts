@@ -15,9 +15,9 @@ export class AppError extends Error {
   public readonly code: ResponseCode
   public readonly data?: unknown
 
-  constructor(code: ResponseCode, options?: { message?: string; data?: unknown }) {
+  constructor(code: ResponseCode, options?: { message?: string; data?: unknown; cause?: unknown }) {
     const message = options?.message ?? CODE_MESSAGES[code] ?? '未知错误'
-    super(message)
+    super(message, options?.cause === undefined ? undefined : { cause: options.cause })
     this.name = 'AppError'
     this.code = code
     this.data = options?.data

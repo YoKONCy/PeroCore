@@ -1,0 +1,14 @@
+{
+  "已记录 QQ {0}，下次启动将自动使用快速登录": "has recorded QQ {0}, and the quick login will be automatically used next time it is started.",
+  "已校正 QQ 版本信息：{0}": "Corrected QQ version information: {0}",
+  "已应用 NapCat 运行兼容修复": "has NapCat run compatibility fix applied",
+  "读取配置目录失败": "failed to read the configuration directory",
+  "已同步{0}反向 WS 配置 → {1}": "has synchronized {0} reverse WS configuration → {1}",
+  "处理配置文件 {0} 失败: {1}": "failed to process configuration file {0}: {1}",
+  "NapCat 进程已在运行": "NapCat process is already running",
+  "启动: {0} {1} (cwd: {2})": "boot: {0} {1} (cwd: {2})",
+  "NapCat 进程退出: code={0}": "NapCat process exited: code={0}",
+  "NapCat 启动失败: {0}": "NapCat startup failed: {0}",
+  "正在停止 NapCat...": "Stopping NapCat...",
+  "无法发送命令: NapCat 未运行": "Unable to send command: NapCat is not running"
+}

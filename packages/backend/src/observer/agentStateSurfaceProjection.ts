@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 import { createHash } from 'node:crypto'
 import type {
   PanelSurfaceProps,
@@ -42,7 +43,7 @@ export async function projectAgentStateSurface(
             revision: 1,
             props: {
               title: 'Agent State',
-              subtitle: '可删除的派生测量，不是人格事实',
+              subtitle: __t('server.observer', '可删除的派生测量，不是人格事实'),
               fields: Object.entries(aggregate).map(([metric, value]) => ({
                 key: metric,
                 label: metric,
@@ -57,11 +58,11 @@ export async function projectAgentStateSurface(
             revision: 1,
             props: {
               columns: [
-                { key: 'metric', label: '指标' },
-                { key: 'value', label: '值' },
-                { key: 'confidence', label: '置信度' },
-                { key: 'source', label: '来源事件' },
-                { key: 'observedAt', label: '观测时间' },
+                { key: 'metric', label: __t('server.observer', '指标') },
+                { key: 'value', label: __t('server.observer', '值') },
+                { key: 'confidence', label: __t('server.observer', '置信度') },
+                { key: 'source', label: __t('server.observer', '来源事件') },
+                { key: 'observedAt', label: __t('server.observer', '观测时间') },
               ],
               rows: measurements.map((item) => ({
                 metric: item.metric,

@@ -8,6 +8,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { paths } from './env'
+import { translateDiagnostic } from '../../../packages/shared/src/i18n'
 
 // 确保日志目录存在
 function ensureLogDir(): void {
@@ -56,6 +57,7 @@ function getLogStream(): fs.WriteStream | null {
 type LogLevel = 'INFO' | 'WARN' | 'ERROR' | 'DEBUG'
 
 function write(level: LogLevel, tag: string, message: string): void {
+  message = translateDiagnostic(message)
   const time = getTimeStr()
   const line = `[${time}] [${level}] [${tag}] ${message}`
 

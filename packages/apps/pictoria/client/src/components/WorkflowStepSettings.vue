@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import type { FieldSchema, Step } from '../types'
 import { pictoria, standalone } from '../services/transport'
@@ -33,7 +35,14 @@ const inputSchema = ref<FieldSchema>(
     JSON.stringify(
       props.step?.inputSchema || {
         type: 'object',
-        properties: { prompt: { type: 'string', title: '提示词' } },
+        properties: {
+          prompt: {
+            type: 'string',
+            get title() {
+              return __t('apps.pictoria.ui', '提示词')
+            },
+          },
+        },
         required: ['prompt'],
         additionalProperties: false,
       },
@@ -47,7 +56,14 @@ const outputSchema = ref<FieldSchema>(
         (localLlm
           ? {
               type: 'object',
-              properties: { text: { type: 'string', title: '文本' } },
+              properties: {
+                text: {
+                  type: 'string',
+                  get title() {
+                    return __t('apps.pictoria.ui', '文本')
+                  },
+                },
+              },
               required: ['text'],
               additionalProperties: false,
             }
@@ -56,7 +72,9 @@ const outputSchema = ref<FieldSchema>(
               properties: {
                 images: {
                   type: 'array',
-                  title: '图片',
+                  get title() {
+                    return __t('apps.pictoria.ui', '图片')
+                  },
                   items: {
                     type: 'object',
                     properties: { assetId: { type: 'string' } },
@@ -86,15 +104,37 @@ if (props.videoApi && !props.step) {
   inputSchema.value = {
     type: 'object',
     properties: {
-      prompt: { type: 'string', title: '提示词', minLength: 1 },
-      images: { type: 'array', title: '参考图片', items: asset, default: [] },
+      prompt: {
+        type: 'string',
+        get title() {
+          return __t('apps.pictoria.ui', '提示词')
+        },
+        minLength: 1,
+      },
+      images: {
+        type: 'array',
+        get title() {
+          return __t('apps.pictoria.ui', '参考图片')
+        },
+        items: asset,
+        default: [],
+      },
     },
     required: ['prompt'],
     additionalProperties: false,
   }
   outputSchema.value = {
     type: 'object',
-    properties: { videos: { type: 'array', title: '视频', items: asset, minItems: 1 } },
+    properties: {
+      videos: {
+        type: 'array',
+        get title() {
+          return __t('apps.pictoria.ui', '视频')
+        },
+        items: asset,
+        minItems: 1,
+      },
+    },
     required: ['videos'],
     additionalProperties: false,
   }
@@ -163,7 +203,14 @@ async function save() {
           kind.value === 'llm' && outputMode.value === 'text'
             ? {
                 type: 'object',
-                properties: { text: { type: 'string', title: '文本' } },
+                properties: {
+                  text: {
+                    type: 'string',
+                    get title() {
+                      return __t('apps.pictoria.ui', '文本')
+                    },
+                  },
+                },
                 required: ['text'],
                 additionalProperties: false,
               }
@@ -186,19 +233,34 @@ async function save() {
       class="workflow-step-settings floating-panel"
       role="dialog"
       aria-modal="true"
-      :aria-label="kind === 'service' ? '配置节点 API' : '配置 LLM'"
+      :aria-label="
+        kind === 'service'
+          ? __t('apps.pictoria.ui', '配置节点 API')
+          : __t('apps.pictoria.ui', '配置 LLM')
+      "
       tabindex="-1"
       @keydown.tab="trapFocus"
       @keydown.esc.stop="!busy && emit('close')"
     >
       <header>
-        <strong>{{ kind === 'service' ? '配置节点 API' : '配置 LLM' }}</strong>
-        <button class="icon-button" :disabled="busy" aria-label="关闭" @click="emit('close')">
+        <strong>
+          {{
+            kind === 'service'
+              ? __t('apps.pictoria.ui', '配置节点 API')
+              : __t('apps.pictoria.ui', '配置 LLM')
+          }}
+        </strong>
+        <button
+          class="icon-button"
+          :disabled="busy"
+          :aria-label="__t('apps.pictoria.ui', '关闭')"
+          @click="emit('close')"
+        >
           <Icon name="close" :size="17" />
         </button>
       </header>
       <label class="panel-field">
-        名称
+        {{ __t('apps.pictoria.ui', '名称') }}
         <input v-model="name" maxlength="100" />
       </label>
       <PictoriaSelect
@@ -206,8 +268,8 @@ async function save() {
         v-model="kind"
         :disabled="busy"
         :options="[
-          { value: 'service', label: '自定义 API' },
-          { value: 'llm', label: 'infOS LLM（可选）' },
+          { value: 'service', label: __t('apps.pictoria.ui', '自定义 API') },
+          { value: 'llm', label: __t('apps.pictoria.ui', 'infOS LLM（可选）') },
         ]"
       />
       <ApiServiceEditor
@@ -222,41 +284,47 @@ async function save() {
       />
       <template v-else>
         <label class="panel-field">
-          infOS 模型 ID
-          <input v-model="modelId" inputmode="numeric" placeholder="默认模型" />
+          {{ __t('apps.pictoria.ui', 'infOS 模型 ID') }}
+          <input
+            v-model="modelId"
+            inputmode="numeric"
+            :placeholder="__t('apps.pictoria.ui', '默认模型')"
+          />
         </label>
         <label class="panel-field">
-          系统提示词
+          {{ __t('apps.pictoria.ui', '系统提示词') }}
           <textarea v-model="system" maxlength="32000" rows="4" />
         </label>
         <label class="panel-field">
-          输出
+          {{ __t('apps.pictoria.ui', '输出') }}
           <PictoriaSelect
             v-model="outputMode"
             :options="[
-              { value: 'text', label: '文本' },
+              { value: 'text', label: __t('apps.pictoria.ui', '文本') },
               { value: 'json', label: 'JSON' },
             ]"
           />
         </label>
       </template>
       <details class="workflow-step-fields" open>
-        <summary>输入</summary>
+        <summary>{{ __t('apps.pictoria.ui', '输入') }}</summary>
         <WorkflowFields v-model="inputSchema" />
       </details>
       <details v-if="kind !== 'llm' || outputMode === 'json'" class="workflow-step-fields" open>
-        <summary>输出</summary>
+        <summary>{{ __t('apps.pictoria.ui', '输出') }}</summary>
         <WorkflowFields v-model="outputSchema" />
       </details>
       <label class="panel-field">
-        输入说明
+        {{ __t('apps.pictoria.ui', '输入说明') }}
         <textarea v-model="usage" maxlength="16000" rows="3" />
       </label>
       <p v-if="error" class="workflow-field-error" role="alert">{{ error }}</p>
       <footer>
-        <button class="text-button" :disabled="busy" @click="emit('close')">取消</button>
+        <button class="text-button" :disabled="busy" @click="emit('close')">
+          {{ __t('apps.pictoria.ui', '取消') }}
+        </button>
         <button class="create-button" :disabled="busy || !name.trim()" @click="save">
-          {{ busy ? '保存中' : '保存' }}
+          {{ busy ? __t('apps.pictoria.ui', '保存中') : __t('apps.pictoria.ui', '保存') }}
         </button>
       </footer>
     </section>

@@ -1,3 +1,4 @@
+import { t as __t } from './i18n'
 /**
  * socialSurfaceProjection — 应用运行时
  *
@@ -42,11 +43,19 @@ export async function projectSocialSurface(
           lifecycle: 'stable',
           revision: 1,
           props: {
-            title: '社交空间',
-            subtitle: '由SocialStorage Authority重建',
+            title: __t('apps.social.ui', '社交空间'),
+            subtitle: __t('apps.social.ui', '由SocialStorage Authority重建'),
             fields: [
-              { key: 'contacts', label: '联系人印象', value: String(contacts.length) },
-              { key: 'channels', label: '最近会话', value: String(channels.length) },
+              {
+                key: 'contacts',
+                label: __t('apps.social.ui', '联系人印象'),
+                value: String(contacts.length),
+              },
+              {
+                key: 'channels',
+                label: __t('apps.social.ui', '最近会话'),
+                value: String(channels.length),
+              },
             ],
           } satisfies PanelSurfaceProps,
         },
@@ -68,9 +77,9 @@ export async function projectSocialSurface(
           revision: 1,
           props: {
             columns: [
-              { key: 'displayName', label: '联系人' },
-              { key: 'identity', label: '身份' },
-              { key: 'impression', label: '印象' },
+              { key: 'displayName', label: __t('apps.social.ui', '联系人') },
+              { key: 'identity', label: __t('apps.social.ui', '身份') },
+              { key: 'impression', label: __t('apps.social.ui', '印象') },
             ],
             rows: contacts.map((contact) => ({
               displayName: contact.displayName || contact.userId,

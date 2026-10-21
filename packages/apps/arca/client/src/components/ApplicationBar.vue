@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useWorkbenchStore } from '../stores/workbench'
@@ -24,11 +26,21 @@ const saveLabel = computed(
   () =>
     ({
       idle: '已保存',
-      saved: '已保存',
-      dirty: '未同步',
-      saving: '保存中…',
-      conflicted: '版本冲突',
-      failed: '保存失败',
+      get saved() {
+        return __t('apps.arca.ui', '已保存')
+      },
+      get dirty() {
+        return __t('apps.arca.ui', '未同步')
+      },
+      get saving() {
+        return __t('apps.arca.ui', '保存中…')
+      },
+      get conflicted() {
+        return __t('apps.arca.ui', '版本冲突')
+      },
+      get failed() {
+        return __t('apps.arca.ui', '保存失败')
+      },
     })[store.editState],
 )
 const bridge = (
@@ -114,7 +126,7 @@ async function stop(keepDraft: boolean) {
     <button
       class="app-brand"
       type="button"
-      title="文稿库"
+      :title="__t('apps.arca.ui', '文稿库')"
       :disabled="store.applicationStopping"
       @click="router.push('/')"
     >
@@ -126,13 +138,15 @@ async function stop(keepDraft: boolean) {
         v-if="inDocument"
         class="document-name"
         type="button"
-        title="重命名"
+        :title="__t('apps.arca.ui', '重命名')"
         :disabled="store.applicationStopping || store.foregroundOperations > 0"
         @click="workspaceActions?.rename()"
       >
         {{ store.documentTitle }}
       </button>
-      <strong v-else>{{ route.name === 'settings' ? '设置' : '文稿' }}</strong>
+      <strong v-else>
+        {{ route.name === 'settings' ? __t('apps.arca.ui', '设置') : __t('apps.arca.ui', '文稿') }}
+      </strong>
     </div>
     <div class="app-controls">
       <button
@@ -140,7 +154,7 @@ async function stop(keepDraft: boolean) {
         class="save-state"
         :data-state="store.editState"
         type="button"
-        title="保存文稿"
+        :title="__t('apps.arca.ui', '保存文稿')"
         :disabled="store.applicationStopping"
         @click="save"
       >
@@ -151,8 +165,8 @@ async function stop(keepDraft: boolean) {
         v-if="route.name !== 'settings'"
         class="icon-button"
         type="button"
-        title="设置"
-        aria-label="设置"
+        :title="__t('apps.arca.ui', '设置')"
+        :aria-label="__t('apps.arca.ui', '设置')"
         :disabled="store.applicationStopping"
         @click="router.push('/settings')"
       >
@@ -166,24 +180,32 @@ async function stop(keepDraft: boolean) {
         @click="requestStop"
       >
         <ArcaIcon name="power" :size="16" />
-        {{ store.applicationStopping ? '停止中…' : '停止应用' }}
+        {{
+          store.applicationStopping
+            ? __t('apps.arca.ui', '停止中…')
+            : __t('apps.arca.ui', '停止应用')
+        }}
       </button>
     </div>
   </header>
   <ArcaDialog
     :open="confirmStop"
-    title="停止应用？"
+    :title="__t('apps.arca.ui', '停止应用？')"
     :busy="store.applicationStopping"
     @close="confirmStop = false"
   >
     <p v-if="dirty">
-      {{ store.editState === 'conflicted' ? '当前文稿存在版本冲突。' : '文稿还有未保存的内容。' }}
+      {{
+        store.editState === 'conflicted'
+          ? __t('apps.arca.ui', '当前文稿存在版本冲突。')
+          : __t('apps.arca.ui', '文稿还有未保存的内容。')
+      }}
     </p>
-    <p v-if="running">正在进行的协作会停止。</p>
+    <p v-if="running">{{ __t('apps.arca.ui', '正在进行的协作会停止。') }}</p>
     <p v-if="stoppingError" class="form-error" role="alert">{{ stoppingError }}</p>
     <template #footer>
       <button type="button" :disabled="store.applicationStopping" @click="confirmStop = false">
-        取消
+        {{ __t('apps.arca.ui', '取消') }}
       </button>
       <button
         v-if="dirty && workspaceActions?.canKeepDraft()"
@@ -191,7 +213,7 @@ async function stop(keepDraft: boolean) {
         :disabled="store.applicationStopping"
         @click="stop(true)"
       >
-        保留草稿并停止
+        {{ __t('apps.arca.ui', '保留草稿并停止') }}
       </button>
       <button
         class="danger-button"
@@ -199,7 +221,7 @@ async function stop(keepDraft: boolean) {
         :disabled="store.applicationStopping"
         @click="stop(false)"
       >
-        {{ dirty ? '保存并停止' : '停止应用' }}
+        {{ dirty ? __t('apps.arca.ui', '保存并停止') : __t('apps.arca.ui', '停止应用') }}
       </button>
     </template>
   </ArcaDialog>

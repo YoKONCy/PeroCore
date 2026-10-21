@@ -1,3 +1,4 @@
+import { t as __t } from './utils/i18n'
 /**
  * @file Electron 主进程入口
  * @description 遵循 07_DUAL_DEPLOYMENT.md — Electron 壳层仅做窗口/IPC/系统能力
@@ -24,6 +25,10 @@ import { initSteam } from './services/steam'
 import { closePictoriaDesktopGuard } from './services/pictoriaLifetime'
 import { closeArcaDesktopGuard } from './services/arcaLifetime'
 import { APPLICATION_NAME, WINDOWS_APP_ID } from './utils/appIdentity'
+import { configureClientCredential, getClientCredential } from './utils/clientCredential'
+import { paths } from './utils/env'
+
+configureClientCredential(process.env.PERO_DATA_DIR || paths.data)
 
 /** 向所有存活渲染窗口广播可见的系统错误，日志仍保留作诊断。 */
 function notifyRendererError(title: string, message: string): void {
@@ -38,7 +43,7 @@ process.on('uncaughtException', (error) => {
   logger.error('Main', msg)
   notifyRendererError('桌面应用异常', error.message)
   try {
-    dialog.showErrorBox('应用启动错误', msg)
+    dialog.showErrorBox(__t('electron.ui.index.ts', '应用启动错误'), msg)
   } catch {
     // 忽略
   }
@@ -46,7 +51,7 @@ process.on('uncaughtException', (error) => {
 
 process.on('unhandledRejection', (reason) => {
   const message = reason instanceof Error ? reason.message : String(reason)
-  logger.error('Main', `未处理的 Promise 拒绝: ${message}`)
+  logger.error('Main', __t('electron.logs.index.ts', '未处理的 Promise 拒绝: {0}', [message]))
   notifyRendererError('桌面服务异常', message)
 })
 
@@ -81,7 +86,10 @@ if (process.platform === 'win32') {
   app.setAppUserModelId(WINDOWS_APP_ID)
   logger.info(
     'AppIdentity',
-    `Windows 任务栏身份：${WINDOWS_APP_ID}；程序路径：${app.getPath('exe')}`,
+    __t('electron.logs.index.ts', 'Windows 任务栏身份：{0}；程序路径：{1}', [
+      WINDOWS_APP_ID,
+      app.getPath('exe'),
+    ]),
   )
 }
 
@@ -97,13 +105,13 @@ process.env['ELECTRON_DISABLE_SECURITY_WARNINGS'] = 'true'
 try {
   const steamStatus = initSteam()
   if (steamStatus === 'restarting') {
-    logger.info('Main', '通过 Steam 重启，当前进程退出...')
+    logger.info('Main', __t('electron.logs.index.ts', '通过 Steam 重启，当前进程退出...'))
     app.quit()
   } else {
-    logger.info('Main', `Steam 初始化: ${steamStatus}`)
+    logger.info('Main', __t('electron.logs.index.ts', 'Steam 初始化: {0}', [steamStatus]))
   }
 } catch (e: unknown) {
-  logger.error('Main', `Steam 初始化异常 (已跳过): ${e}`)
+  logger.error('Main', __t('electron.logs.index.ts', 'Steam 初始化异常 (已跳过): {0}', [e]))
 }
 
 // ─── IPC 注册 (在 app.ready 之前即可) ─────────────────
@@ -145,9 +153,9 @@ app.whenReady().then(async () => {
     const { setupUpdater } = await import('./services/updater')
     setupUpdater()
 
-    logger.info('Main', '应用启动完成（Daemon 连接模式）')
+    logger.info('Main', __t('electron.logs.index.ts', '应用启动完成（Daemon 连接模式）'))
   } catch (e: unknown) {
-    logger.error('Main', `App whenReady 失败: ${e}`)
+    logger.error('Main', __t('electron.logs.index.ts', 'App whenReady 失败: {0}', [e]))
   }
 })
 
@@ -173,12 +181,15 @@ app.on('before-quit', async (event) => {
     }
   } catch (error) {
     isPreparingQuit = false
-    logger.warn('Main', `关闭应用标签失败，已取消退出：${String(error)}`)
+    logger.warn(
+      'Main',
+      __t('electron.logs.index.ts', '关闭应用标签失败，已取消退出：{0}', [String(error)]),
+    )
     return
   }
   isQuitting = true
 
-  logger.info('Main', '正在执行退出清理...')
+  logger.info('Main', __t('electron.logs.index.ts', '正在执行退出清理...'))
   try {
     // 1. 销毁所有窗口
     windowManager.destroyAll()
@@ -187,7 +198,7 @@ app.on('before-quit', async (event) => {
     await Promise.all(
       ['arca', 'pictoria'].map(async (name) => {
         try {
-          const token = process.env.INFOS_API_TOKEN ?? ''
+          const token = getClientCredential()
           const response = await fetch(
             `http://127.0.0.1:${Number(process.env.PERO_PORT ?? 9120)}/api/applications/${name}/shutdown-managed`,
             {
@@ -199,7 +210,13 @@ app.on('before-quit', async (event) => {
           )
           if (!response.ok) throw new Error(`HTTP ${response.status}`)
         } catch (error) {
-          logger.warn('Main', `停止托管 ${name} 失败，继续退出清理：${String(error)}`)
+          logger.warn(
+            'Main',
+            __t('electron.logs.index.ts', '停止托管 {0} 失败，继续退出清理：{1}', [
+              name,
+              String(error),
+            ]),
+          )
         }
       }),
     )
@@ -223,18 +240,29 @@ app.on('before-quit', async (event) => {
     const { destroyTray } = await import('./services/tray')
     destroyTray()
   } catch (e: unknown) {
-    logger.error('Main', `退出清理失败: ${e}`)
+    logger.error('Main', __t('electron.logs.index.ts', '退出清理失败: {0}', [e]))
   } finally {
     // 其他退出步骤失败也必须等待 NapCat 进程树回收完成。
     await import('./services/napcat')
       .then(({ stopNapCat }) => stopNapCat())
-      .catch((error) => logger.warn('Main', `停止 NapCat 失败：${String(error)}`))
+      .catch((error) =>
+        logger.warn(
+          'Main',
+          __t('electron.logs.index.ts', '停止 NapCat 失败：{0}', [String(error)]),
+        ),
+      )
     // 即使 Daemon 不可达，断开桌面存活连接也能触发 Pictoria 自行停止。
     await closePictoriaDesktopGuard().catch((error) =>
-      logger.warn('Main', `关闭 Pictoria 存活连接失败：${String(error)}`),
+      logger.warn(
+        'Main',
+        __t('electron.logs.index.ts', '关闭 Pictoria 存活连接失败：{0}', [String(error)]),
+      ),
     )
     await closeArcaDesktopGuard().catch((error) =>
-      logger.warn('Main', `关闭 Arca 存活连接失败：${String(error)}`),
+      logger.warn(
+        'Main',
+        __t('electron.logs.index.ts', '关闭 Arca 存活连接失败：{0}', [String(error)]),
+      ),
     )
     logger.close()
   }
@@ -243,7 +271,7 @@ app.on('before-quit', async (event) => {
 })
 
 app.on('second-instance', () => {
-  logger.info('Main', '第二个实例启动请求，激活现有窗口')
+  logger.info('Main', __t('electron.logs.index.ts', '第二个实例启动请求，激活现有窗口'))
   const win = windowManager.launcherWin ?? windowManager.dashboardWin ?? windowManager.petWin
   if (win) {
     if (win.isMinimized()) win.restore()

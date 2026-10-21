@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * 已废弃的周期调度兼容层。
  *
@@ -108,7 +109,11 @@ export class LegacyPeriodicScheduler {
       },
     })
     logger.info(
-      `任务注册: ${definition.displayName} (${definition.name}, 间隔=${Math.round(definition.intervalMs / 1000)}s)`,
+      __t('logs.scheduler', '任务注册: {0} ({1}, 间隔={2}s)', [
+        definition.displayName,
+        definition.name,
+        Math.round(definition.intervalMs / 1000),
+      ]),
     )
   }
 
@@ -123,7 +128,12 @@ export class LegacyPeriodicScheduler {
     }, this.tickIntervalMs)
 
     this.started = true
-    logger.info(`调度器已启动 (tick=${this.tickIntervalMs}ms, 任务数=${this.tasks.size})`)
+    logger.info(
+      __t('logs.scheduler', '调度器已启动 (tick={0}ms, 任务数={1})', [
+        this.tickIntervalMs,
+        this.tasks.size,
+      ]),
+    )
   }
 
   /**
@@ -135,7 +145,7 @@ export class LegacyPeriodicScheduler {
       this.timer = null
     }
     this.started = false
-    logger.info('调度器已停止')
+    logger.info(__t('logs.scheduler', '调度器已停止'))
   }
 
   /** 调度器是否已启动 */
@@ -150,7 +160,7 @@ export class LegacyPeriodicScheduler {
     const task = this.tasks.get(name)
     if (!task) return false
     if (task.running) {
-      logger.warn(`任务 ${name} 正在运行中，跳过手动触发`)
+      logger.warn(__t('logs.scheduler', '任务 {0} 正在运行中，跳过手动触发', [name]))
       return false
     }
     await this.runTask(task)
@@ -232,7 +242,9 @@ export class LegacyPeriodicScheduler {
       task.stats.lastError = String(err)
       task.execution.lastFailureAt = failedAt
       task.execution.lastOutcome = 'error'
-      logger.error(`任务 ${task.displayName} (${task.name}) 执行失败: ${err}`)
+      logger.error(
+        __t('logs.scheduler', '任务 {0} ({1}) 执行失败: {2}', [task.displayName, task.name, err]),
+      )
     } finally {
       const finishedAt = Date.now()
       task.running = false

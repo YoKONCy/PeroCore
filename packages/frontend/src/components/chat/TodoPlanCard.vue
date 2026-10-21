@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import { computed, onActivated, ref, watch } from 'vue'
 import type { PlanStep, TaskPlan } from '@infos/shared'
 import PixelIcon from '../pixel/PixelIcon.vue'
@@ -13,7 +15,7 @@ const done = computed(() => props.plan.steps.filter((step) => step.status === 'c
 const progress = computed(() => done.value / Math.max(1, props.plan.steps.length))
 const current = computed(() =>
   props.plan.status === 'completed'
-    ? '事项已完成'
+    ? __t('ui.chat', '事项已完成')
     : ((
         props.plan.steps.find((step) => step.status === 'in_progress') ??
         props.plan.steps.find((step) => step.status === 'blocked') ??
@@ -21,27 +23,53 @@ const current = computed(() =>
       )?.title ?? ''),
 )
 const labels: Record<string, string> = {
-  pending: '未完成',
-  in_progress: '进行中',
-  queued: '排队中',
-  running: '进行中',
-  paused: '已暂停',
-  waiting_input: '等你回应',
-  waiting: '等待中',
-  blocked: '受阻',
-  failed: '失败',
-  cancelled: '已取消',
-  completed: '已完成',
+  get pending() {
+    return __t('ui.chat', '未完成')
+  },
+  get in_progress() {
+    return __t('ui.chat', '进行中')
+  },
+  get queued() {
+    return __t('ui.chat', '排队中')
+  },
+  get running() {
+    return __t('ui.chat', '进行中')
+  },
+  get paused() {
+    return __t('ui.chat', '已暂停')
+  },
+  get waiting_input() {
+    return __t('ui.chat', '等你回应')
+  },
+  get waiting() {
+    return __t('ui.chat', '等待中')
+  },
+  get blocked() {
+    return __t('ui.chat', '受阻')
+  },
+  get failed() {
+    return __t('ui.chat', '失败')
+  },
+  get cancelled() {
+    return __t('ui.chat', '已取消')
+  },
+  get completed() {
+    return __t('ui.chat', '已完成')
+  },
 }
 function label(step: PlanStep) {
   if (step.task) return labels[step.task.status] ?? ''
   if (step.schedule)
     return step.schedule.status === 'failed'
-      ? '安排失败'
+      ? __t('ui.chat', '安排失败')
       : step.schedule.status === 'cancelled'
-        ? '已取消'
-        : '已安排'
-  return step.status === 'in_progress' ? '进行中' : step.status === 'blocked' ? '受阻' : ''
+        ? __t('ui.chat', '已取消')
+        : __t('ui.chat', '已安排')
+  return step.status === 'in_progress'
+    ? __t('ui.chat', '进行中')
+    : step.status === 'blocked'
+      ? __t('ui.chat', '受阻')
+      : ''
 }
 function toggle() {
   expanded.value = !expanded.value
@@ -80,7 +108,7 @@ watch(
   <section
     class="todo-plan"
     :class="{ 'todo-plan--complete': plan.status === 'completed' }"
-    aria-label="行动计划"
+    :aria-label="__t('ui.chat', '行动计划')"
   >
     <div class="todo-plan__heading">
       <button
@@ -112,8 +140,8 @@ watch(
         v-if="dismissible && plan.status === 'completed'"
         class="todo-plan__dismiss"
         type="button"
-        title="收起已完成计划"
-        aria-label="收起已完成计划"
+        :title="__t('ui.chat', '收起已完成计划')"
+        :aria-label="__t('ui.chat', '收起已完成计划')"
         @click="emit('dismiss')"
       >
         <PixelIcon name="close" size="xs" />
@@ -125,7 +153,7 @@ watch(
       :aria-valuenow="done"
       :aria-valuemax="plan.steps.length"
       :aria-valuemin="0"
-      :aria-label="`${done}项完成，共${plan.steps.length}项`"
+      :aria-label="__t('ui.chat', '{0}项完成，共{1}项', [done, plan.steps.length])"
     >
       <span :style="{ transform: `scaleX(${progress})` }" />
     </div>
@@ -167,7 +195,10 @@ watch(
                 <span v-if="label(step)" class="todo-plan__state">{{ label(step) }}</span>
                 <PixelIcon v-if="step.task" name="chevron-right" size="xs" />
                 <span class="sr-only">
-                  {{ labels[step.status] ?? (step.status === 'pending' ? '未完成' : '') }}
+                  {{
+                    labels[step.status] ??
+                    (step.status === 'pending' ? __t('ui.chat', '未完成') : '')
+                  }}
                 </span>
               </component>
             </li>

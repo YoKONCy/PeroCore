@@ -29,6 +29,47 @@
   margin-left: auto;
 }
 
+.app-background-slots {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+.app-background-slot {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 2px solid var(--ui-border-default);
+  background: var(--dash-panel-soft);
+  color: var(--ui-text-secondary);
+  text-align: left;
+  transition:
+    border-color var(--ui-duration-fast),
+    background-color var(--ui-duration-fast);
+}
+.app-background-slot[aria-pressed='true'] {
+  border-color: var(--ui-focus-color);
+  background: var(--ui-bg-hover);
+  color: var(--ui-text-primary);
+}
+.app-background-slot:hover:not(:disabled) {
+  background: var(--ui-bg-hover);
+}
+.app-background-slot:focus-visible {
+  outline: 2px solid var(--ui-focus-color);
+  outline-offset: 2px;
+}
+.app-background-slot:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+.app-background-slot strong {
+  font-size: 12px;
+}
+.app-background-slot small {
+  font-size: 10px;
+  color: var(--ui-text-tertiary);
+}
+
 /* 图片和模糊边缘只能绘制在预览框内，不能覆盖设置按钮与后续控件。 */
 .app-background-preview {
   position: relative;

@@ -2,6 +2,9 @@ import { EventEmitter } from 'node:events'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SocialBridge } from '@infos/social/runtime/socialBridge'
 import type { InboundMessage } from '@infos/social/runtime/types'
+import { currentSocialRecovery, socialFailure } from '@infos/social/runtime/socialRecovery'
+import { SocialLoopGuard, normalizeLoopPolicy } from '@infos/social/runtime/socialLoopGuard'
+import type { SocialTurnRecord } from '@infos/shared'
 
 class FakeAdapter extends EventEmitter {
   platform = 'napcat'
@@ -45,7 +48,7 @@ function createBridge(overrides: Record<string, unknown> = {}) {
       getRecent: vi.fn().mockResolvedValue([]),
       memoryAvailable: vi.fn().mockResolvedValue(true),
       getTurn: vi.fn().mockResolvedValue(null),
-      saveTurn: vi.fn().mockResolvedValue(undefined),
+      saveTurn: vi.fn(async (_record: SocialTurnRecord) => {}),
       getDataVersion: vi.fn().mockResolvedValue(0),
       completeQueuedMessages: vi.fn().mockResolvedValue(undefined),
       queuedMessages: vi.fn().mockResolvedValue([]),
@@ -56,7 +59,11 @@ function createBridge(overrides: Record<string, unknown> = {}) {
   return { bridge: new SocialBridge(deps as never), deps }
 }
 
-function executeTurn(bridge: SocialBridge, messages: InboundMessage[]) {
+function executeTurn(
+  bridge: SocialBridge,
+  messages: InboundMessage[],
+  signal = new AbortController().signal,
+) {
   const first = messages[0]!
   return (
     bridge as unknown as {
@@ -77,13 +84,117 @@ function executeTurn(bridge: SocialBridge, messages: InboundMessage[]) {
     },
     messages,
     'proactive_review',
-    new AbortController().signal,
+    signal,
   )
 }
 
 describe('SocialBridge 单 Agent 社交链路', () => {
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
+
+  it('普通群聊短时限流保留原批次，窗口恢复后自动调用模型并发送', async () => {
+    const values = new Map<string, string>()
+    const loopGuard = new SocialLoopGuard(
+      {
+        get: async (key) => values.get(key),
+        set: async (key, value) => {
+          values.set(key, value)
+        },
+      },
+      () => normalizeLoopPolicy({ maxTurnsPerWindow: 1, windowSeconds: 10 }),
+      () => [],
+      () => undefined,
+    )
+    const { bridge, deps } = createBridge({ loopGuard })
+    const adapter = new FakeAdapter()
+    bridge.registerAdapter(adapter as never)
+    const snapshots: Array<{ error?: string; status: string }> = []
+    deps.socialMessageRepo.saveTurn.mockImplementation(async (record) => {
+      snapshots.push(structuredClone(record))
+    })
+    await executeTurn(bridge, [inbound({ rawEvent: { self_id: '111111', message_id: 1 } })])
+    const pending = executeTurn(bridge, [
+      inbound({ rawEvent: { self_id: '111111', message_id: 2 } }),
+    ])
+    await vi.advanceTimersByTimeAsync(1)
+    expect(deps.generateReply).toHaveBeenCalledTimes(1)
+    expect(deps.socialMessageRepo.completeQueuedMessages).toHaveBeenCalledTimes(1)
+    expect(
+      snapshots.some(
+        (record) => record.status === 'running' && record.error?.includes('消息已保留'),
+      ),
+    ).toBe(true)
+    await vi.advanceTimersByTimeAsync(10000)
+    await expect(pending).resolves.toMatchObject({ type: 'reply' })
+    expect(deps.generateReply).toHaveBeenCalledTimes(2)
+    expect(adapter.sendMessage).toHaveBeenCalledTimes(2)
+    expect(deps.socialMessageRepo.completeQueuedMessages).toHaveBeenCalledTimes(2)
+    expect(snapshots.at(-1)).toMatchObject({ status: 'completed', error: undefined })
+  })
+
+  it('限流等待遵守父任务停止，不在窗口到期后产生幽灵回复', async () => {
+    const values = new Map<string, string>()
+    const loopGuard = new SocialLoopGuard(
+      {
+        get: async (key) => values.get(key),
+        set: async (key, value) => {
+          values.set(key, value)
+        },
+      },
+      () => normalizeLoopPolicy({ maxTurnsPerWindow: 1, windowSeconds: 10 }),
+      () => [],
+      () => undefined,
+    )
+    const { bridge, deps } = createBridge({ loopGuard })
+    const adapter = new FakeAdapter()
+    bridge.registerAdapter(adapter as never)
+    await executeTurn(bridge, [inbound({ rawEvent: { self_id: '111111', message_id: 1 } })])
+    const controller = new AbortController()
+    const pending = executeTurn(
+      bridge,
+      [inbound({ rawEvent: { self_id: '111111', message_id: 2 } })],
+      controller.signal,
+    )
+    const rejection = expect(pending).rejects.toThrow('用户停止')
+    await vi.advanceTimersByTimeAsync(1)
+    controller.abort(new Error('用户停止'))
+    await rejection
+    await vi.advanceTimersByTimeAsync(10000)
+    expect(deps.generateReply).toHaveBeenCalledTimes(1)
+    expect(adapter.sendMessage).toHaveBeenCalledTimes(1)
+  })
+
+  it('模型重试预算耗尽后关闭批次，不把 fetch failed 重新交给外层恢复', async () => {
+    const failure = Object.assign(new Error('OpenAI 网络错误: fetch failed'), {
+      data: { retryable: true },
+    })
+    const generateReply = vi.fn(async () => {
+      currentSocialRecovery()!.record.checkpoint.generation = { retries: 2, toolStarted: false }
+      throw failure
+    })
+    const { bridge, deps } = createBridge({ generateReply })
+    const adapter = new FakeAdapter()
+    bridge.registerAdapter(adapter as never)
+    const error = await executeTurn(bridge, [inbound()]).catch((value: unknown) => value)
+    expect(error).toMatchObject({ code: 'SOCIAL_TURN_ENDED', data: { retryable: false } })
+    expect(socialFailure(error).retryable).toBe(false)
+    expect(generateReply).toHaveBeenCalledOnce()
+    expect(deps.socialMessageRepo.saveTurn).toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: 'failed' }),
+    )
+    expect(adapter.sendMessage).not.toHaveBeenCalled()
+  })
+
+  it.each(['failed', 'cancelled'] as const)(
+    '恢复 %s 的持久任务时不调用模型，也不重新开启重试',
+    async (status) => {
+      const { bridge, deps } = createBridge()
+      deps.socialMessageRepo.getTurn.mockResolvedValue({ status, error: '该任务已经结束' } as never)
+      const error = await executeTurn(bridge, [inbound()]).catch((value: unknown) => value)
+      expect(socialFailure(error).retryable).toBe(false)
+      expect(deps.generateReply).not.toHaveBeenCalled()
+    },
+  )
 
   it('群友提及前的主人发言不会改变本轮对话对象，完整回复只发送一次', async () => {
     const reply = '你现在方便吗？我已经准备好了！\n这是完整的一条消息。'

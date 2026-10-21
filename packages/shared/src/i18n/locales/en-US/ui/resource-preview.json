@@ -1,0 +1,19 @@
+{
+  "文件": "File",
+  "音频": "Audio",
+  "读取中…": "Loading…",
+  "点击打开文件": "Open file",
+  "打开预览": "Open preview",
+  "放大": "Enlarge",
+  "放大预览": "Expand preview",
+  "打开": "Open",
+  "无法预览，可打开源文件": "Preview unavailable. Open the source file.",
+  "当前编码无法播放，可下载后打开": "This codec cannot be played here. Download to open.",
+  "可打开源文件或下载": "Open the source file or download",
+  "内容节选": "Excerpt",
+  "打开源文件": "Open source",
+  "下载": "Download",
+  "关闭": "Close",
+  "无法打开文件": "Unable to open file",
+  "请从所属会话打开文件": "Open this file from its conversation"
+}

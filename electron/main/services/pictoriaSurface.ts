@@ -1,3 +1,4 @@
+import { getClientCredential } from '../utils/clientCredential'
 import { ipcMain } from 'electron'
 import { desktopTabs } from '../windows/desktopTabs'
 import { startDesktopPictoria } from './pictoriaLifetime'
@@ -86,7 +87,7 @@ export function registerPictoriaSurface(): void {
     } else throw new Error('未知画布请求')
     const serialized = body === undefined ? undefined : JSON.stringify(body)
     if (serialized && serialized.length > 28_100_000) throw new Error('画布请求超过大小限制')
-    const token = process.env.INFOS_API_TOKEN
+    const token = getClientCredential()
     const response = await fetch(
       `http://127.0.0.1:${Number(process.env.PERO_PORT ?? 9120)}/api/applications/pictoria${endpoint}`,
       {

@@ -326,10 +326,18 @@ export const threads = sqliteTable(
     contextPolicy: text('context_policy'),
     /** Thread 级禁用工具列表（JSON 字符串）；只能屏蔽 Channel 已允许工具，不能扩权。 */
     disabledToolsJson: text('disabled_tools_json').default('[]').notNull(),
-    interactionMode: text('interaction_mode').$type<'chat' | 'work'>().default('chat').notNull(),
+    interactionMode: text('interaction_mode')
+      .$type<'minimal' | 'chat' | 'work'>()
+      .default('chat')
+      .notNull(),
     /** 自动执行模式仅跳过可审批决策，不跳过拒绝、终端与越界删除审批。 */
     autoExecuteTools: integer('auto_execute_tools', { mode: 'boolean' }).default(false).notNull(),
     executionMode: text('execution_mode').default('manual').notNull(),
+    /** 空值跟随全局主模型；删除模型卡片时恢复默认。 */
+    modelConfigId: integer('model_config_id').references(() => aiModelConfigs.id, {
+      onDelete: 'set null',
+    }),
+    reasoningEffort: text('reasoning_effort').$type<import('@infos/shared').ReasoningEffort>(),
     /**
      * M05 §3.2: Thread 用途：conversation / background_task
      * 普通聊天为 conversation；后台任务使用 background_task 与聊天历史隔离
@@ -766,6 +774,17 @@ export const petStates = sqliteTable(
 // 模型与语音配置
 // ─────────────────────────────────────────────
 
+/** 可复用的服务商连接，同品牌可保存多个独立实例。 */
+export const providerConnections = sqliteTable('provider_connections', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  brand: text('brand').notNull(),
+  protocol: text('protocol').notNull().default('openai'),
+  apiBase: text('api_base').notNull().default(''),
+  authMode: text('auth_mode').notNull().default('api_key'),
+  apiKey: text('api_key').notNull().default(''),
+})
+
 /** AI 模型卡配置表 */
 export const aiModelConfigs = sqliteTable(
   'ai_model_configs',
@@ -775,6 +794,14 @@ export const aiModelConfigs = sqliteTable(
     modelId: text('model_id').notNull(),
     provider: text('provider').default('openai'),
     providerType: text('provider_type').default('global'),
+    providerConnectionId: text('provider_connection_id').references(() => providerConnections.id, {
+      onDelete: 'restrict',
+    }),
+    connectionOverride: integer('connection_override', { mode: 'boolean' })
+      .notNull()
+      .default(false),
+    connectionProtocol: text('connection_protocol'),
+    connectionAuthMode: text('connection_auth_mode').notNull().default('api_key'),
     apiKey: text('api_key'),
     apiBase: text('api_base'),
     temperature: real('temperature'),
@@ -1068,6 +1095,8 @@ export const scheduledTasks = sqliteTable(
     lastError: text('last_error'),
     taskId: text('task_id'),
     settledAt: text('settled_at'),
+    /** 固定间隔周期计划；空值表示一次性任务。 */
+    repeatIntervalMinutes: integer('repeat_interval_minutes'),
   },
   (table) => [
     index('idx_scheduled_tasks_agent_id').on(table.agentId),
@@ -1508,6 +1537,8 @@ export const durableNotifications = sqliteTable(
     revision: integer('revision').default(1).notNull(),
     createdAt: text('created_at').notNull(),
     readAt: text('read_at'),
+    metadataJson: text('metadata_json').default('{}').notNull(),
+    expiresAt: text('expires_at'),
   },
   (table) => [
     index('idx_durable_notifications_principal_status').on(
@@ -1516,6 +1547,30 @@ export const durableNotifications = sqliteTable(
       table.createdAt,
     ),
   ],
+)
+
+/** 跨重启保留的通知游标，不复用内存 Gateway 事件序号。 */
+export const notificationFeed = sqliteTable('notification_feed', {
+  sequence: integer('sequence').primaryKey({ autoIncrement: true }),
+  notificationId: text('notification_id')
+    .notNull()
+    .unique()
+    .references(() => durableNotifications.notificationId, { onDelete: 'cascade' }),
+})
+
+export const notificationDeviceReceipts = sqliteTable(
+  'notification_device_receipts',
+  {
+    deviceId: text('device_id').notNull(),
+    notificationId: text('notification_id')
+      .notNull()
+      .references(() => durableNotifications.notificationId, { onDelete: 'cascade' }),
+    revision: integer('revision').notNull(),
+    receivedAt: text('received_at').notNull(),
+    presentedAt: text('presented_at'),
+    readAt: text('read_at'),
+  },
+  (table) => [primaryKey({ columns: [table.deviceId, table.notificationId] })],
 )
 
 export const subscriptionCursors = sqliteTable(
@@ -1646,5 +1701,30 @@ export const appResourceGrants = sqliteTable(
   (table) => [
     index('idx_grants_holder').on(table.holderId, table.revoked),
     index('idx_grants_owner').on(table.ownerAgentId),
+  ],
+)
+/** 用户预提交的消息队列；执行状态与历史消息分开持久化。 */
+export const conversationQueueThreads = sqliteTable('conversation_queue_threads', {
+  threadId: text('thread_id').primaryKey(),
+  paused: integer('paused', { mode: 'boolean' }).notNull().default(false),
+  reason: text('reason'),
+})
+
+export const conversationQueueItems = sqliteTable(
+  'conversation_queue_items',
+  {
+    id: text('id').primaryKey(),
+    threadId: text('thread_id').notNull(),
+    revision: integer('revision').notNull().default(1),
+    position: integer('position').notNull(),
+    state: text('state').notNull().default('queued'),
+    inputJson: text('input_json').notNull(),
+    immediate: integer('immediate', { mode: 'boolean' }).notNull().default(false),
+    createdAt: integer('created_at').notNull(),
+    error: text('error'),
+    checkpointJson: text('checkpoint_json'),
+  },
+  (table) => [
+    index('idx_conversation_queue_thread').on(table.threadId, table.state, table.position),
   ],
 )

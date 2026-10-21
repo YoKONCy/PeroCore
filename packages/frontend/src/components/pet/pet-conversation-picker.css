@@ -1,0 +1,212 @@
+.pet-conversation-picker {
+  margin: 0 0 10px;
+  min-width: 0;
+}
+.pet-conversation-picker button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--pet-divider);
+  border-radius: 5px 5px 2px 5px;
+  color: var(--pet-text);
+  background: var(--pet-control-fill);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 120ms,
+    border-color 120ms,
+    translate 120ms;
+}
+.pet-conversation-picker button:hover:not(:disabled),
+.pet-conversation-picker button[aria-expanded='true'],
+.pet-conversation-picker button[aria-pressed='true'] {
+  color: var(--pet-pink);
+  border-color: var(--pet-bubble-rim);
+  background: color-mix(in srgb, var(--pet-pink) 9%, var(--pet-soft));
+}
+.pet-conversation-picker button:active:not(:disabled) {
+  translate: 0 1px;
+}
+.pet-conversation-picker button:focus-visible {
+  outline: 1px solid var(--pet-pink);
+  outline-offset: -2px;
+}
+.pet-conversation-picker button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.pet-conversation-picker__bar {
+  display: flex;
+  align-items: stretch;
+  gap: 5px;
+}
+.pet-conversation-picker__agent {
+  flex: 0 1 120px;
+}
+.pet-conversation-picker__bar button > span {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.pet-conversation-picker__bar button > :last-child {
+  flex-shrink: 0;
+}
+.pet-conversation-picker img {
+  width: 22px;
+  height: 22px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid var(--pet-divider);
+  flex-shrink: 0;
+}
+.pet-conversation-picker__thread {
+  flex: 1;
+}
+.pet-conversation-picker__bar .pet-conversation-picker__new {
+  justify-content: center;
+  width: 30px;
+  padding: 0;
+  flex-shrink: 0;
+  color: var(--pet-pink);
+}
+.pet-conversation-picker__drawer {
+  margin-top: 7px;
+  padding: 7px;
+  border: 1px solid var(--pet-divider);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--pet-panel) 80%, transparent);
+}
+.pet-conversation-picker__caption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 2px 6px;
+  font-size: 10px;
+  color: var(--pet-muted);
+}
+.pet-conversation-picker__caption > svg {
+  color: var(--pet-pink);
+}
+.pet-conversation-picker__list {
+  display: grid;
+  gap: 4px;
+  max-height: 150px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  padding: 1px;
+}
+.pet-conversation-picker__list.is-agents {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.pet-conversation-picker__list button {
+  min-height: 36px;
+  background: transparent;
+  border-color: transparent;
+}
+.pet-conversation-picker__list button > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pet-conversation-picker__summary {
+  display: grid;
+  gap: 3px;
+}
+.pet-conversation-picker__summary strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 400;
+}
+.pet-conversation-picker__summary small {
+  display: flex;
+  gap: 8px;
+  font-size: 9px;
+  color: var(--pet-muted);
+}
+.pet-conversation-picker__summary time {
+  margin-left: auto;
+}
+.pet-conversation-picker__status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 12px 0;
+  color: var(--pet-muted);
+  font-size: 11px;
+}
+.pet-conversation-picker__status > span {
+  flex: 1;
+}
+.pet-conversation-picker__status button {
+  padding: 3px 6px;
+  background: transparent;
+}
+.pet-conversation-picker .pet-conversation-picker__more {
+  justify-content: center;
+  width: 100%;
+  margin-top: 5px;
+  border: 0;
+  background: transparent;
+  color: var(--pet-accent);
+  font-size: 10px;
+}
+.pet-conversation-picker__switching {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  color: var(--pet-muted);
+  font-size: 10px;
+  margin-top: 5px;
+}
+.pet-conversation-picker__switching i {
+  display: block;
+  width: 4px;
+  height: 4px;
+  background: var(--pet-pink);
+  animation: pet-switch-pulse 0.9s ease-in-out infinite alternate;
+}
+.pet-conversation-picker__error {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--ui-warning);
+}
+.pet-picker-enter-active,
+.pet-picker-leave-active {
+  transition:
+    opacity 140ms,
+    transform 140ms;
+  transform-origin: top;
+}
+.pet-picker-enter-from,
+.pet-picker-leave-to {
+  opacity: 0;
+  transform: translateY(-3px) scaleY(0.97);
+}
+@keyframes pet-switch-pulse {
+  to {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pet-conversation-picker *,
+  .pet-picker-enter-active,
+  .pet-picker-leave-active {
+    animation: none !important;
+    transition: none !important;
+  }
+}

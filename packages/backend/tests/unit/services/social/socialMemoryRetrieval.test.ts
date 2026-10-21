@@ -34,8 +34,19 @@ function fixture(dimension: number) {
   store.link(2, 1, 'memory_edge', 1)
   store.buildTextIndex()
   const compiler = new SocialAppCompiler(
-    { queryGrants: async () => [] } as never,
-    {} as never,
+    {
+      queryGrants: async () => [
+        { resource: { kind: 'persona', agentId: 'pero' }, permissions: ['read'] },
+      ],
+    } as never,
+    {
+      getAgent: () => ({
+        name: 'Pero',
+        promptPath: fileURLToPath(
+          new URL('../../../../src/assets/agents/pero/system_prompt.md', import.meta.url),
+        ),
+      }),
+    } as never,
     new MdpEngine(fileURLToPath(new URL('../../../../src/services/mdp/prompts/', import.meta.url))),
     stores,
   )

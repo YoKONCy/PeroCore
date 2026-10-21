@@ -1,3 +1,4 @@
+import { t as __t } from './i18n'
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import type {
   DocumentId,
@@ -186,7 +187,7 @@ export class ArcaCollaborationAuthority {
         changeSetId: proposal.changeSetId,
         reviewerPrincipalId: 'application:infos.arca',
         decision: 'reject',
-        message: '协作任务已取消或失效',
+        message: __t('apps.arca.ui', '协作任务已取消或失效'),
       })
   }
   close(): void {

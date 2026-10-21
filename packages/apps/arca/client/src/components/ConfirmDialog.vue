@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 /**
@@ -88,7 +90,7 @@ onBeforeUnmount(() => {
         <span class="confirm-glyph" aria-hidden="true">!</span>
         <div>
           <p class="pixel-label">
-            {{ danger ? '危险操作' : '确认操作' }}
+            {{ danger ? __t('apps.arca.ui', '危险操作') : __t('apps.arca.ui', '确认操作') }}
             <span class="pixel-en">{{ danger ? 'DANGER' : 'CONFIRM' }}</span>
           </p>
           <h2 id="confirm-title">{{ title }}</h2>
@@ -97,7 +99,7 @@ onBeforeUnmount(() => {
       <p id="confirm-message" class="confirm-message">{{ message }}</p>
       <footer class="confirm-actions">
         <button ref="cancelButton" class="soft-button" type="button" @click="cancel">
-          {{ cancelText ?? '取消' }}
+          {{ cancelText ?? __t('apps.arca.ui', '取消') }}
         </button>
         <button
           ref="confirmButton"
@@ -106,7 +108,7 @@ onBeforeUnmount(() => {
           type="button"
           @click="emit('confirm')"
         >
-          {{ confirmText ?? '确认' }}
+          {{ confirmText ?? __t('apps.arca.ui', '确认') }}
         </button>
       </footer>
     </section>

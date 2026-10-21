@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * Context Compiler — 上下文编译器 (AIOS 版)
  *
@@ -480,7 +481,9 @@ export class ContextCompiler {
           })
         } catch (progressError) {
           logger.warn(
-            `发送 RAG 失败轨迹失败: ${progressError instanceof Error ? progressError.message : String(progressError)}`,
+            __t('logs.context', '发送 RAG 失败轨迹失败: {0}', [
+              progressError instanceof Error ? progressError.message : String(progressError),
+            ]),
           )
         }
       }
@@ -783,7 +786,11 @@ export class ContextCompiler {
     }
 
     logger.debug(
-      `上下文已编译: thread=${threadId}, agent=${agentId}, channel=${channel}, ` +
+      __t('logs.context', '上下文已编译: thread={0}, agent={1}, channel={2}, ', [
+        threadId,
+        agentId,
+        channel,
+      ]) +
         `messages=${messages.length}, memory=${memoryHitCount}, tools=${toolCount}, ` +
         `slots=${validSlotMessages.length}`,
     )
@@ -858,14 +865,14 @@ export class ContextCompiler {
   private loadSystemPrompt(agentId: string): string {
     const agent = this.agentManager.getAgent(agentId)
     if (!agent) {
-      logger.warn(`Agent 未找到: ${agentId}，使用空人格`)
+      logger.warn(__t('logs.context', 'Agent 未找到: {0}，使用空人格', [agentId]))
       return ''
     }
 
     try {
       return readFileSync(agent.promptPath, 'utf-8')
     } catch {
-      logger.warn(`人格文件读取失败: ${agent.promptPath}`)
+      logger.warn(__t('logs.context', '人格文件读取失败: {0}', [agent.promptPath]))
       return ''
     }
   }
@@ -1102,12 +1109,13 @@ export class ContextCompiler {
     return normalized || 'unknown'
   }
 
-  /** 历史只携带图片来源，不自动重发原图；需要细节时由 read_image 加载。 */
+  /** 历史携带图片与文档引用；原件按需读取，不重复注入正文或媒体。 */
   private conversationContent(message: ThreadMessageInfo): string {
     if (message.role !== 'user' && message.role !== 'assistant') return message.content
     let content =
       message.role === 'assistant' ? splitSpokenReply(message.content).content : message.content
     const images = new Map<string, string>()
+    const documents = new Map<string, string>()
     try {
       const metadata = JSON.parse(message.metadataJson)
       if (message.role === 'assistant' && metadata?.executionPause?.kind === 'desktop') {
@@ -1118,12 +1126,15 @@ export class ContextCompiler {
         for (const item of metadata.attachments) {
           if (item?.kind === 'image' && typeof item.id === 'string')
             images.set(item.id, String(item.originalName ?? '图片'))
+          if ((item?.kind === 'file' || item?.kind === 'pdf') && typeof item.id === 'string')
+            documents.set(item.id, String(item.originalName ?? '文档'))
         }
       }
       if (Array.isArray(metadata?.toolCalls)) {
         for (const call of metadata.toolCalls) {
           const resource = resourceFromToolResult(call?.name, call?.result)
           if (resource?.kind === 'image' && resource.id) images.set(resource.id, resource.name)
+          if (resource?.id && resource.kind !== 'image') documents.set(resource.id, resource.name)
         }
       }
     } catch {
@@ -1133,7 +1144,13 @@ export class ContextCompiler {
       .filter(([id]) => /^[0-9a-f-]{36}$/i.test(id))
       .slice(0, 5)
       .map(([id, name]) => `${JSON.stringify(name.slice(0, 180))} — attachment:${id}`)
-    return refs.length ? `${content}\n【图片附件】\n${refs.join('\n')}` : content
+    const documentRefs = [...documents]
+      .filter(([id]) => /^[0-9a-f-]{36}$/i.test(id))
+      .slice(0, 5)
+      .map(([id, name]) => `${JSON.stringify(name.slice(0, 180))} — attachment:${id}`)
+    if (refs.length) content += `\n【图片附件】\n${refs.join('\n')}`
+    if (documentRefs.length) content += `\n【文档附件】\n${documentRefs.join('\n')}`
+    return content
   }
 
   // ─────────────────────────────────────────
@@ -1258,7 +1275,9 @@ export class ContextCompiler {
             : fallback.continuityHours,
       }
     } catch (err) {
-      logger.warn(`Thread ContextPolicy JSON 解析失败，回退到默认策略: ${err}`)
+      logger.warn(
+        __t('logs.context', 'Thread ContextPolicy JSON 解析失败，回退到默认策略: {0}', [err]),
+      )
       return fallback
     }
   }

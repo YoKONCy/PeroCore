@@ -1,7 +1,10 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n/index'
+
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import type { PetControlSettings } from '@infos/shared'
+import type { PetControlSettings, MessageResource } from '@infos/shared'
+import '@infos/shared/i18n/catalogs/petActivity'
 import BedrockAvatar from '../components/avatar/BedrockAvatar.vue'
 import PetOverlayUI from '../components/pet/PetOverlayUI.vue'
 import { usePetWindow } from '../composables/pet/usePetWindow'
@@ -63,8 +66,18 @@ const {
 const {
   chatState,
   activeAgentId,
+  activeSessionId,
+  activeThread,
+  switching,
+  selectAgent,
+  selectThread,
+  createThread,
   conversationTarget,
   latestReply,
+  activity,
+  deliveries,
+  deliveryKey,
+  deliveryTarget,
   unread,
   hint,
   wsState,
@@ -72,8 +85,7 @@ const {
   stopSpeech: cancelServerSpeech,
   selectPrincipal,
 } = usePetGateway()
-const { attention, attentionKey, attentionKind, attentionTarget, running } =
-  usePetAttention(activeAgentId)
+const { attention, attentionKey, attentionKind, attentionTarget } = usePetAttention(activeAgentId)
 const reaction = ref('')
 const replyText = ref('')
 const transientHint = ref('')
@@ -96,8 +108,15 @@ const cleanup: Array<() => void> = []
 
 const voice = usePetVoice(async ({ audio, mimeType }, signal) => {
   const agentId = activeAgentId.value
+  const threadId = activeSessionId.value
   const result = await voiceApi.recognize(audio, mimeType, signal)
-  if (signal.aborted || activeAgentId.value !== agentId) return
+  if (
+    signal.aborted ||
+    activeAgentId.value !== agentId ||
+    activeSessionId.value !== threadId ||
+    switching.value
+  )
+    return
   if (chatState.value.isThinking) {
     showHint('上一条消息仍在处理中，这次语音没有发送')
     return
@@ -175,7 +194,13 @@ function stopSpeech(agentId?: string) {
   cancelServerSpeech(agentId)
 }
 function pttDown() {
-  if (!voiceReady.value || settings.value.voiceMode !== 'ptt') return
+  if (
+    !voiceReady.value ||
+    settings.value.voiceMode !== 'ptt' ||
+    switching.value ||
+    !activeSessionId.value
+  )
+    return
   if (chatState.value.isThinking) {
     showHint('正在处理上一条消息，请稍等片刻')
     return
@@ -247,6 +272,15 @@ watch(activeAgentId, (_, previous) => {
   clearTimeout(replyTimer)
   void configureVoice()
 })
+watch(activeSessionId, () => {
+  stopSpeech()
+  cancelVoice()
+  reaction.value = ''
+  replyText.value = ''
+  replyNotice.value = false
+  playbackCaption.value = ''
+  clearTimeout(replyTimer)
+})
 watch(latestReply, (reply, previous) => {
   if (!reply || reply.messageId === previous?.messageId || !unread.value) return
   clearTimeout(replyTimer)
@@ -271,8 +305,34 @@ async function openConversation() {
     showHint('主应用暂时无法打开')
   }
 }
+async function openDelivery(resource: MessageResource) {
+  try {
+    const opened = await invoke('pet-controls:open-resource', {
+      resource,
+      target: deliveryTarget.value || conversationTarget.value,
+    })
+    if (opened !== true) throw new Error('RESOURCE_OPEN_FAILED')
+  } catch {
+    showHint(__t('ui.pet-activity', '无法打开文件'))
+  }
+}
 async function sendOverlayMessage(text: string, complete: (accepted: boolean) => void) {
   complete(await sendChat(text, settings.value.speechEnabled))
+}
+async function choosePetAgent(id: string, complete: (success: boolean) => void) {
+  cancelVoice()
+  stopSpeech()
+  complete(await selectAgent(id))
+}
+async function choosePetThread(id: string, complete: (success: boolean) => void) {
+  cancelVoice()
+  stopSpeech()
+  complete(await selectThread(id))
+}
+async function newPetThread(complete: (success: boolean) => void) {
+  cancelVoice()
+  stopSpeech()
+  complete(await createThread())
 }
 async function openSection(section: string) {
   try {
@@ -393,10 +453,18 @@ onMounted(() => {
       assetUrl?: string
       volume?: number
       caption?: string
+      agentId?: string
+      threadId?: string
     }
     if (!payload.playbackId || !payload.assetUrl?.startsWith('/api/assets/audio/')) return
     const id = payload.playbackId
-    if (!settings.value.speechEnabled || recording.value) {
+    if (
+      !settings.value.speechEnabled ||
+      recording.value ||
+      switching.value ||
+      (payload.agentId && payload.agentId !== activeAgentId.value) ||
+      (payload.threadId && payload.threadId !== activeSessionId.value)
+    ) {
       send('audio-output:receipt', { playbackId: id, state: 'cancelled' })
       return
     }
@@ -450,7 +518,10 @@ onUnmounted(() => {
       :mood-text="chatState.mood"
       :vibe-text="chatState.vibe"
       :mind-text="chatState.mind"
-      :thinking="chatState.isThinking || running"
+      :thinking="chatState.isThinking"
+      :activity="activity"
+      :deliveries="deliveries"
+      :delivery-key="deliveryKey"
       :stage="chatState.thinkingMessage"
       :connected="wsState === 'connected'"
       :unread="unread"
@@ -469,6 +540,9 @@ onUnmounted(() => {
       :voice-error="voiceError"
       :audio-level="audioLevel"
       :agent-id="activeAgentId"
+      :thread-id="activeSessionId"
+      :thread-title="activeThread?.title"
+      :switching="switching"
       :attention="attention"
       :attention-key="attentionKey"
       :attention-kind="attentionKind"
@@ -477,6 +551,9 @@ onUnmounted(() => {
       :bounds="bounds"
       :viewport="viewport"
       @send-message="sendOverlayMessage"
+      @select-agent="choosePetAgent"
+      @select-thread="choosePetThread"
+      @new-thread="newPetThread"
       @ui-enter="onInteractableEnter"
       @ui-leave="onInteractableLeave"
       @voice-mode="setVoiceMode"
@@ -486,33 +563,40 @@ onUnmounted(() => {
       @stop-speech="stopSpeech"
       @toggle-resize="toggleResizeMode"
       @open-conversation="openConversation"
+      @open-resource="openDelivery"
       @open-section="openSection"
       @dismiss-hint="transientHint = ''"
       @model-change="onModelChange"
     >
       <template #window-settings>
         <div class="window-settings">
-          <span>桌宠大小</span>
+          <span>{{ __t('ui.navigation', '桌宠大小') }}</span>
           <button
             type="button"
             :class="{ active: resizeMode }"
             :disabled="!isElectron()"
             @click="toggleResizeMode"
           >
-            {{ resizeMode ? '结束调节' : '滚轮调节' }}
+            {{ resizeMode ? __t('ui.navigation', '结束调节') : __t('ui.navigation', '滚轮调节') }}
           </button>
         </div>
-        <p v-if="resizeMode" class="resize-hint">{{ windowSize }}px · 滚轮调整大小，Esc 退出</p>
+        <p v-if="resizeMode" class="resize-hint">
+          {{ windowSize }}{{ __t('ui.navigation', 'px · 滚轮调整大小，Esc 退出') }}
+        </p>
         <div class="pet-theme-settings">
-          <span>界面主题</span>
-          <div class="pet-theme-options" role="group" aria-label="界面主题">
+          <span>{{ __t('ui.navigation', '界面主题') }}</span>
+          <div
+            class="pet-theme-options"
+            role="group"
+            :aria-label="__t('ui.navigation', '界面主题')"
+          >
             <button
               type="button"
               :class="{ active: petTheme === 'light' }"
               :aria-pressed="petTheme === 'light'"
               @click="setPetTheme('light')"
             >
-              浅色
+              {{ __t('ui.navigation', '浅色') }}
             </button>
             <button
               type="button"
@@ -520,13 +604,15 @@ onUnmounted(() => {
               :aria-pressed="petTheme === 'dark'"
               @click="setPetTheme('dark')"
             >
-              暗色
+              {{ __t('ui.navigation', '暗色') }}
             </button>
           </div>
         </div>
         <div class="window-actions">
-          <button type="button" @click="invoke('hide-pet-window')">隐藏桌宠</button>
-          <button type="button" @click="reloadPet">重新加载</button>
+          <button type="button" @click="invoke('hide-pet-window')">
+            {{ __t('ui.navigation', '隐藏桌宠') }}
+          </button>
+          <button type="button" @click="reloadPet">{{ __t('ui.navigation', '重新加载') }}</button>
         </div>
       </template>
     </PetOverlayUI>

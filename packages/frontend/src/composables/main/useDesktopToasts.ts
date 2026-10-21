@@ -1,3 +1,4 @@
+import { t as __t } from '../../i18n/index'
 import { onMounted, onUnmounted, watch, type Ref } from 'vue'
 import type { DesktopToastAction, DesktopToastSnapshot } from '@infos/shared'
 import { invoke, isElectron, listen } from '../../utils/ipcAdapter'
@@ -32,7 +33,7 @@ export function useDesktopToasts(theme: Ref<'light' | 'dark'>): void {
       tasks: tasks.toasts.map((toast) => ({ ...toast })),
     }
     void invoke('desktop-toasts:update', snapshot).catch((error) =>
-      logger.warn('DesktopToasts', '通知层同步失败', error),
+      logger.warn('DesktopToasts', __t('logs.frontend.navigation', '通知层同步失败'), error),
     )
   }
   watch([() => notification.toasts, () => tasks.toasts, theme], publish, {

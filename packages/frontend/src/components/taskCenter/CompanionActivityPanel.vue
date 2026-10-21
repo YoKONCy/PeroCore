@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { getDisplayLocale } from '../../i18n/index'
+
+import { t as __t } from '../../i18n/index'
+
 import './task-pixel.css'
 import { computed, ref, toRef, watch } from 'vue'
 import { useCompanionActivity } from '../../composables/pet/useCompanionActivity'
@@ -91,15 +95,27 @@ watch(activity, async (state) => {
   }
 })
 const statusLabels: Record<string, string> = {
-  waiting: '等待条件',
-  blocked: '需要处理',
-  queued: '排队中',
-  running: '执行中',
-  paused: '已暂停',
-  waiting_input: '等待确认',
+  get waiting() {
+    return __t('ui.taskCenter', '等待条件')
+  },
+  get blocked() {
+    return __t('ui.taskCenter', '需要处理')
+  },
+  get queued() {
+    return __t('ui.taskCenter', '排队中')
+  },
+  get running() {
+    return __t('ui.taskCenter', '执行中')
+  },
+  get paused() {
+    return __t('ui.taskCenter', '已暂停')
+  },
+  get waiting_input() {
+    return __t('ui.taskCenter', '等待确认')
+  },
 }
 function timeText(value: string): string {
-  return new Date(value).toLocaleString('zh-CN', {
+  return new Date(value).toLocaleString(getDisplayLocale(), {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
@@ -128,7 +144,7 @@ function dismiss(): void {
     v-if="visible"
     class="companion-activity task-pixel-surface"
     :class="{ 'is-floating': floating, 'is-compact': compact, 'needs-attention': needsAttention }"
-    aria-label="角色工作状态"
+    :aria-label="__t('ui.taskCenter', '角色工作状态')"
   >
     <header class="activity-head">
       <button
@@ -141,7 +157,11 @@ function dismiss(): void {
           <PixelIcon :name="needsAttention ? 'bell' : 'activity'" size="xs" />
         </span>
         <span class="activity-heading">
-          <strong v-if="!floating">{{ attentionOnly ? '需要留意' : '角色动态' }}</strong>
+          <strong v-if="!floating">
+            {{
+              attentionOnly ? __t('ui.taskCenter', '需要留意') : __t('ui.taskCenter', '角色动态')
+            }}
+          </strong>
           <span :title="summary">{{ summary }}</span>
         </span>
         <PixelIcon
@@ -154,8 +174,8 @@ function dismiss(): void {
         v-if="floating"
         class="activity-dismiss"
         type="button"
-        title="暂时收起，相同事项不再弹出"
-        aria-label="收起工作提示"
+        :title="__t('ui.taskCenter', '暂时收起，相同事项不再弹出')"
+        :aria-label="__t('ui.taskCenter', '收起工作提示')"
         @click="dismiss"
       >
         <PixelIcon name="close" size="xs" />
@@ -165,7 +185,7 @@ function dismiss(): void {
       <div v-if="error" role="alert" class="activity-error">
         <PixelIcon name="alert" size="xs" />
         <span>{{ error }}</span>
-        <button type="button" @click="refresh">重试</button>
+        <button type="button" @click="refresh">{{ __t('ui.taskCenter', '重试') }}</button>
       </div>
       <article v-for="task in tasks" :key="task.id" class="activity-item">
         <div class="activity-item-head">
@@ -180,7 +200,11 @@ function dismiss(): void {
         <p v-else-if="task.currentStage" class="activity-muted">{{ task.currentStage }}</p>
         <div class="activity-actions">
           <button type="button" class="activity-primary" @click="openTask(task)">
-            {{ ['waiting_input', 'blocked'].includes(task.status) ? '查看并处理' : '查看任务' }}
+            {{
+              ['waiting_input', 'blocked'].includes(task.status)
+                ? __t('ui.taskCenter', '查看并处理')
+                : __t('ui.taskCenter', '查看任务')
+            }}
             <PixelIcon name="chevron-right" size="xs" />
           </button>
         </div>
@@ -189,17 +213,19 @@ function dismiss(): void {
         <div class="activity-item-head">
           <PixelIcon name="sparkle" size="xs" />
           <strong>{{ suggestion.title }}</strong>
-          <span class="activity-state">建议</span>
+          <span class="activity-state">{{ __t('ui.taskCenter', '建议') }}</span>
         </div>
         <p class="activity-muted">{{ suggestion.reason }}</p>
         <details class="activity-disclosure">
           <summary>
-            行动内容
+            {{ __t('ui.taskCenter', '行动内容') }}
             <PixelIcon name="chevron-down" size="xs" />
           </summary>
           <p>{{ suggestion.instruction }}</p>
         </details>
-        <span v-if="suggestion.status === 'accepting'" class="activity-muted">正在派发任务…</span>
+        <span v-if="suggestion.status === 'accepting'" class="activity-muted">
+          {{ __t('ui.taskCenter', '正在派发任务…') }}
+        </span>
         <div v-else class="activity-actions">
           <button
             type="button"
@@ -208,7 +234,7 @@ function dismiss(): void {
             @click="perform(() => schedulerApi.resolveSuggestion(suggestion.id, agentId, 'accept'))"
           >
             <PixelIcon name="check" size="xs" />
-            采纳并开始
+            {{ __t('ui.taskCenter', '采纳并开始') }}
           </button>
           <button
             type="button"
@@ -218,7 +244,7 @@ function dismiss(): void {
               perform(() => schedulerApi.resolveSuggestion(suggestion.id, agentId, 'dismiss'))
             "
           >
-            暂不采纳
+            {{ __t('ui.taskCenter', '暂不采纳') }}
           </button>
         </div>
       </article>
@@ -229,19 +255,22 @@ function dismiss(): void {
           <span class="activity-state">
             {{
               item.status === 'failed'
-                ? '未能派发'
+                ? __t('ui.taskCenter', '未能派发')
                 : item.status === 'dispatching'
-                  ? '派发中'
-                  : '待触发'
+                  ? __t('ui.taskCenter', '派发中')
+                  : __t('ui.taskCenter', '待触发')
             }}
           </span>
         </div>
         <p class="activity-muted">
-          {{ item.type === 'follow_up' ? '跟进' : '计划' }} · {{ timeText(item.time) }}
+          {{
+            item.type === 'follow_up' ? __t('ui.taskCenter', '跟进') : __t('ui.taskCenter', '计划')
+          }}
+          · {{ timeText(item.time) }}
         </p>
         <details v-if="item.reason" class="activity-disclosure">
           <summary>
-            检查内容
+            {{ __t('ui.taskCenter', '检查内容') }}
             <PixelIcon name="chevron-down" size="xs" />
           </summary>
           <p>{{ item.content }}</p>
@@ -256,7 +285,7 @@ function dismiss(): void {
             @click="perform(() => schedulerApi.retryReminder(item.id, agentId))"
           >
             <PixelIcon name="refresh" size="xs" />
-            重试派发
+            {{ __t('ui.taskCenter', '重试派发') }}
           </button>
           <button
             v-if="item.status !== 'dispatching'"
@@ -265,13 +294,13 @@ function dismiss(): void {
             :disabled="busy"
             @click="perform(() => schedulerApi.cancelReminder(item.id, agentId))"
           >
-            取消计划
+            {{ __t('ui.taskCenter', '取消计划') }}
           </button>
         </div>
       </article>
       <details v-if="recent.length" class="activity-results" :open="focused || undefined">
         <summary>
-          近期结果
+          {{ __t('ui.taskCenter', '近期结果') }}
           <span>{{ recent.length }}</span>
           <PixelIcon name="chevron-down" size="xs" />
         </summary>
@@ -282,10 +311,10 @@ function dismiss(): void {
             <span class="activity-state">
               {{
                 task.status === 'completed'
-                  ? '已完成'
+                  ? __t('ui.taskCenter', '已完成')
                   : task.status === 'failed'
-                    ? '遇到问题'
-                    : '已取消'
+                    ? __t('ui.taskCenter', '遇到问题')
+                    : __t('ui.taskCenter', '已取消')
               }}
             </span>
           </div>
@@ -293,7 +322,7 @@ function dismiss(): void {
           <p v-else-if="task.result" class="activity-result-preview">{{ task.result }}</p>
           <div class="activity-actions">
             <button type="button" @click="openTask(task)">
-              查看结果
+              {{ __t('ui.taskCenter', '查看结果') }}
               <PixelIcon name="chevron-right" size="xs" />
             </button>
             <button
@@ -303,7 +332,7 @@ function dismiss(): void {
               :disabled="busy"
               @click="perform(() => backgroundTasksApi.resumeInterrupted(task.id))"
             >
-              继续任务
+              {{ __t('ui.taskCenter', '继续任务') }}
             </button>
           </div>
         </article>

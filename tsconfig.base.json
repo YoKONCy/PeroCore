@@ -21,6 +21,7 @@
     "paths": {
       "@infos/avatar-assets": ["./packages/avatar-assets/src"],
       "@infos/shared": ["./packages/shared/src"],
+      "@infos/shared/*": ["./packages/shared/src/*"],
       "@infos/backend": ["./packages/backend/src"],
       "@infos/backend/*": ["./packages/backend/src/*"],
       "@infos/document-engine": ["./packages/document-engine/src"],

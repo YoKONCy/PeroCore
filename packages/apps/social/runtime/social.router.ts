@@ -1,3 +1,4 @@
+import { t as __t } from './i18n'
 /**
  * Social Router — 社交模式 HTTP + WebSocket 端点
  *
@@ -62,11 +63,23 @@ export function createSocialRouter(
   )
   router.post('/turns/:id/cancel', async (c) => {
     await socialBridge.cancelTurn(c.req.param('id'))
-    return c.json({ code: 'OK', message: '社交任务已取消' })
+    return c.json({ code: 'OK', message: __t('apps.social.ui', '社交任务已取消') })
   })
   router.post('/turns/:id/acknowledge', async (c) => {
     await socialBridge.acknowledgeTurn(c.req.param('id'))
-    return c.json({ code: 'OK', message: '已处理' })
+    return c.json({ code: 'OK', message: __t('apps.social.ui', '已处理') })
+  })
+  router.post('/turns/:agentId/acknowledge-all', async (c) => {
+    const body: unknown = await c.req.json()
+    const ids = (body as { ids?: unknown } | null)?.ids
+    if (
+      !Array.isArray(ids) ||
+      ids.length > 100 ||
+      ids.some((id) => typeof id !== 'string' || id.length > 200)
+    )
+      throw new AppError('BAD_REQUEST')
+    await socialBridge.acknowledgeTurns(c.req.param('agentId'), ids)
+    return c.json({ code: 'OK' })
   })
   router.get('/stickers/accounts', (c) =>
     c.json({ code: 'OK', data: { accounts: deps?.getStickerAccounts?.() ?? [] } }),
@@ -74,7 +87,10 @@ export function createSocialRouter(
   router.get('/stickers/:accountId', async (c) => {
     const accountId = c.req.param('accountId')
     if (!deps?.stickers || !deps.getStickerAccounts?.().includes(accountId))
-      return c.json({ code: 'SERVICE_UNAVAILABLE', message: '该 QQ 账号未连接' }, 503)
+      return c.json(
+        { code: 'SERVICE_UNAVAILABLE', message: __t('apps.social.ui', '该 QQ 账号未连接') },
+        503,
+      )
     try {
       const data = await deps.stickers.list(
         accountId,
@@ -97,7 +113,10 @@ export function createSocialRouter(
   router.get('/stickers/:accountId/:stickerId/image', async (c) => {
     const accountId = c.req.param('accountId')
     if (!deps?.stickers || !deps.getStickerAccounts?.().includes(accountId))
-      return c.json({ code: 'SERVICE_UNAVAILABLE', message: '该 QQ 账号未连接' }, 503)
+      return c.json(
+        { code: 'SERVICE_UNAVAILABLE', message: __t('apps.social.ui', '该 QQ 账号未连接') },
+        503,
+      )
     try {
       const image = await deps.stickers.read(accountId, c.req.param('stickerId'))
       c.header('Cache-Control', 'no-store')
@@ -112,7 +131,10 @@ export function createSocialRouter(
   router.post('/stickers/:accountId', async (c) => {
     const accountId = c.req.param('accountId')
     if (!deps?.stickers || !deps.getStickerAccounts?.().includes(accountId))
-      return c.json({ code: 'SERVICE_UNAVAILABLE', message: '该 QQ 账号未连接' }, 503)
+      return c.json(
+        { code: 'SERVICE_UNAVAILABLE', message: __t('apps.social.ui', '该 QQ 账号未连接') },
+        503,
+      )
     try {
       const body = (await c.req.json().catch(() => {
         throw new AppError('INVALID_PARAMETER', { message: '请求正文必须为 JSON 对象' })
@@ -138,7 +160,10 @@ export function createSocialRouter(
   })
   router.get('/status-card/design', async (c) => {
     if (!deps?.statusCards)
-      return c.json({ code: 'SERVICE_UNAVAILABLE', message: '状态卡片服务未就绪' }, 503)
+      return c.json(
+        { code: 'SERVICE_UNAVAILABLE', message: __t('apps.social.ui', '状态卡片服务未就绪') },
+        503,
+      )
     return c.json({
       code: 'OK',
       data: await deps.statusCards.getDesign(deps.getAgentConfig().agentId),
@@ -146,7 +171,10 @@ export function createSocialRouter(
   })
   router.put('/status-card/design', async (c) => {
     if (!deps?.statusCards)
-      return c.json({ code: 'SERVICE_UNAVAILABLE', message: '状态卡片服务未就绪' }, 503)
+      return c.json(
+        { code: 'SERVICE_UNAVAILABLE', message: __t('apps.social.ui', '状态卡片服务未就绪') },
+        503,
+      )
     try {
       return c.json({
         code: 'OK',
@@ -161,7 +189,10 @@ export function createSocialRouter(
   })
   router.post('/status-card/preview', async (c) => {
     if (!deps?.statusCards || !deps.getHostAgentId)
-      return c.json({ code: 'SERVICE_UNAVAILABLE', message: '状态卡片服务未就绪' }, 503)
+      return c.json(
+        { code: 'SERVICE_UNAVAILABLE', message: __t('apps.social.ui', '状态卡片服务未就绪') },
+        503,
+      )
     try {
       const image = await deps.statusCards.render(deps.getHostAgentId(), await c.req.json())
       return c.json({ code: 'OK', data: image })
@@ -181,7 +212,7 @@ export function createSocialRouter(
     const statuses = await socialBridge.getAllStatus()
     return c.json({
       code: 'OK',
-      message: '获取社交状态成功',
+      message: __t('apps.social.ui', '获取社交状态成功'),
       data: { adapters: statuses },
     })
   })
@@ -195,7 +226,10 @@ export function createSocialRouter(
     const content = body.content as string
 
     if (!channelId || !content) {
-      return c.json({ code: 'BAD_REQUEST', message: '缺少 channelId 或 content' }, 400)
+      return c.json(
+        { code: 'BAD_REQUEST', message: __t('apps.social.ui', '缺少 channelId 或 content') },
+        400,
+      )
     }
 
     await socialBridge.sendReply(platform, {
@@ -204,34 +238,91 @@ export function createSocialRouter(
       content,
     })
 
-    return c.json({ code: 'OK', message: '消息已发送' })
+    return c.json({ code: 'OK', message: __t('apps.social.ui', '消息已发送') })
   })
 
   router.get('/mode-config', (c) => {
-    if (!deps) return c.json({ code: 'SERVICE_UNAVAILABLE', message: '社交配置服务未初始化' }, 503)
-    return c.json({ code: 'OK', message: '获取社交模式配置成功', data: deps.getModeConfig() })
+    if (!deps)
+      return c.json(
+        { code: 'SERVICE_UNAVAILABLE', message: __t('apps.social.ui', '社交配置服务未初始化') },
+        503,
+      )
+    return c.json({
+      code: 'OK',
+      message: __t('apps.social.ui', '获取社交模式配置成功'),
+      data: deps.getModeConfig(),
+    })
+  })
+
+  router.post('/loop-guard/allow', async (c) => {
+    const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null
+    if (
+      !body ||
+      !/^[1-9]\d{4,19}$/.test(String(body.accountId ?? '')) ||
+      !/^[1-9]\d{4,19}$/.test(String(body.channelId ?? '')) ||
+      !['private', 'group'].includes(String(body.channelType))
+    )
+      return c.json(
+        {
+          code: 'INVALID_PARAMETER',
+          message: __t('apps.social.ui', '请提供已连接账号、会话类型和会话 QQ 号'),
+        },
+        400,
+      )
+    const data = await socialBridge.allowLimitedConversation(
+      String(body.accountId),
+      body.channelType as 'private' | 'group',
+      String(body.channelId),
+    )
+    return c.json({
+      code: 'OK',
+      message: __t('apps.social.ui', '已重新开放有限交流预算，旧计划不会复活'),
+      data,
+    })
   })
 
   router.put('/mode-config', async (c) => {
-    if (!deps) return c.json({ code: 'SERVICE_UNAVAILABLE', message: '社交配置服务未初始化' }, 503)
+    if (!deps)
+      return c.json(
+        { code: 'SERVICE_UNAVAILABLE', message: __t('apps.social.ui', '社交配置服务未初始化') },
+        503,
+      )
     const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>
+    if (!body || typeof body !== 'object' || Array.isArray(body))
+      return c.json(
+        { code: 'INVALID_PARAMETER', message: __t('apps.social.ui', '社交模式配置必须是对象') },
+        400,
+      )
     const data = await deps.updateModeConfig(body)
-    return c.json({ code: 'OK', message: '社交模式配置已保存', data })
+    return c.json({ code: 'OK', message: __t('apps.social.ui', '社交模式配置已保存'), data })
   })
 
   router.get('/agent-config', (c) => {
-    if (!deps) return c.json({ code: 'SERVICE_UNAVAILABLE', message: '社交配置服务未初始化' }, 503)
-    return c.json({ code: 'OK', message: '获取社交角色成功', data: deps.getAgentConfig() })
+    if (!deps)
+      return c.json(
+        { code: 'SERVICE_UNAVAILABLE', message: __t('apps.social.ui', '社交配置服务未初始化') },
+        503,
+      )
+    return c.json({
+      code: 'OK',
+      message: __t('apps.social.ui', '获取社交角色成功'),
+      data: deps.getAgentConfig(),
+    })
   })
 
   router.put('/agent-config', async (c) => {
-    if (!deps) return c.json({ code: 'SERVICE_UNAVAILABLE', message: '社交配置服务未初始化' }, 503)
+    if (!deps)
+      return c.json(
+        { code: 'SERVICE_UNAVAILABLE', message: __t('apps.social.ui', '社交配置服务未初始化') },
+        503,
+      )
     const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>
     const agentId = typeof body.agentId === 'string' ? body.agentId.trim() : ''
-    if (!agentId) return c.json({ code: 'BAD_REQUEST', message: '缺少 agentId' }, 400)
+    if (!agentId)
+      return c.json({ code: 'BAD_REQUEST', message: __t('apps.social.ui', '缺少 agentId') }, 400)
     try {
       const data = await deps.updateAgentConfig(agentId)
-      return c.json({ code: 'OK', message: '社交角色已切换', data })
+      return c.json({ code: 'OK', message: __t('apps.social.ui', '社交角色已切换'), data })
     } catch (error) {
       return c.json(
         { code: 'BAD_REQUEST', message: error instanceof Error ? error.message : String(error) },
@@ -241,29 +332,45 @@ export function createSocialRouter(
   })
 
   router.get('/projection/:agentId', async (c) => {
-    if (!deps) return c.json({ code: 'SERVICE_UNAVAILABLE', message: '社交数据服务未初始化' }, 503)
+    if (!deps)
+      return c.json(
+        { code: 'SERVICE_UNAVAILABLE', message: __t('apps.social.ui', '社交数据服务未初始化') },
+        503,
+      )
     const agentId = c.req.param('agentId')
     return c.json({
       code: 'OK',
-      message: '获取社交Surface成功',
+      message: __t('apps.social.ui', '获取社交Surface成功'),
       data: await deps.dataService.project(agentId),
     })
   })
 
   router.get('/contacts/:agentId', async (c) => {
-    if (!deps) return c.json({ code: 'SERVICE_UNAVAILABLE', message: '社交数据服务未初始化' }, 503)
+    if (!deps)
+      return c.json(
+        { code: 'SERVICE_UNAVAILABLE', message: __t('apps.social.ui', '社交数据服务未初始化') },
+        503,
+      )
     const contacts = await deps.dataService.listContacts(c.req.param('agentId'))
-    return c.json({ code: 'OK', message: '获取联系人成功', data: { contacts } })
+    return c.json({
+      code: 'OK',
+      message: __t('apps.social.ui', '获取联系人成功'),
+      data: { contacts },
+    })
   })
 
   router.post('/history-sync/:platform', async (c) => {
     const platform = c.req.param('platform')
     await socialBridge.syncOfflineHistory(platform)
-    return c.json({ code: 'OK', message: '离线历史同步完成' })
+    return c.json({ code: 'OK', message: __t('apps.social.ui', '离线历史同步完成') })
   })
 
   router.post('/data/clear', async (c) => {
-    if (!deps) return c.json({ code: 'SERVICE_UNAVAILABLE', message: '社交数据服务未初始化' }, 503)
+    if (!deps)
+      return c.json(
+        { code: 'SERVICE_UNAVAILABLE', message: __t('apps.social.ui', '社交数据服务未初始化') },
+        503,
+      )
     const result = await deps.dataService.clear(
       (await c.req.json().catch(() => ({}))) as Record<string, unknown>,
     )

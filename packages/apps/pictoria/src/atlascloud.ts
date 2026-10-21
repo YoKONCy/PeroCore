@@ -1,3 +1,4 @@
+import { t as __t } from './i18n'
 import { z } from 'zod'
 import type { Store } from './store'
 import { serviceSchema, stepSchema, type ServiceProfile } from './domain'
@@ -103,19 +104,22 @@ export function configureAtlas(store: Store, owner: string, raw: unknown) {
       const properties: Record<string, unknown> = {
         prompt: {
           type: 'string',
-          title: mode === 'edit' ? '编辑说明' : '提示词',
+          title:
+            mode === 'edit'
+              ? __t('apps.pictoria.ui', '编辑说明')
+              : __t('apps.pictoria.ui', '提示词'),
           minLength: 1,
           maxLength: family.promptLimit || 32000,
           description:
             mode === 'edit'
-              ? '说明希望修改什么，以及哪些内容需要保留。'
-              : '用自然语言描述主体、场景、风格与构图。',
+              ? __t('apps.pictoria.ui', '说明希望修改什么，以及哪些内容需要保留。')
+              : __t('apps.pictoria.ui', '用自然语言描述主体、场景、风格与构图。'),
         },
         ...(mode === 'edit'
           ? {
               images: {
                 type: 'array',
-                title: '参考图片',
+                title: __t('apps.pictoria.ui', '参考图片'),
                 items: asset,
                 minItems: 1,
                 maxItems: family.maxImages,

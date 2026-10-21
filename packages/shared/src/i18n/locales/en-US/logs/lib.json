@@ -1,0 +1,12 @@
+{
+  "[infOS] 日志文件已启用: {0}": "[infOS] Log file enabled: {0}",
+  "未捕获异常 (uncaughtException)，进程即将退出": "uncaughtException, the process is about to exit",
+  "未处理的 Promise 拒绝 (unhandledRejection)": "Unhandled Promise rejection (unhandledRejection)",
+  "收到 {0} 信号，开始优雅退出...": "receives the {0} signal and begins to exit gracefully...",
+  "清理回调执行失败": "Cleanup callback execution failed",
+  "优雅退出完成，再见喵~ 🐾": "Graceful exit completed, goodbye meow~ 🐾",
+  "[infOS] 进程退出 (code: {0})": "[infOS] process exited (code: {0})",
+  "进程守护已注册 (uncaughtException / unhandledRejection / SIGINT / SIGTERM)": "process daemon has been registered (uncaughtException / unhandledRejection / SIGINT / SIGTERM)",
+  "OpenTelemetry 已启用，导出到 {0}": "OpenTelemetry enabled, export to {0}",
+  "OpenTelemetry 已启用（仅上下文传播，未配置导出器）": "OpenTelemetry enabled (context propagation only, no exporter configured)"
+}

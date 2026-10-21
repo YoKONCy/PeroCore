@@ -1,3 +1,4 @@
+import { t as __t } from '../../i18n/index'
 import {
   computed,
   inject,
@@ -71,21 +72,23 @@ export function useCompanionActivity(agentId: Ref<string>) {
   }
 
   const summary = computed(() => {
-    if (error.value) return '工作状态暂不可用'
+    if (error.value) return __t('ui.pet', '工作状态暂不可用')
     const state = activity.value
-    if (!state) return '正在读取工作状态…'
+    if (!state) return __t('ui.pet', '正在读取工作状态…')
     const waiting = state.tasks.find((task) => ['waiting_input', 'blocked'].includes(task.status))
-    if (waiting) return `需要你：${waiting.title}`
+    if (waiting) return __t('ui.pet', '需要你：{0}', [waiting.title])
     const suggestions = state.suggestions.filter((item) => item.status === 'open')
-    if (suggestions.length) return `有 ${suggestions.length} 条建议待处理`
-    if (state.scheduled.some((item) => item.status === 'failed')) return '有计划派发失败，需要查看'
+    if (suggestions.length) return __t('ui.pet', '有 {0} 条建议待处理', [suggestions.length])
+    if (state.scheduled.some((item) => item.status === 'failed'))
+      return __t('ui.pet', '有计划派发失败，需要查看')
     const failed = state.recent.find((task) => task.status === 'failed' && !task.readAt)
-    if (failed) return `任务遇到问题：${failed.title}`
+    if (failed) return __t('ui.pet', '任务遇到问题：{0}', [failed.title])
     const running = state.tasks.find((task) => task.status === 'running')
-    if (running) return `正在处理：${running.title}`
-    if (state.tasks.length) return `有 ${state.tasks.length} 项工作等待继续`
-    if (state.scheduled.length) return `已安排 ${state.scheduled.length} 项提醒与跟进`
-    return '暂时没有待处理事项'
+    if (running) return __t('ui.pet', '正在处理：{0}', [running.title])
+    if (state.tasks.length) return __t('ui.pet', '有 {0} 项工作等待继续', [state.tasks.length])
+    if (state.scheduled.length)
+      return __t('ui.pet', '已安排 {0} 项提醒与跟进', [state.scheduled.length])
+    return __t('ui.pet', '暂时没有待处理事项')
   })
   const needsAttention = computed(
     () =>

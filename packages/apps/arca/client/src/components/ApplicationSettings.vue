@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
 import { arcaApplicationControl, type ArcaApplicationStatus } from '../services/applicationControl'
 import { useWorkbenchStore } from '../stores/workbench'
@@ -16,29 +18,39 @@ let disposed = false
 const connected = computed(() => status.value?.federation.state === 'connected')
 const ownership = computed(() =>
   status.value?.ownership === 'managed'
-    ? '由 infOS 托管'
+    ? __t('apps.arca.ui', '由 infOS 托管')
     : status.value?.ownership === 'adopted'
-      ? '外部实例'
-      : '未运行',
+      ? __t('apps.arca.ui', '外部实例')
+      : __t('apps.arca.ui', '未运行'),
 )
 const connectionLabel = computed(() => {
   const state = status.value?.federation.state
   return state === 'connected'
-    ? '已接入'
+    ? __t('apps.arca.ui', '已接入')
     : state === 'connecting'
-      ? '连接中'
+      ? __t('apps.arca.ui', '连接中')
       : state === 'error'
-        ? '连接异常'
-        : '离线'
+        ? __t('apps.arca.ui', '连接异常')
+        : __t('apps.arca.ui', '离线')
 })
 const hostStateLabel = computed(
   () =>
     ({
-      offline: '未运行',
-      starting: '启动中',
-      running: '运行中',
-      stopping: '停止中',
-      error: '异常',
+      get offline() {
+        return __t('apps.arca.ui', '未运行')
+      },
+      get starting() {
+        return __t('apps.arca.ui', '启动中')
+      },
+      get running() {
+        return __t('apps.arca.ui', '运行中')
+      },
+      get stopping() {
+        return __t('apps.arca.ui', '停止中')
+      },
+      get error() {
+        return __t('apps.arca.ui', '异常')
+      },
     })[status.value?.hostState ?? 'offline'],
 )
 
@@ -127,7 +139,7 @@ onBeforeUnmount(() => {
     <p v-else-if="notice" class="property-message" role="status">{{ notice }}</p>
     <section class="property-group connection-overview">
       <header>
-        <span>应用</span>
+        <span>{{ __t('apps.arca.ui', '应用') }}</span>
         <small>{{ hostStateLabel }}</small>
       </header>
       <div class="application-ownership">
@@ -145,18 +157,28 @@ onBeforeUnmount(() => {
             :disabled="!status?.managedRuntimeAvailable || !!action || refreshing"
             @click="run('start')"
           >
-            {{ action === 'start' ? '启动中…' : '启动应用' }}
+            {{
+              action === 'start' ? __t('apps.arca.ui', '启动中…') : __t('apps.arca.ui', '启动应用')
+            }}
           </button>
           <button :disabled="!!action || refreshing" @click="run('reconnect')">
-            {{ action === 'reconnect' ? '检测中…' : '重新连接' }}
+            {{
+              action === 'reconnect'
+                ? __t('apps.arca.ui', '检测中…')
+                : __t('apps.arca.ui', '重新连接')
+            }}
           </button>
         </div>
       </div>
       <dl class="application-facts">
         <div>
-          <dt>文稿服务</dt>
+          <dt>{{ __t('apps.arca.ui', '文稿服务') }}</dt>
           <dd :class="{ connected: store.connection === 'ready' }">
-            {{ store.connection === 'ready' ? '已连接' : '离线' }}
+            {{
+              store.connection === 'ready'
+                ? __t('apps.arca.ui', '已连接')
+                : __t('apps.arca.ui', '离线')
+            }}
           </dd>
         </div>
         <div>
@@ -166,40 +188,40 @@ onBeforeUnmount(() => {
       </dl>
     </section>
     <details class="property-group application-diagnostics">
-      <summary>诊断信息</summary>
+      <summary>{{ __t('apps.arca.ui', '诊断信息') }}</summary>
       <dl class="application-facts">
         <div>
-          <dt>进程 ID</dt>
+          <dt>{{ __t('apps.arca.ui', '进程 ID') }}</dt>
           <dd>{{ status?.pid ?? '—' }}</dd>
         </div>
         <div>
-          <dt>节点 ID</dt>
+          <dt>{{ __t('apps.arca.ui', '节点 ID') }}</dt>
           <dd>
             <code>{{ status?.federation.discovery?.nodeId ?? '—' }}</code>
           </dd>
         </div>
         <div>
-          <dt>连接代次</dt>
+          <dt>{{ __t('apps.arca.ui', '连接代次') }}</dt>
           <dd>{{ status?.federation.discovery?.generation ?? '—' }}</dd>
         </div>
         <div>
-          <dt>最后连接</dt>
+          <dt>{{ __t('apps.arca.ui', '最后连接') }}</dt>
           <dd>{{ status?.federation.lastConnectedAt ?? '—' }}</dd>
         </div>
         <div>
-          <dt>发现文件</dt>
+          <dt>{{ __t('apps.arca.ui', '发现文件') }}</dt>
           <dd>
             <code>{{ status?.federation.discoveryPath ?? '—' }}</code>
           </dd>
         </div>
         <div>
-          <dt>服务端点</dt>
+          <dt>{{ __t('apps.arca.ui', '服务端点') }}</dt>
           <dd>
             <code>{{ status?.federation.discovery?.endpoint ?? store.endpoint ?? '—' }}</code>
           </dd>
         </div>
         <div>
-          <dt>界面入口</dt>
+          <dt>{{ __t('apps.arca.ui', '界面入口') }}</dt>
           <dd>
             <code>{{ status?.uiUrl ?? '—' }}</code>
           </dd>
@@ -214,12 +236,14 @@ onBeforeUnmount(() => {
       <footer class="application-actions application-diagnostic-actions">
         <label class="application-auto-refresh">
           <input v-model="autoRefresh" type="checkbox" @change="schedule" />
-          自动刷新
+          {{ __t('apps.arca.ui', '自动刷新') }}
         </label>
         <button :disabled="!!action || refreshing" @click="refresh()">
-          {{ refreshing ? '刷新中…' : '刷新' }}
+          {{ refreshing ? __t('apps.arca.ui', '刷新中…') : __t('apps.arca.ui', '刷新') }}
         </button>
-        <button :disabled="!status" @click="copyDiagnostics">复制诊断</button>
+        <button :disabled="!status" @click="copyDiagnostics">
+          {{ __t('apps.arca.ui', '复制诊断') }}
+        </button>
       </footer>
     </details>
   </div>

@@ -17,13 +17,14 @@
  */
 
 import { isElectron } from '../utils/ipcAdapter'
+import { getLocale, translateDiagnostic } from '@infos/shared/i18n'
 
 /** 日志级别 */
 type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 
 /** 格式化日志前缀 */
 function formatPrefix(level: LogLevel, tag: string): string {
-  const time = new Date().toLocaleTimeString('zh-CN', { hour12: false })
+  const time = new Date().toLocaleTimeString(getLocale(), { hour12: false })
   return `[${time}] [${level.toUpperCase()}] [${tag}]`
 }
 
@@ -47,6 +48,7 @@ function sendToMainProcess(level: LogLevel, tag: string, message: string): void 
 export const logger = {
   /** 调试信息 (生产环境可静默) */
   debug(tag: string, message: string, data?: unknown): void {
+    message = translateDiagnostic(message)
     if (import.meta.env.DEV) {
       console.debug(`${formatPrefix('debug', tag)} ${message}`, data ?? '')
     }
@@ -54,18 +56,21 @@ export const logger = {
 
   /** 关键业务节点 */
   info(tag: string, message: string, data?: unknown): void {
+    message = translateDiagnostic(message)
     console.log(`${formatPrefix('info', tag)} ${message}`, data ?? '')
     sendToMainProcess('info', tag, message)
   },
 
   /** 降级、重试、非致命异常 */
   warn(tag: string, message: string, data?: unknown): void {
+    message = translateDiagnostic(message)
     console.warn(`${formatPrefix('warn', tag)} ${message}`, data ?? '')
     sendToMainProcess('warn', tag, message)
   },
 
   /** 系统异常 */
   error(tag: string, message: string, data?: unknown): void {
+    message = translateDiagnostic(message)
     console.error(`${formatPrefix('error', tag)} ${message}`, data ?? '')
     sendToMainProcess('error', tag, message)
   },

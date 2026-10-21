@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * approvalService — 领域服务
  *
@@ -78,10 +79,10 @@ export class ApprovalService {
     for (const listener of listeners) {
       try {
         void Promise.resolve(listener({ ...request })).catch((error) =>
-          logger.warn('审批状态通知失败', { approvalId: request.id, error }),
+          logger.warn(__t('logs.execution', '审批状态通知失败'), { approvalId: request.id, error }),
         )
       } catch (error) {
-        logger.warn('审批状态通知失败', { approvalId: request.id, error })
+        logger.warn(__t('logs.execution', '审批状态通知失败'), { approvalId: request.id, error })
       }
     }
   }

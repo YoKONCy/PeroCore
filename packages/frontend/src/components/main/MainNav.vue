@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /**
  * MainNav — MainView 左侧主导航
  *
@@ -20,12 +22,20 @@ import { useMainNav, type MainNavItem } from '../../composables/main/useMainNav'
 import { useApprovalStore } from '../../stores'
 import InfosLogo from '../brands/InfosLogo.vue'
 
-withDefaults(defineProps<{ showThemeToggle?: boolean }>(), { showThemeToggle: true })
+const props = withDefaults(
+  defineProps<{ showThemeToggle?: boolean; expanded?: boolean; tutorial?: boolean }>(),
+  {
+    showThemeToggle: true,
+    expanded: false,
+    tutorial: false,
+  },
+)
+const emit = defineEmits<{ navigate: [] }>()
 
 const {
   currentTab,
   pendingTab,
-  isNavCollapsed,
+  isNavCollapsed: collapsed,
   isNavPinned,
   navGroups,
   setTab,
@@ -36,6 +46,7 @@ const {
   theme,
   toggleTheme,
 } = useMainNav()
+const isNavCollapsed = computed(() => !props.expanded && !props.tutorial && collapsed.value)
 const approvalStore = useApprovalStore()
 const navigationRoot = ref<HTMLElement | null>(null)
 const selection = useSelectionIndicator(
@@ -44,6 +55,11 @@ const selection = useSelectionIndicator(
 )
 
 // ── 导航项样式 ──
+
+function navigateTab(id: MainNavItem['id']) {
+  setTab(id)
+  emit('navigate')
+}
 
 function itemClasses(item: MainNavItem): string[] {
   const isActive = currentTab.value === item.id
@@ -75,8 +91,10 @@ function itemClasses(item: MainNavItem): string[] {
         type="button"
         class="main-nav-pin"
         :class="{ 'main-nav-pin--pinned': isNavPinned }"
-        :title="isNavPinned ? '取消固定' : '固定展开'"
-        :aria-label="isNavPinned ? '取消固定侧栏' : '固定展开侧栏'"
+        :title="isNavPinned ? __t('ui.navigation', '取消固定') : __t('ui.navigation', '固定展开')"
+        :aria-label="
+          isNavPinned ? __t('ui.navigation', '取消固定侧栏') : __t('ui.navigation', '固定展开侧栏')
+        "
         :aria-pressed="isNavPinned"
         @click="toggleNavPin"
       >
@@ -105,8 +123,10 @@ function itemClasses(item: MainNavItem): string[] {
         type="button"
         class="main-nav-pin main-nav-pin--collapsed"
         :class="{ 'main-nav-pin--pinned': isNavPinned }"
-        :title="isNavPinned ? '取消固定' : '固定展开'"
-        :aria-label="isNavPinned ? '取消固定侧栏' : '固定展开侧栏'"
+        :title="isNavPinned ? __t('ui.navigation', '取消固定') : __t('ui.navigation', '固定展开')"
+        :aria-label="
+          isNavPinned ? __t('ui.navigation', '取消固定侧栏') : __t('ui.navigation', '固定展开侧栏')
+        "
         :aria-pressed="isNavPinned"
         @click="toggleNavPin"
       >
@@ -142,31 +162,32 @@ function itemClasses(item: MainNavItem): string[] {
         <button
           v-if="group.title"
           class="main-nav-group-title"
-          :class="{ 'main-nav-group-title--expanded': isGroupExpanded(group.id) }"
+          :class="{ 'main-nav-group-title--expanded': tutorial || isGroupExpanded(group.id) }"
           @click="group.collapsible && toggleGroup(group.id)"
         >
           <span v-if="!isNavCollapsed" class="main-nav-group-label">{{ group.title }}</span>
           <PixelIcon
             v-if="group.collapsible"
-            :name="isGroupExpanded(group.id) ? 'chevron-up' : 'chevron-down'"
+            :name="tutorial || isGroupExpanded(group.id) ? 'chevron-up' : 'chevron-down'"
             size="xs"
             class="main-nav-group-chevron"
           />
         </button>
 
         <!-- 导航项 -->
-        <template v-if="!group.collapsible || isGroupExpanded(group.id)">
+        <template v-if="tutorial || !group.collapsible || isGroupExpanded(group.id)">
           <button
             v-for="item in group.items"
             :key="item.id"
             :data-motion-item="item.id"
+            :data-onboarding-nav="item.id"
             :class="itemClasses(item)"
             :disabled="item.disabled"
             :aria-current="currentTab === item.id ? 'page' : undefined"
             :aria-busy="pendingTab === item.id"
             @pointerenter="prefetchTab(item.id)"
             @focus="prefetchTab(item.id)"
-            @click="setTab(item.id)"
+            @click="navigateTab(item.id)"
           >
             <PixelIcon :name="item.icon" size="sm" class="main-nav-item-icon" />
 
@@ -193,12 +214,18 @@ function itemClasses(item: MainNavItem): string[] {
     <div v-if="showThemeToggle" class="main-nav-footer">
       <button
         class="main-nav-theme-btn"
-        :title="theme === 'light' ? '切换到深色' : '切换到浅色'"
+        :title="
+          theme === 'light'
+            ? __t('ui.navigation', '切换到深色')
+            : __t('ui.navigation', '切换到浅色')
+        "
         @click="toggleTheme"
       >
         <PixelIcon :name="theme === 'light' ? 'moon' : 'sun'" size="sm" />
         <span v-if="!isNavCollapsed" class="main-nav-item-label">
-          {{ theme === 'light' ? '深色模式' : '浅色模式' }}
+          {{
+            theme === 'light' ? __t('ui.navigation', '深色模式') : __t('ui.navigation', '浅色模式')
+          }}
         </span>
       </button>
     </div>

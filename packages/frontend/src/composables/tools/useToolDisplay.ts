@@ -1,3 +1,4 @@
+import { t as __t } from '../../i18n/index'
 /**
  * useToolDisplay — 工具显示元数据注册表
  *
@@ -132,7 +133,11 @@ async function ensureLoaded(): Promise<void> {
         }
       } catch (error) {
         // API 不可用：使用内置兜底表，不影响轨迹渲染
-        logger.warn('useToolDisplay', '拉取工具显示元数据失败，使用内置兜底表', error)
+        logger.warn(
+          'useToolDisplay',
+          __t('logs.frontend.tools', '拉取工具显示元数据失败，使用内置兜底表'),
+          error,
+        )
       } finally {
         loaded = true
       }
@@ -162,77 +167,199 @@ export async function resolveToolDisplay(name: string): Promise<AgentToolDisplay
 }
 
 const FALLBACK_TOOL_LABEL: Record<string, string> = {
-  send_file: '发送文件',
-  update_plan: '更新计划',
-  edit_file: '编辑文件',
-  write_file: '写入文件',
-  read_file: '读取文件',
-  read_image: '读取图片',
-  read_file_range: '范围读取',
-  get_file_info: '查看文件信息',
-  list_directory: '浏览目录',
-  glob_files: '查找文件',
+  get send_file() {
+    return __t('ui.tools', '发送文件')
+  },
+  get update_plan() {
+    return __t('ui.tools', '更新计划')
+  },
+  get edit_file() {
+    return __t('ui.tools', '编辑文件')
+  },
+  get write_file() {
+    return __t('ui.tools', '写入文件')
+  },
+  get read_file() {
+    return __t('ui.tools', '读取文件')
+  },
+  get read_image() {
+    return __t('ui.tools', '读取图片')
+  },
+  get read_file_range() {
+    return __t('ui.tools', '范围读取')
+  },
+  get get_file_info() {
+    return __t('ui.tools', '查看文件信息')
+  },
+  get list_directory() {
+    return __t('ui.tools', '浏览目录')
+  },
+  get glob_files() {
+    return __t('ui.tools', '查找文件')
+  },
   code_search: '搜索代码',
-  search_files: '搜索文件',
-  terminal_execute: '终端执行',
-  terminal_create: '创建终端',
-  terminal_list: '终端列表',
-  terminal_get: '查看终端',
-  terminal_read: '读取终端',
-  terminal_wait: '等待终端',
-  terminal_write: '输入终端',
-  terminal_resize: '调整终端',
-  terminal_interrupt: '中断终端',
-  terminal_kill: '终止终端',
-  terminal_close: '关闭终端',
-  web_fetch: '获取网页',
-  browser_open_url: '打开网页',
-  browser_click: '点击网页',
-  browser_type: '网页输入',
-  browser_scroll: '滚动网页',
-  browser_back: '网页后退',
+  get search_files() {
+    return __t('ui.tools', '搜索文件')
+  },
+  get terminal_execute() {
+    return __t('ui.tools', '终端执行')
+  },
+  get terminal_create() {
+    return __t('ui.tools', '创建终端')
+  },
+  get terminal_list() {
+    return __t('ui.tools', '终端列表')
+  },
+  get terminal_get() {
+    return __t('ui.tools', '查看终端')
+  },
+  get terminal_read() {
+    return __t('ui.tools', '读取终端')
+  },
+  get terminal_wait() {
+    return __t('ui.tools', '等待终端')
+  },
+  get terminal_write() {
+    return __t('ui.tools', '输入终端')
+  },
+  get terminal_resize() {
+    return __t('ui.tools', '调整终端')
+  },
+  get terminal_interrupt() {
+    return __t('ui.tools', '中断终端')
+  },
+  get terminal_kill() {
+    return __t('ui.tools', '终止终端')
+  },
+  get terminal_close() {
+    return __t('ui.tools', '关闭终端')
+  },
+  get web_fetch() {
+    return __t('ui.tools', '获取网页')
+  },
+  get browser_open_url() {
+    return __t('ui.tools', '打开网页')
+  },
+  get browser_click() {
+    return __t('ui.tools', '点击网页')
+  },
+  get browser_type() {
+    return __t('ui.tools', '网页输入')
+  },
+  get browser_scroll() {
+    return __t('ui.tools', '滚动网页')
+  },
+  get browser_back() {
+    return __t('ui.tools', '网页后退')
+  },
   browser_get_content: '读取网页内容',
   browser_query_dom: '检查网页结构',
-  assembling_tool: '准备工具调用',
-  run_script: '运行脚本',
-  take_screenshot: '屏幕截图',
-  browser_screenshot: '浏览器截图',
-  browser_page_image: '读取网页图片',
+  get assembling_tool() {
+    return __t('ui.tools', '准备工具调用')
+  },
+  get run_script() {
+    return __t('ui.tools', '运行脚本')
+  },
+  get take_screenshot() {
+    return __t('ui.tools', '屏幕截图')
+  },
+  get browser_screenshot() {
+    return __t('ui.tools', '浏览器截图')
+  },
+  get browser_page_image() {
+    return __t('ui.tools', '读取网页图片')
+  },
   get_system_info: '系统信息',
-  open_application: '打开应用',
-  get_active_windows: '活动窗口',
-  activate_window: '切换窗口',
-  automation_execute: '桌面自动化',
-  get_mouse_position: '鼠标位置',
-  set_reminder: '创建提醒',
-  schedule_follow_up: '安排跟进',
-  suggest_next_step: '提出建议',
+  get open_application() {
+    return __t('ui.tools', '打开应用')
+  },
+  get get_active_windows() {
+    return __t('ui.tools', '活动窗口')
+  },
+  get activate_window() {
+    return __t('ui.tools', '切换窗口')
+  },
+  get automation_execute() {
+    return __t('ui.tools', '桌面自动化')
+  },
+  get get_mouse_position() {
+    return __t('ui.tools', '鼠标位置')
+  },
+  get set_reminder() {
+    return __t('ui.tools', '创建提醒')
+  },
+  get schedule_follow_up() {
+    return __t('ui.tools', '安排跟进')
+  },
+  get suggest_next_step() {
+    return __t('ui.tools', '提出建议')
+  },
   query_facts: '查询事实',
-  search_knowledge: '检索知识',
-  write_fact: '记录事实',
-  supersede_fact: '更新事实',
-  delete_fact: '删除事实',
-  add_fact_object_alias: '添加别名',
-  remove_fact_object_alias: '移除别名',
-  list_reminders: '查看提醒',
-  cancel_reminder: '取消提醒',
-  finish_task: '完成任务',
-  update_state: '更新角色状态',
-  load_skill: '加载技能',
-  skill_list_resources: '查看技能资源',
-  skill_read_resource: '读取技能资源',
-  social_notify_owner: '通知主人',
-  stronghold_move_to_room: '移动到房间',
-  stronghold_list_rooms: '查看房间',
-  stronghold_get_room_info: '房间信息',
-  stronghold_set_environment: '设置环境',
-  stronghold_summon_agents: '传唤据点成员',
-  stronghold_call_butler: '呼叫管家',
+  get search_knowledge() {
+    return __t('ui.tools', '检索知识')
+  },
+  get write_fact() {
+    return __t('ui.tools', '记录事实')
+  },
+  get supersede_fact() {
+    return __t('ui.tools', '更新事实')
+  },
+  get delete_fact() {
+    return __t('ui.tools', '删除事实')
+  },
+  get add_fact_object_alias() {
+    return __t('ui.tools', '添加别名')
+  },
+  get remove_fact_object_alias() {
+    return __t('ui.tools', '移除别名')
+  },
+  get list_reminders() {
+    return __t('ui.tools', '查看提醒')
+  },
+  get cancel_reminder() {
+    return __t('ui.tools', '取消提醒')
+  },
+  get finish_task() {
+    return __t('ui.tools', '完成任务')
+  },
+  get update_state() {
+    return __t('ui.tools', '更新角色状态')
+  },
+  get load_skill() {
+    return __t('ui.tools', '加载技能')
+  },
+  get skill_list_resources() {
+    return __t('ui.tools', '查看技能资源')
+  },
+  get skill_read_resource() {
+    return __t('ui.tools', '读取技能资源')
+  },
+  get social_notify_owner() {
+    return __t('ui.tools', '通知主人')
+  },
+  get stronghold_move_to_room() {
+    return __t('ui.tools', '移动到房间')
+  },
+  get stronghold_list_rooms() {
+    return __t('ui.tools', '查看房间')
+  },
+  get stronghold_get_room_info() {
+    return __t('ui.tools', '房间信息')
+  },
+  get stronghold_set_environment() {
+    return __t('ui.tools', '设置环境')
+  },
+  get stronghold_summon_agents() {
+    return __t('ui.tools', '传唤据点成员')
+  },
+  get stronghold_call_butler() {
+    return __t('ui.tools', '呼叫管家')
+  },
 }
 
 /** 工具名 → 显示名；任何情况下都不向用户暴露 snake_case 函数标识。 */
 export function toolDisplayLabel(name: string, display?: AgentToolDisplay): string {
-  if (display?.label) return display.label
+  if (display?.label) return __t('common.tools', display.label)
   if (FALLBACK_TOOL_LABEL[name]) return FALLBACK_TOOL_LABEL[name]
   return name
     .split(/[_-]+/)

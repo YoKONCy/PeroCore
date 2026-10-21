@@ -38,6 +38,17 @@ function createResolver(config: Record<string, string | null>) {
 }
 
 describe('ModelRoleResolver角色指派', () => {
+  it('只装配当前卡片的有序回退，不递归子卡片自身的配置', async () => {
+    const { resolver } = createResolver({
+      'model.main': '1',
+      'model.fallbacks.1': '[2]',
+      'model.fallbacks.2': '[1]',
+    })
+    const model = await resolver.resolveAgent('pero')
+    expect(model?.configId).toBe(1)
+    expect(model?.fallbackModels?.map((candidate) => candidate.configId)).toEqual([2])
+    expect(model?.fallbackModels?.[0]?.fallbackModels).toEqual([])
+  })
   it('知识整理使用任务指派，未指派时回退主模型', async () => {
     const assigned = createResolver({ 'model.main': '1', 'model.task.knowledge': '2' })
     expect((await assigned.resolver.bind('knowledge')())?.modelId).toBe('nana-model')

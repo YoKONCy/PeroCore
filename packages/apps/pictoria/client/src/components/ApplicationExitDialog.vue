@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import Icon from './PictoriaIcon.vue'
 
@@ -67,20 +69,36 @@ onBeforeUnmount(() => {
       <span class="application-exit-symbol">
         <Icon :name="exited ? 'check' : 'power'" :size="24" />
       </span>
-      <h2 id="application-exit-title">{{ exited ? 'Pictoria 已退出' : '退出 Pictoria？' }}</h2>
+      <h2 id="application-exit-title">
+        {{
+          exited
+            ? __t('apps.pictoria.ui', 'Pictoria 已退出')
+            : __t('apps.pictoria.ui', '退出 Pictoria？')
+        }}
+      </h2>
       <p>
-        {{ exited ? (hosted ? 'infOS 仍在运行。' : '可以关闭此页面。') : '保存编辑并停止后台。' }}
+        {{
+          exited
+            ? hosted
+              ? __t('apps.pictoria.ui', 'infOS 仍在运行。')
+              : __t('apps.pictoria.ui', '可以关闭此页面。')
+            : __t('apps.pictoria.ui', '保存编辑并停止后台。')
+        }}
       </p>
       <p v-if="error" class="application-exit-error" role="alert">{{ error }}</p>
       <footer v-if="!exited">
-        <button class="quiet-button" :disabled="busy" @click="cancel">取消</button>
+        <button class="quiet-button" :disabled="busy" @click="cancel">
+          {{ __t('apps.pictoria.ui', '取消') }}
+        </button>
         <button class="create-button" :disabled="busy" @click="emit('confirm')">
           <Icon :name="busy ? 'refresh' : 'power'" :size="16" :class="{ 'exit-spinner': busy }" />
-          {{ busy ? progress : '保存并退出' }}
+          {{ busy ? progress : __t('apps.pictoria.ui', '保存并退出') }}
         </button>
       </footer>
       <footer v-else-if="embedded">
-        <button class="create-button" @click="emit('closePage')">关闭标签页</button>
+        <button class="create-button" @click="emit('closePage')">
+          {{ __t('apps.pictoria.ui', '关闭标签页') }}
+        </button>
       </footer>
     </section>
   </div>

@@ -207,6 +207,11 @@
 .usage-agent-filter {
   width: 122px;
 }
+.usage-scope-filter {
+  width: 210px;
+  max-width: 100%;
+  flex: 1 1 180px;
+}
 .usage-icon-button {
   padding: 5px;
 }

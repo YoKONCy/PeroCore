@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 import Database from 'better-sqlite3'
 import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { mkdirSync } from 'node:fs'
@@ -20,7 +21,7 @@ try {
   const db = drizzle(sqlite, { schema })
   const migrationsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'migrations')
   applySchemaMigrations(sqlite, db, migrationsDir, existingDatabase)
-  logger.success(`数据库结构迁移完成：${databasePath}`)
+  logger.success(__t('logs.database', '数据库结构迁移完成：{0}', [databasePath]))
 } finally {
   sqlite.close()
 }

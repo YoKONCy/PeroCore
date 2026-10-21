@@ -1,3 +1,4 @@
+import { t as __t } from '../i18n/index'
 /**
  * useNotificationStore — 全局通知系统
  *
@@ -10,6 +11,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { getApiBaseUrl } from '../api/transport'
+import { translateDiagnostic } from '@infos/shared/i18n'
 
 export type NotificationType = 'info' | 'success' | 'warning' | 'error'
 export type NotificationSeverity = 'silent' | 'toast' | 'modal'
@@ -67,6 +69,7 @@ export const useNotificationStore = defineStore('notification', () => {
     typeOrOpts: NotificationType | ToastOptions = 'info',
     duration = 4000,
   ) {
+    message = translateDiagnostic(message)
     const opts: ToastOptions =
       typeof typeOrOpts === 'string' ? { type: typeOrOpts, duration } : typeOrOpts
 
@@ -142,6 +145,7 @@ export const useNotificationStore = defineStore('notification', () => {
 
   /** 显示模态通知（阻断） */
   function showModal(message: string, title?: string, type: NotificationType = 'error') {
+    message = translateDiagnostic(message)
     modal.value = {
       id: nextId++,
       type,
@@ -181,7 +185,7 @@ export const useNotificationStore = defineStore('notification', () => {
     }
 
     if (severity === 'modal') {
-      showModal(message, `错误: ${code}`, 'error')
+      showModal(message, __t('ui.useNotificationStore', '错误: {0}', [code]), 'error')
       return
     }
 

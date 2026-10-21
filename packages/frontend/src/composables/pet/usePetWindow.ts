@@ -1,3 +1,4 @@
+import { t as __t } from '../../i18n/index'
 /**
  * usePetWindow — Pet 窗口 Electron 交互 composable
  *
@@ -66,7 +67,9 @@ export function usePetWindow() {
   function onInteractableLeave(): void {
     if (resizeMode.value) return
     if (
-      (document.activeElement?.matches('textarea,input,select,[contenteditable=true]') &&
+      (document.activeElement?.matches(
+        'textarea,input,select,[contenteditable=true],:focus-visible',
+      ) &&
         document.activeElement.closest('[data-pet-ui]')) ||
       document.querySelector('[data-pet-ui]:hover')
     )
@@ -227,7 +230,7 @@ export function usePetWindow() {
       }
       cleanupFns.push(unlistenMouse)
     } catch {
-      logger.warn('PetWindow', '全局鼠标追踪注册失败')
+      logger.warn('PetWindow', __t('logs.frontend.pet', '全局鼠标追踪注册失败'))
     }
 
     // 4. 注册拖拽事件

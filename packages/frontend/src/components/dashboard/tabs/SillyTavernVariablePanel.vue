@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../../i18n/index'
+
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { PButton, PSelect, PDialog } from '../../pixel'
 import { promptApi } from '../../../api/modules/promptApi'
@@ -13,13 +15,21 @@ const busy = ref(false),
   loaded = ref(false)
 let request = 0
 const options = computed(() => [
-  { value: '$global', label: '全局变量' },
+  {
+    value: '$global',
+    get label() {
+      return __t('ui.settings', '全局变量')
+    },
+  },
   ...sessions.value.map((item) => {
     const parts = item.scope.split(':'),
       agent = props.agents.find((candidate) => candidate.value === parts[1])?.label ?? parts[1]
     const location =
       parts[0] === 'social' ? `${parts[2]}/${parts.at(-1)}` : parts.at(-1)?.slice(0, 8)
-    return { value: item.scope, label: `${agent ?? '会话'} · ${location} · ${item.count}` }
+    return {
+      value: item.scope,
+      label: `${agent ?? __t('ui.settings', '会话')} · ${location} · ${item.count}`,
+    }
   }),
 ])
 async function load(next = scope.value) {
@@ -61,7 +71,7 @@ onBeforeUnmount(() => {
     class="bindings-panel"
     @toggle="($event.target as HTMLDetailsElement).open && !loaded && load()"
   >
-    <summary>持久变量</summary>
+    <summary>{{ __t('ui.settings', '持久变量') }}</summary>
     <div class="row">
       <PSelect
         :model-value="scope"
@@ -71,7 +81,9 @@ onBeforeUnmount(() => {
         :disabled="busy"
         @update:model-value="load(String($event))"
       />
-      <PButton size="sm" variant="ghost" :disabled="busy" @click="load()">刷新</PButton>
+      <PButton size="sm" variant="ghost" :disabled="busy" @click="load()">
+        {{ __t('ui.settings', '刷新') }}
+      </PButton>
       <PButton
         size="sm"
         variant="danger"
@@ -83,7 +95,7 @@ onBeforeUnmount(() => {
           }
         "
       >
-        清空
+        {{ __t('ui.settings', '清空') }}
       </PButton>
     </div>
     <p v-if="error" class="error">
@@ -99,7 +111,7 @@ onBeforeUnmount(() => {
           }
         "
       >
-        重置全部
+        {{ __t('ui.settings', '重置全部') }}
       </PButton>
     </p>
     <div class="st-variable-state">
@@ -107,15 +119,17 @@ onBeforeUnmount(() => {
         <code>{{ name }}</code>
         <pre>{{ value }}</pre>
       </div>
-      <p v-if="loaded && !Object.keys(values).length" class="muted-text">暂无变量</p>
+      <p v-if="loaded && !Object.keys(values).length" class="muted-text">
+        {{ __t('ui.settings', '暂无变量') }}
+      </p>
     </div>
     <PDialog
       v-model="confirmOpen"
-      title="清空变量"
+      :title="__t('ui.settings', '清空变量')"
       :message="
         clearAll
-          ? '清空所有酒馆变量？正在生成的旧变量变更将失效。'
-          : '清空所选范围的变量？正在生成的旧变量变更将失效。'
+          ? __t('ui.settings', '清空所有酒馆变量？')
+          : __t('ui.settings', '清空所选范围的变量？')
       "
       @confirm="reset"
     />

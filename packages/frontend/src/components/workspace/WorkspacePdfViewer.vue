@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { getDocument, GlobalWorkerOptions, PasswordResponses, TextLayer } from 'pdfjs-dist'
 import type {
@@ -8,6 +10,7 @@ import type {
 } from 'pdfjs-dist/types/src/display/api'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { WorkspacePreviewState } from './workspacePreview'
+import { getApiBaseUrl, getApiResourceHeaders } from '../../api/transport'
 
 const props = defineProps<{ src: string; state: WorkspacePreviewState }>()
 const emit = defineEmits<{
@@ -42,7 +45,7 @@ let observer: ResizeObserver | undefined
 let lastMatch: { term: string; page: number } | undefined
 const cachedText = new Map<number, string>()
 const zoomLabel = computed(() =>
-  props.state.zoom ? `${Math.round(props.state.zoom * 100)}%` : '适应宽度',
+  props.state.zoom ? `${Math.round(props.state.zoom * 100)}%` : __t('ui.workspace', '适应宽度'),
 )
 
 async function load() {
@@ -64,6 +67,8 @@ async function load() {
   const assets = new URL('pdf-assets/', document.baseURI).href
   const task = getDocument({
     url: props.src,
+    httpHeaders: getApiResourceHeaders(props.src),
+    withCredentials: new URL(props.src, getApiBaseUrl()).origin === new URL(getApiBaseUrl()).origin,
     cMapUrl: `${assets}cmaps/`,
     cMapPacked: true,
     standardFontDataUrl: `${assets}standard_fonts/`,
@@ -280,7 +285,7 @@ onBeforeUnmount(() => {
       <button
         type="button"
         :disabled="!pdf || state.page <= 1"
-        aria-label="上一页"
+        :aria-label="__t('ui.workspace', '上一页')"
         @click="go(state.page - 1)"
       >
         ‹
@@ -291,7 +296,7 @@ onBeforeUnmount(() => {
         min="1"
         :max="pageCount || 1"
         :disabled="!pdf"
-        aria-label="页码"
+        :aria-label="__t('ui.workspace', '页码')"
         @change="go(Number(pageInput))"
         @keydown.enter.prevent="go(Number(pageInput))"
       />
@@ -299,27 +304,41 @@ onBeforeUnmount(() => {
       <button
         type="button"
         :disabled="!pdf || state.page >= pageCount"
-        aria-label="下一页"
+        :aria-label="__t('ui.workspace', '下一页')"
         @click="go(state.page + 1)"
       >
         ›
       </button>
-      <button type="button" :disabled="!pdf" aria-label="缩小" @click="zoom(-1)">−</button>
+      <button
+        type="button"
+        :disabled="!pdf"
+        :aria-label="__t('ui.workspace', '缩小')"
+        @click="zoom(-1)"
+      >
+        −
+      </button>
       <button type="button" :disabled="!pdf" @click="emit('state', { zoom: 0 })">
         {{ zoomLabel }}
       </button>
-      <button type="button" :disabled="!pdf" aria-label="放大" @click="zoom(1)">＋</button>
+      <button
+        type="button"
+        :disabled="!pdf"
+        :aria-label="__t('ui.workspace', '放大')"
+        @click="zoom(1)"
+      >
+        ＋
+      </button>
       <span class="file-view-spacer" />
       <form class="workspace-pdf__search" @submit.prevent="search()">
         <input
           v-model="query"
           type="search"
-          placeholder="查找文字"
-          aria-label="查找 PDF 文字"
+          :placeholder="__t('ui.workspace', '查找文字')"
+          :aria-label="__t('ui.workspace', '查找 PDF 文字')"
           :disabled="!pdf"
         />
         <button type="submit" :disabled="!pdf || !query || searching">
-          {{ searching ? '查找中…' : '查找' }}
+          {{ searching ? __t('ui.workspace', '查找中…') : __t('ui.workspace', '查找') }}
         </button>
       </form>
       <small v-if="searchMessage">{{ searchMessage }}</small>
@@ -330,11 +349,24 @@ onBeforeUnmount(() => {
         class="file-view-state file-view-password"
         @submit.prevent="unlock"
       >
-        <span>{{ passwordError ? '密码不正确，请重新输入' : '此 PDF 需要密码' }}</span>
-        <input v-model="password" type="password" autocomplete="off" aria-label="PDF 密码" />
-        <button class="workspace-pdf__unlock" type="submit">打开</button>
+        <span>
+          {{
+            passwordError
+              ? __t('ui.workspace', '密码不正确，请重新输入')
+              : __t('ui.workspace', '此 PDF 需要密码')
+          }}
+        </span>
+        <input
+          v-model="password"
+          type="password"
+          autocomplete="off"
+          :aria-label="__t('ui.workspace', 'PDF 密码')"
+        />
+        <button class="workspace-pdf__unlock" type="submit">
+          {{ __t('ui.workspace', '打开') }}
+        </button>
       </form>
-      <div v-if="loading" class="file-view-state">正在读取 PDF…</div>
+      <div v-if="loading" class="file-view-state">{{ __t('ui.workspace', '正在读取 PDF…') }}</div>
       <div
         v-show="pdf && !loading"
         class="workspace-pdf__sheet"
@@ -348,7 +380,9 @@ onBeforeUnmount(() => {
         <canvas ref="canvas" />
         <div ref="textContainer" class="workspace-pdf__text textLayer" />
       </div>
-      <span v-if="rendering && !loading" class="workspace-pdf__rendering">正在绘制…</span>
+      <span v-if="rendering && !loading" class="workspace-pdf__rendering">
+        {{ __t('ui.workspace', '正在绘制…') }}
+      </span>
     </div>
   </div>
 </template>

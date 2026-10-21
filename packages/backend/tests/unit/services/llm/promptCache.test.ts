@@ -32,6 +32,69 @@ function snapshot(content: string): ChatMessage {
 }
 
 describe('跨轮提示词前缀', () => {
+  it('多条已送达文字与表情作为完整消息组续接，不与第一条回复错误比较', () => {
+    const user = current('发三条')
+    const first = preparePromptReplay('social:multi-delivery', [system, user], '模型')
+    const trace: ChatMessage[] = [
+      ...first.messages,
+      {
+        role: 'assistant',
+        content: null,
+        toolCalls: [
+          {
+            id: 'act',
+            type: 'function',
+            function: { name: 'social_act', arguments: '{"reply":"第一条"}' },
+          },
+        ],
+      },
+      { role: 'tool', toolCallId: 'act', content: '{"status":"completed"}' },
+    ]
+    const replies: ChatMessage[] = ['第一条', '[native_emoji:12:1]', '第三条'].map((content) => ({
+      role: 'assistant',
+      content,
+    }))
+    first.commit(
+      trace,
+      replies.map((reply) => reply.content).join('\n'),
+      replies.map((reply) => ({
+        key: historyKey(reply),
+        reply: String(reply.content),
+      })),
+    )
+    const next = preparePromptReplay(
+      'social:multi-delivery',
+      [system, history(user), ...replies.map(history), current('继续')],
+      '模型',
+    )
+    expect(next.reused).toBe(true)
+    expect(next.messages.slice(0, trace.length)).toEqual(trace)
+    expect(next.messages.at(-1)?.content).toBe('继续')
+  })
+
+  it('消息组部分删除或改写后退出热轨迹，不补回已删除内容', () => {
+    const user = current('发两条')
+    const first = preparePromptReplay('social:changed-delivery', [system, user], '模型')
+    const a: ChatMessage = { role: 'assistant', content: '第一条' }
+    const b: ChatMessage = { role: 'assistant', content: '第二条' }
+    first.commit(
+      [...first.messages, a, b],
+      '第一条\n第二条',
+      [a, b].map((reply) => ({
+        key: historyKey(reply),
+        reply: String(reply.content),
+      })),
+    )
+    const next = preparePromptReplay(
+      'social:changed-delivery',
+      [system, history(user), history(a), current('继续')],
+      '模型',
+    )
+    expect(next.reused).toBe(false)
+    expect(next.reason).toContain('消息组')
+    expect(next.messages.some((message) => message.content === '第二条')).toBe(false)
+  })
+
   it('动态状态相同不重复注入，变化时只在尾部追加', () => {
     const messages: ChatMessage[] = [system, current('处理任务')]
     expect(appendPromptSnapshot(messages, 'infos.work.execution-state', '终端一')).toBe(true)

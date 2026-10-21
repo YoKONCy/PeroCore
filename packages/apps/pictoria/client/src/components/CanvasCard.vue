@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 import { computed, nextTick, ref, watch } from 'vue'
 import type { CanvasItem, OutputPort } from '../types'
 import Icon from './PictoriaIcon.vue'
@@ -27,7 +29,7 @@ watch(editing, async (value) => {
     editor.value?.focus()
   }
 })
-const caption = computed(() => props.item.content.name || '未命名素材')
+const caption = computed(() => props.item.content.name || __t('apps.pictoria.ui', '未命名素材'))
 const video = computed(() => props.item.content.mimeType?.startsWith('video/'))
 const audio = computed(() => props.item.content.mimeType?.startsWith('audio/'))
 const states: Record<string, string> = {
@@ -66,20 +68,20 @@ const states: Record<string, string> = {
     <div v-if="item.content.kind === 'text'" class="text-card-content">
       <span class="note-eyebrow">
         <Icon name="note" :size="13" />
-        灵感便签
+        {{ __t('apps.pictoria.ui', '灵感便签') }}
       </span>
       <textarea
         v-if="editing"
         ref="editor"
         :value="item.content.text"
         maxlength="64000"
-        placeholder="写下一个想法…"
+        :placeholder="__t('apps.pictoria.ui', '写下一个想法…')"
         @input="emit('text', ($event.target as HTMLTextAreaElement).value)"
         @blur="editing = false"
         @keydown.esc.stop="editing = false"
       />
       <p v-else :class="{ empty: !item.content.text }">
-        {{ item.content.text || '双击，写下一个想法…' }}
+        {{ item.content.text || __t('apps.pictoria.ui', '双击，写下一个想法…') }}
       </p>
     </div>
     <div
@@ -102,14 +104,14 @@ const states: Record<string, string> = {
           class="text-button"
           @click.stop="emit('recover')"
         >
-          恢复任务
+          {{ __t('apps.pictoria.ui', '恢复任务') }}
         </button>
         <button
           v-if="!['completed', 'partial', 'failed', 'cancelled'].includes(item.content.state || '')"
           class="text-button"
           @click.stop="emit('cancel')"
         >
-          取消创作
+          {{ __t('apps.pictoria.ui', '取消创作') }}
         </button>
       </div>
     </div>
@@ -120,7 +122,13 @@ const states: Record<string, string> = {
         <img v-else-if="url" :src="url" :alt="caption" draggable="false" />
         <div v-else class="asset-placeholder">
           <Icon :name="video ? 'play' : audio ? 'sound' : 'image'" :size="27" />
-          <span>{{ missing ? '预览暂不可用' : '正在载入素材' }}</span>
+          <span>
+            {{
+              missing
+                ? __t('apps.pictoria.ui', '预览暂不可用')
+                : __t('apps.pictoria.ui', '正在载入素材')
+            }}
+          </span>
         </div>
       </div>
       <footer>
@@ -132,8 +140,8 @@ const states: Record<string, string> = {
       <button
         class="output-port"
         :class="{ visible: selected }"
-        title="拖到步骤或下方创作栏"
-        aria-label="从右侧拖动引用连线"
+        :title="__t('apps.pictoria.ui', '拖到步骤或下方创作栏')"
+        :aria-label="__t('apps.pictoria.ui', '从右侧拖动引用连线')"
         @pointerdown.stop="emit('connect', $event, 'right')"
       >
         <span />
@@ -141,8 +149,8 @@ const states: Record<string, string> = {
       <button
         class="output-port output-port-bottom"
         :class="{ visible: selected }"
-        title="拖到步骤或下方创作栏"
-        aria-label="从下方拖动引用连线"
+        :title="__t('apps.pictoria.ui', '拖到步骤或下方创作栏')"
+        :aria-label="__t('apps.pictoria.ui', '从下方拖动引用连线')"
         @pointerdown.stop="emit('connect', $event, 'bottom')"
       >
         <span />
@@ -151,7 +159,7 @@ const states: Record<string, string> = {
     <span
       v-if="selected"
       class="card-resize-handle"
-      aria-label="调整大小"
+      :aria-label="__t('apps.pictoria.ui', '调整大小')"
       @pointerdown.stop="emit('resize', $event)"
     />
   </article>

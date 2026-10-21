@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import { nextTick, onMounted, ref, watch } from 'vue'
 import type { DesktopApplication } from '@infos/shared'
 import { PixelIcon } from '../pixel'
@@ -21,9 +23,30 @@ const emit = defineEmits<{
 }>()
 const input = ref<HTMLInputElement | null>(null)
 const shortcuts = [
-  { id: 'chat', title: '与助手聊聊', detail: '回到日常对话', icon: 'chat' },
-  { id: 'workspace', title: '工作区', detail: '文件、终端与轻量任务', icon: 'code' },
-  { id: 'tasks', title: '任务中心', detail: '查看正在进行的工作', icon: 'list' },
+  {
+    id: 'chat',
+    get title() {
+      return __t('ui.layout', '与助手聊聊')
+    },
+    detail: '回到日常对话',
+    icon: 'chat',
+  },
+  {
+    id: 'workspace',
+    get title() {
+      return __t('ui.layout', '工作区')
+    },
+    detail: '文件、终端与轻量任务',
+    icon: 'code',
+  },
+  {
+    id: 'tasks',
+    get title() {
+      return __t('ui.layout', '任务中心')
+    },
+    detail: '查看正在进行的工作',
+    icon: 'list',
+  },
 ]
 async function focusAddress(): Promise<void> {
   await nextTick()
@@ -34,26 +57,30 @@ watch(() => props.focusRequest, focusAddress)
 </script>
 
 <template>
-  <section class="desktop-new-page" aria-label="新标签页">
+  <section class="desktop-new-page" :aria-label="__t('ui.layout', '新标签页')">
     <div class="desktop-new-content">
       <div class="desktop-new-brand">
         <PixelIcon name="sparkle" size="lg" />
-        <span class="font-pixel">新的灵感，从这里开始</span>
+        <span class="font-pixel">{{ __t('ui.layout', '新的灵感，从这里开始') }}</span>
       </div>
-      <h1>打开网页，或继续手边的工作</h1>
+      <h1>{{ __t('ui.layout', '打开网页，或继续手边的工作') }}</h1>
       <form class="desktop-new-search" @submit.prevent="emit('browse', modelValue)">
         <PixelIcon name="search" size="md" />
         <input
           ref="input"
           :value="modelValue"
           :disabled="busy"
-          aria-label="输入网址或搜索内容"
-          placeholder="输入网址或搜索内容…"
+          :aria-label="__t('ui.layout', '输入网址或搜索内容')"
+          :placeholder="__t('ui.layout', '输入网址或搜索内容…')"
           autocomplete="off"
           spellcheck="false"
           @input="emit('update:modelValue', ($event.target as HTMLInputElement).value)"
         />
-        <button type="submit" :disabled="busy || !modelValue.trim()" aria-label="打开网页或搜索">
+        <button
+          type="submit"
+          :disabled="busy || !modelValue.trim()"
+          :aria-label="__t('ui.layout', '打开网页或搜索')"
+        >
           <PixelIcon
             :name="busy ? 'refresh' : 'chevron-right'"
             size="sm"
@@ -64,21 +91,21 @@ watch(() => props.focusRequest, focusAddress)
       <div class="desktop-new-hint">
         <span>
           <kbd>Ctrl + T</kbd>
-          新建
+          {{ __t('ui.layout', '新建') }}
         </span>
         <span>
           <kbd>Ctrl + Tab</kbd>
-          切换
+          {{ __t('ui.layout', '切换') }}
         </span>
         <span>
           <kbd>Ctrl + W</kbd>
-          关闭
+          {{ __t('ui.layout', '关闭') }}
         </span>
       </div>
       <div class="desktop-weather"><WeatherCard /></div>
 
       <div class="desktop-launch-group">
-        <h2>迷你游戏</h2>
+        <h2>{{ __t('ui.layout', '迷你游戏') }}</h2>
         <div class="desktop-launch-grid">
           <button
             class="desktop-launch-card"
@@ -88,8 +115,8 @@ watch(() => props.focusRequest, focusAddress)
           >
             <span class="desktop-launch-icon"><PixelIcon name="star" size="lg" /></span>
             <span>
-              <strong>塔罗牌</strong>
-              <small>来试试今天的运势吧！</small>
+              <strong>{{ __t('ui.layout', '塔罗牌') }}</strong>
+              <small>{{ __t('ui.layout', '来试试今天的运势吧！') }}</small>
             </span>
             <PixelIcon name="chevron-right" size="xs" />
           </button>
@@ -97,7 +124,7 @@ watch(() => props.focusRequest, focusAddress)
       </div>
 
       <div v-if="applications.length" class="desktop-launch-group">
-        <h2>应用</h2>
+        <h2>{{ __t('ui.layout', '应用') }}</h2>
         <div class="desktop-launch-grid">
           <button
             v-for="application in applications"
@@ -119,7 +146,7 @@ watch(() => props.focusRequest, focusAddress)
         </div>
       </div>
       <div class="desktop-launch-group">
-        <h2>继续工作</h2>
+        <h2>{{ __t('ui.layout', '继续工作') }}</h2>
         <div class="desktop-launch-grid">
           <button
             v-for="shortcut in shortcuts"

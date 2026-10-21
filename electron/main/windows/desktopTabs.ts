@@ -1,3 +1,4 @@
+import { t as __t } from '../utils/i18n'
 import { BrowserWindow, WebContentsView, dialog, nativeTheme, type WebContents } from 'electron'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -105,7 +106,10 @@ class DesktopTabManager {
         })
         .catch((error) => {
           this.hostClosing = false
-          logger.warn('DesktopTabs', `关闭主窗口标签失败：${String(error)}`)
+          logger.warn(
+            'DesktopTabs',
+            __t('electron.logs.windows', '关闭主窗口标签失败：{0}', [String(error)]),
+          )
         })
     })
     host.once('closed', () => {
@@ -173,7 +177,9 @@ class DesktopTabManager {
     if (this.hostClosing) throw new Error('窗口正在关闭，请稍后再试')
     if (this.entries.size >= MAX_TABS) throw new Error(`最多同时打开 ${MAX_TABS} 个标签`)
     const id = `new-${randomUUID()}`
-    this.entries.set(id, { tab: { id, kind: 'new', title: '新标签页', icon: 'plus' } })
+    this.entries.set(id, {
+      tab: { id, kind: 'new', title: __t('electron.ui.windows', '新标签页'), icon: 'plus' },
+    })
     this.activate(id)
     return this.snapshot()
   }
@@ -191,7 +197,9 @@ class DesktopTabManager {
     if (!replaced && this.entries.size >= MAX_TABS)
       throw new Error(`最多同时打开 ${MAX_TABS} 个标签`)
     const id = replaceId ?? `tarot-${randomUUID()}`
-    this.entries.set(id, { tab: { id, kind: 'tarot', title: '一起抽牌', icon: 'star' } })
+    this.entries.set(id, {
+      tab: { id, kind: 'tarot', title: __t('electron.ui.windows', '一起抽牌'), icon: 'star' },
+    })
     return this.activate(id)
   }
 
@@ -219,10 +227,15 @@ class DesktopTabManager {
       if (!owner || owner.isDestroyed()) return
       const answer = dialog.showMessageBoxSync(owner, {
         type: 'question',
-        title: '关闭标签页',
-        message: `${entry.tab.title} 中有尚未提交的内容，要关闭吗？`,
-        detail: 'Arca 的本地文稿草稿会保留；尚未提交的其他页面内容可能丢失。',
-        buttons: ['继续编辑', '关闭标签页'],
+        title: __t('electron.ui.windows', '关闭标签页'),
+        message: __t('electron.ui.windows', '{0} 中有尚未提交的内容，要关闭吗？', [
+          entry.tab.title,
+        ]),
+        detail: __t(
+          'electron.ui.windows',
+          'Arca 的本地文稿草稿会保留；尚未提交的其他页面内容可能丢失。',
+        ),
+        buttons: [__t('electron.ui.windows', '继续编辑'), __t('electron.ui.windows', '关闭标签页')],
         defaultId: 0,
         cancelId: 0,
         noLink: true,
@@ -346,7 +359,10 @@ class DesktopTabManager {
     view.webContents.on('preload-error', (_event, _file, error) => {
       clearTimeout(entry.startupTimer)
       view.webContents.setBackgroundThrottling(true)
-      logger.warn('DesktopTabs', `${definition.title} 桥接加载失败：${error.message}`)
+      logger.warn(
+        'DesktopTabs',
+        __t('electron.logs.windows', '{0} 桥接加载失败：{1}', [definition.title, error.message]),
+      )
       this.update(id, { loading: false, error: '应用桥接加载失败，请重新打开' })
     })
     view.webContents.on('render-process-gone', () => {
@@ -414,7 +430,13 @@ class DesktopTabManager {
     if (typeof state.error === 'string') {
       clearTimeout(entry.startupTimer)
       sender.setBackgroundThrottling(true)
-      logger.warn('DesktopTabs', `${entry.tab.title} 界面启动失败：${state.error.slice(0, 1000)}`)
+      logger.warn(
+        'DesktopTabs',
+        __t('electron.logs.windows', '{0} 界面启动失败：{1}', [
+          entry.tab.title,
+          state.error.slice(0, 1000),
+        ]),
+      )
       this.update(entry.tab.id, {
         loading: false,
         error: `应用界面启动失败：${state.error.slice(0, 300)}`,
@@ -454,9 +476,11 @@ class DesktopTabManager {
   openHome(
     section?: string,
     conversation?: NonNullable<DesktopTabsState['homeNavigation']>['conversation'],
+    resource?: NonNullable<DesktopTabsState['homeNavigation']>['resource'],
   ): void {
     this.ensureHost()
-    if (section) this.homeNavigation = { section, revision: this.revision + 1, conversation }
+    if (section)
+      this.homeNavigation = { section, revision: this.revision + 1, conversation, resource }
     this.activate('home')
   }
 
@@ -500,10 +524,15 @@ class DesktopTabManager {
       if (!force && entry.tab.dirty && this.host && !this.host.isDestroyed()) {
         const result = await dialog.showMessageBox(this.host, {
           type: 'question',
-          title: '关闭应用标签',
-          message: `${entry.tab.title} 中还有尚未提交的文稿，确定关闭吗？`,
-          detail: '本地文稿草稿会保留，重新打开后可以继续编辑。',
-          buttons: ['继续编辑', '关闭标签页'],
+          title: __t('electron.ui.windows', '关闭应用标签'),
+          message: __t('electron.ui.windows', '{0} 中还有尚未提交的文稿，确定关闭吗？', [
+            entry.tab.title,
+          ]),
+          detail: __t('electron.ui.windows', '本地文稿草稿会保留，重新打开后可以继续编辑。'),
+          buttons: [
+            __t('electron.ui.windows', '继续编辑'),
+            __t('electron.ui.windows', '关闭标签页'),
+          ],
           defaultId: 0,
           cancelId: 0,
           noLink: true,
@@ -673,7 +702,10 @@ class DesktopTabManager {
       } else if (key === 'w') {
         event.preventDefault()
         void this.close(this.activeTabId).catch((error) =>
-          logger.warn('DesktopTabs', `关闭标签失败：${String(error)}`),
+          logger.warn(
+            'DesktopTabs',
+            __t('electron.logs.windows', '关闭标签失败：{0}', [String(error)]),
+          ),
         )
       } else if (key === 'tab') {
         event.preventDefault()

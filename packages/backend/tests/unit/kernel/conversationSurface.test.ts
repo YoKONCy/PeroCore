@@ -4,6 +4,29 @@ import { ConversationSurfaceSession } from '@infos/backend/projections/conversat
 import { ConversationSurfaceProjector } from '@infos/backend/projections/conversationSurfaceProjector'
 
 describe('Conversation Surface Session', () => {
+  it('队列实时快照包含已生成正文和工具参数，可在断线后直接接续观察', () => {
+    const session = new ConversationSurfaceSession('thread', 'pero', 'run', true)
+    session.open()
+    session.startNarration('text')
+    session.appendText('text', '已生成的进度')
+    session.startToolDraft('draft')
+    session.appendToolDraft('draft', 'read_file', '{"path":"a.ts"}', 15)
+    const snapshot = session.liveSnapshot()
+    expect(snapshot.state).toBe('open')
+    expect(snapshot.nodes).toContainEqual(
+      expect.objectContaining({
+        kind: 'markdown',
+        props: expect.objectContaining({ source: '已生成的进度' }),
+      }),
+    )
+    expect(snapshot.nodes).toContainEqual(
+      expect.objectContaining({
+        kind: 'tool-call',
+        props: expect.objectContaining({ name: 'read_file', args: '{"path":"a.ts"}' }),
+      }),
+    )
+    expect(snapshot.sequence).toBeGreaterThan(0)
+  })
   it('流式提交保留暂停终态，不再覆盖成输出完成', () => {
     const message = { messageId: '42', executionPause: { kind: 'desktop', message: '用户已接管' } }
     const surface = {

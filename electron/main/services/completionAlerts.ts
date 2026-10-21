@@ -1,3 +1,4 @@
+import { t as __t } from '../utils/i18n'
 import path from 'node:path'
 import { app, Notification } from 'electron'
 import { paths } from '../utils/env'
@@ -22,7 +23,9 @@ function openResult(alert: CompletionAlert): void {
         taskId: alert.taskId,
       })
     })
-    .catch((error) => logger.warn('完成通知结果跳转失败', String(error)))
+    .catch((error) =>
+      logger.warn(__t('electron.logs.completionAlerts', '完成通知结果跳转失败'), String(error)),
+    )
 }
 
 export const completionAlerts = new CompletionAlertController(
@@ -38,13 +41,16 @@ export const completionAlerts = new CompletionAlertController(
       process.platform === 'win32' && app.isReady() && Notification.isSupported(),
     showNotification: (alert) => {
       const notification = new Notification({
-        title: `${alert.agentName} 完成了任务`,
+        title: __t('electron.ui.completionAlerts', '{0} 完成了任务', [alert.agentName]),
         body: alert.title,
         silent: true,
       })
       notification.on('click', () => openResult(alert))
       notification.on('failed', (_event, error) =>
-        logger.warn('Windows 完成通知发送失败', String(error)),
+        logger.warn(
+          __t('electron.logs.completionAlerts', 'Windows 完成通知发送失败'),
+          String(error),
+        ),
       )
       notification.show()
     },

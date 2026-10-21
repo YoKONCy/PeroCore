@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 import type { Readable, Writable } from 'node:stream'
 import { createInterface } from 'node:readline'
 import { createLogger } from '../../lib/logger'
@@ -77,7 +78,9 @@ export class PackageStdioTransport implements PackageProcessTransport {
     try {
       message = JSON.parse(text) as PackageRpcResponse | PackageRpcNotification
     } catch {
-      logger.debug(`忽略 Package Process 非 JSON 输出: ${text.slice(0, 100)}`)
+      logger.debug(
+        __t('logs.packages', '忽略 Package Process 非 JSON 输出: {0}', [text.slice(0, 100)]),
+      )
       return
     }
     if ('id' in message && message.id !== null) {

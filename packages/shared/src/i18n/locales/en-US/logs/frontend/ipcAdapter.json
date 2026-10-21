@@ -1,0 +1,8 @@
+{
+  "本机资产扫描在浏览器模式不可用: {0}": "Native asset scanning is not available in browser mode: {0}",
+  "NapCat 在浏览器模式不可用: {0}": "NapCat is not available in browser mode: {0}",
+  "桌面感知功能在浏览器模式不可用: {0}": "desktop awareness function is not available in browser mode: {0}",
+  "Docker 模式下后端独立运行，跳过: {0}": "The backend runs independently in Docker mode, skip: {0}\nFor",
+  "Docker 模式请通过 HTTP API 获取日志": "Docker mode, please obtain logs through HTTP API",
+  "未处理的 IPC 通道: {0}": "Unhandled IPC channel: {0}"
+}

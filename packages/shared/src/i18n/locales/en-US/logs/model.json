@@ -1,0 +1,6 @@
+{
+  "模型多级回退顺序已更新": "model multi-level rollback sequence has been updated",
+  "模型配置已创建: {0} ({1})": "model configuration created: {0} ({1})",
+  "模型配置已更新: {0}": "model configuration has been updated: {0}",
+  "模型配置已删除: {0} ({1})": "model configuration deleted: {0} ({1})"
+}

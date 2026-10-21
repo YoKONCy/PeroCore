@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /**
  * PToast — 全局 Toast 通知容器
  *
@@ -47,10 +49,18 @@ const iconMap: Record<string, string> = {
 
 /** 默认标题 */
 const defaultTitleMap: Record<string, string> = {
-  info: '提示',
-  success: '成功',
-  warning: '警告',
-  error: '错误',
+  get info() {
+    return __t('ui.notification', '提示')
+  },
+  get success() {
+    return __t('ui.notification', '成功')
+  },
+  get warning() {
+    return __t('ui.notification', '警告')
+  },
+  get error() {
+    return __t('ui.notification', '错误')
+  },
 }
 </script>
 
@@ -67,9 +77,15 @@ const defaultTitleMap: Record<string, string> = {
           <div class="toast-header">
             <span class="toast-icon">{{ iconMap[toast.type] ?? '💠' }}</span>
             <span class="toast-title">
-              {{ toast.title || defaultTitleMap[toast.type] || '提示' }}
+              {{ toast.title || defaultTitleMap[toast.type] || __t('ui.notification', '提示') }}
             </span>
-            <button class="toast-close" aria-label="关闭通知" @click="dismiss(toast.id)">✕</button>
+            <button
+              class="toast-close"
+              :aria-label="__t('ui.notification', '关闭通知')"
+              @click="dismiss(toast.id)"
+            >
+              ✕
+            </button>
           </div>
 
           <!-- 消息体 -->

@@ -1,3 +1,4 @@
+import { providerApiUrl } from './providerUrl'
 import { normalizeTokenUsage } from '../usage'
 import { combinedOutputLimit, fetchLlmResponse } from '../requestPolicy'
 import { geminiReasoningEffort } from '../geminiThinking'
@@ -143,7 +144,11 @@ export class OpenAiResponsesProvider implements LlmProvider {
       headers: this.headers(),
       signal: AbortSignal.timeout(10_000),
     })
-    if (!response.ok) return []
+    if (!response.ok)
+      throw this.error(`获取模型列表失败：HTTP ${response.status}`, {
+        status: response.status,
+        retryable: false,
+      })
     const data = (await response.json()) as { data?: Array<{ id?: string }> }
     return (data.data ?? []).flatMap((item) => (item.id ? [item.id] : [])).sort()
   }
@@ -323,12 +328,14 @@ export class OpenAiResponsesProvider implements LlmProvider {
   }
 
   private headers(): Record<string, string> {
-    return { 'Content-Type': 'application/json', Authorization: `Bearer ${this.config.apiKey}` }
+    return {
+      'Content-Type': 'application/json',
+      ...(this.config.apiKey ? { Authorization: `Bearer ${this.config.apiKey}` } : {}),
+    }
   }
 
   private url(path: string): string {
-    const base = this.config.apiBase.replace(/\/$/, '')
-    return base.endsWith('/v1') ? `${base}${path}` : `${base}/v1${path}`
+    return providerApiUrl(this.config.apiBase, path)
   }
 
   private error(message: string, data: Record<string, unknown> = {}): AppError {

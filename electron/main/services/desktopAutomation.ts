@@ -1,3 +1,4 @@
+import { t as __t } from '../utils/i18n'
 import { logger } from '../utils/logger'
 import { windowsDesktop } from './windowsDesktop'
 
@@ -20,7 +21,10 @@ function loadRuntime(): Promise<NutModule> {
     // 使用静态包名，让打包器识别主进程运行依赖；首次操作时才加载原生组件。
     runtimePromise = import('@nut-tree-fork/nut-js')
       .then((module) => {
-        logger.info('DesktopAutomation', '桌面自动化组件已在 Electron 能力进程加载')
+        logger.info(
+          'DesktopAutomation',
+          __t('electron.logs.desktopAutomation', '桌面自动化组件已在 Electron 能力进程加载'),
+        )
         return module as unknown as NutModule
       })
       .catch((error: unknown) => {

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../../i18n/index'
+
 import { computed, nextTick, ref, watch } from 'vue'
 import type { MessageResource } from '@infos/shared'
 import { attachmentsApi } from '../../../api/modules/attachmentsApi'
@@ -71,16 +73,16 @@ function retry() {
 </script>
 
 <template>
-  <section class="tool-image" aria-label="图片浏览">
+  <section class="tool-image" :aria-label="__t('ui.tools', '图片浏览')">
     <header>
       <PixelIcon name="image" size="sm" />
-      <strong :title="preview?.name">{{ preview?.name || '图片' }}</strong>
+      <strong :title="preview?.name">{{ preview?.name || __t('ui.tools', '图片') }}</strong>
       <small v-if="dimensions">{{ dimensions }}</small>
     </header>
     <template v-if="preview && active">
       <div v-if="failed" class="tool-image__empty" role="status">
-        <span>图片已不可用</span>
-        <button type="button" @click="retry">重试</button>
+        <span>{{ __t('ui.tools', '图片已不可用') }}</span>
+        <button type="button" @click="retry">{{ __t('ui.tools', '重试') }}</button>
       </div>
       <button
         v-else
@@ -89,8 +91,8 @@ function retry() {
         class="tool-image__frame"
         :class="{ loaded }"
         :disabled="!loaded"
-        title="放大图片"
-        aria-label="放大图片"
+        :title="__t('ui.tools', '放大图片')"
+        :aria-label="__t('ui.tools', '放大图片')"
         aria-haspopup="dialog"
         @click="openViewer"
       >
@@ -104,13 +106,15 @@ function retry() {
           @load="imageLoaded"
           @error="failed = true"
         />
-        <span v-if="!loaded" class="tool-image__loading" role="status">正在加载图片…</span>
+        <span v-if="!loaded" class="tool-image__loading" role="status">
+          {{ __t('ui.tools', '正在加载图片…') }}
+        </span>
         <span v-else class="tool-image__expand"><PixelIcon name="search" size="sm" /></span>
       </button>
     </template>
     <PDialog
       v-model="viewerOpen"
-      :title="preview?.name || '图片'"
+      :title="preview?.name || __t('ui.tools', '图片')"
       width="min(1200px, calc(100vw - 32px))"
     >
       <div
@@ -135,7 +139,7 @@ function retry() {
       </div>
       <template #footer>
         <small class="tool-image__hint">
-          {{ dimensions }} · 滚轮缩放 · 拖动平移 · 双击切换原始尺寸
+          {{ dimensions }} {{ __t('ui.tools', '· 滚轮缩放 · 拖动平移 · 双击切换原始尺寸') }}
         </small>
       </template>
     </PDialog>

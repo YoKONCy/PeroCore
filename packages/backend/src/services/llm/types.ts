@@ -7,6 +7,8 @@
  * @module packages/backend/src/services/llm/types
  */
 
+import type { ReasoningEffort } from '@infos/shared'
+
 // ─────────────────────────────────────────────
 // 消息类型 (以 OpenAI 格式为基准)
 // ─────────────────────────────────────────────
@@ -73,7 +75,7 @@ export interface ToolDefinition {
 // ─────────────────────────────────────────────
 
 /** 模型推理强度；undefined 表示完全不向 Provider 传参。 */
-export type ReasoningEffort = 'off' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+export type { ReasoningEffort } from '@infos/shared'
 export type LlmWireApi = 'chat_completions' | 'responses'
 export type ReasoningDialect = 'auto' | 'openai' | 'deepseek' | 'openrouter' | 'generic'
 
@@ -130,6 +132,8 @@ export interface ChatOptions {
   retryPartialResponse?: boolean
   /** 本地重试通知，不发送给 Provider。 */
   onRetry?: (retry: import('@infos/shared').ModelRetryInfo) => void
+  /** 每次真实模型尝试前执行通道限流等准入逻辑，重试与回退也不能绕过。 */
+  beforeAttempt?: () => Promise<void>
 }
 
 // ─────────────────────────────────────────────

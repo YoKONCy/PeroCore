@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /** 角色头像的共享状态浮层；完整文本可选中、滚动，且不改变角色选择。 */
 import { computed, nextTick, onBeforeUnmount, onDeactivated, ref, useId, watch } from 'vue'
 import { usePetStateStore } from '../../stores/usePetStateStore'
@@ -167,29 +169,29 @@ onBeforeUnmount(() => {
           <header class="agent-state-card__header">
             <PixelIcon name="sparkle" size="xs" />
             <strong>{{ agentName }}</strong>
-            <span>当前状态</span>
+            <span>{{ __t('ui.agent', '当前状态') }}</span>
           </header>
           <p v-if="loading && !hasState" class="agent-state-card__notice" role="status">
-            正在读取角色状态…
+            {{ __t('ui.agent', '正在读取角色状态…') }}
           </p>
           <dl v-if="hasState" class="agent-state-card__fields">
             <div>
-              <dt>心情</dt>
-              <dd>{{ state.mood || '暂无心情记录' }}</dd>
+              <dt>{{ __t('ui.agent', '心情') }}</dt>
+              <dd>{{ state.mood || __t('ui.agent', '暂无心情记录') }}</dd>
             </div>
             <div>
-              <dt>外在表现 · Vibe</dt>
-              <dd>{{ state.vibe || '暂无外在表现记录' }}</dd>
+              <dt>{{ __t('ui.agent', '外在表现 · Vibe') }}</dt>
+              <dd>{{ state.vibe || __t('ui.agent', '暂无外在表现记录') }}</dd>
             </div>
             <div>
-              <dt>内心想法</dt>
-              <dd>{{ state.mind || '暂无内心想法记录' }}</dd>
+              <dt>{{ __t('ui.agent', '内心想法') }}</dt>
+              <dd>{{ state.mind || __t('ui.agent', '暂无内心想法记录') }}</dd>
             </div>
           </dl>
           <footer v-if="error" class="agent-state-card__notice" role="status">
-            <span>{{ hasState ? '刷新失败，当前显示已缓存的状态' : error }}</span>
+            <span>{{ hasState ? __t('ui.agent', '刷新失败，当前显示已缓存的状态') : error }}</span>
             <button type="button" :disabled="loading" @click="stateStore.refresh(agentId, true)">
-              {{ loading ? '读取中…' : '重试' }}
+              {{ loading ? __t('ui.agent', '读取中…') : __t('ui.agent', '重试') }}
             </button>
           </footer>
         </section>

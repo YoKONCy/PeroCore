@@ -1,3 +1,4 @@
+import { t as __t } from '../../../lib/i18n'
 /**
  * API Reranker Provider — OpenAI/Cohere/Jina 兼容
  *
@@ -33,7 +34,9 @@ export interface RerankerConfig {
 
 export class ApiRerankerProvider implements RerankerProvider {
   constructor(private config: RerankerConfig) {
-    logger.info(`Reranker 初始化: model=${config.model}, base=${config.apiBase}`)
+    logger.info(
+      __t('logs.embedding', 'Reranker 初始化: model={0}, base={1}', [config.model, config.apiBase]),
+    )
   }
 
   /**
@@ -84,7 +87,7 @@ export class ApiRerankerProvider implements RerankerProvider {
       const code = response.status === 429 ? 'RATE_LIMITED' : 'EXTERNAL_ERROR'
 
       const error = upstreamHttpError(response, errBody, 'Reranker API', code)
-      logger.error('Reranker API 失败', {
+      logger.error(__t('logs.embedding', 'Reranker API 失败'), {
         status: response.status,
         reason: error.message,
         model: this.config.model,

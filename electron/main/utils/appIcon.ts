@@ -1,3 +1,4 @@
+import { t as __t } from './i18n'
 import { app, nativeImage, type NativeImage } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
@@ -45,10 +46,16 @@ export function loadSystemIcon(size: number): NativeImage | undefined {
         iconsBySize.set(size, resized)
         return resized
       } catch (error) {
-        logger.warn('AppIcon', `系统图标读取失败，继续查找其他路径：${iconPath}；${String(error)}`)
+        logger.warn(
+          'AppIcon',
+          __t('electron.logs.utils', '系统图标读取失败，继续查找其他路径：{0}；{1}', [
+            iconPath,
+            String(error),
+          ]),
+        )
       }
     }
   }
-  logger.warn('AppIcon', '未找到可用的原版系统图标')
+  logger.warn('AppIcon', __t('electron.logs.utils', '未找到可用的原版系统图标'))
   return undefined
 }

@@ -1,3 +1,4 @@
+import { t as __t } from '../i18n'
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { desktop, fileBase64, pictoria, standalone } from '../services/transport'
 import { normalizeCreationPreferences } from '../services/creationPreferences'
@@ -31,7 +32,9 @@ function assetIds(value: unknown): string[] {
 export function useCanvas() {
   const project = reactive<Project>({
     id: uid(),
-    title: '未命名画布',
+    get title() {
+      return __t('apps.pictoria.ui', '未命名画布')
+    },
     revision: 0,
     items: [],
     creation: normalizeCreationPreferences(undefined),
@@ -489,7 +492,7 @@ export function useCanvas() {
     const definition = JSON.parse(
       JSON.stringify({
         id: project.id,
-        title: project.title.trim() || '未命名画布',
+        title: project.title.trim() || __t('apps.pictoria.ui', '未命名画布'),
         collectionId: project.collectionId ?? null,
         items: project.items,
         edges: project.edges || [],
@@ -651,7 +654,15 @@ export function useCanvas() {
       return
     }
     if (dirty.value) remember()
-    loadDocument({ id: uid(), title: '未命名画布', revision: 0, collectionId, items: [] })
+    loadDocument({
+      id: uid(),
+      get title() {
+        return __t('apps.pictoria.ui', '未命名画布')
+      },
+      revision: 0,
+      collectionId,
+      items: [],
+    })
     dirty.value = true
     remember()
     if (online.value) await save()
@@ -670,7 +681,15 @@ export function useCanvas() {
         if (previousOwner && dirty.value) remember()
         agentId.value = data.agents[0]?.id || ''
         if (previousOwner !== agentId.value) removedCollections.clear()
-        if (previousOwner) loadDocument({ id: uid(), title: '未命名画布', revision: 0, items: [] })
+        if (previousOwner)
+          loadDocument({
+            id: uid(),
+            get title() {
+              return __t('apps.pictoria.ui', '未命名画布')
+            },
+            revision: 0,
+            items: [],
+          })
       }
       if (!online.value || !agentId.value) return
       localStorage.setItem('pictoria.agent', agentId.value)
@@ -742,7 +761,14 @@ export function useCanvas() {
     removedCollections.clear()
     projects.value = []
     collections.value = []
-    loadDocument({ id: uid(), title: '未命名画布', revision: 0, items: [] })
+    loadDocument({
+      id: uid(),
+      get title() {
+        return __t('apps.pictoria.ui', '未命名画布')
+      },
+      revision: 0,
+      items: [],
+    })
     await connect()
   }
   async function listAll<T>(owner: string, operation: string): Promise<T[]> {
@@ -864,6 +890,112 @@ export function useCanvas() {
       return false
     } finally {
       releaseHierarchy()
+    }
+  }
+  async function renameProject(id: string, title: string) {
+    if (disposed || hierarchyBusy.value || loading.value || saving.value || importing.value)
+      return false
+    const name = title.trim()
+    if (!name || name.length > 120) {
+      error.value = '画布名称须为 1 至 120 个字符'
+      return false
+    }
+    if (id === project.id) {
+      const owner = agentId.value,
+        generation = context
+      if (project.title !== name) {
+        checkpoint()
+        project.title = name
+      }
+      await nextTick()
+      if (disposed || generation !== context || owner !== agentId.value) return false
+      remember()
+      return online.value ? await save() : true
+    }
+    if (!online.value) return false
+    const canvas = projects.value.find((item) => item.id === id)
+    if (!canvas) return false
+    const owner = agentId.value,
+      generation = context
+    hierarchyBusy.value = true
+    error.value = ''
+    try {
+      // 只更新名称，避免用列表中的旧快照覆盖画布内容。
+      const saved = await pictoria.operation<Project>(owner, 'project.rename', {
+        id,
+        title: name,
+        expectedRevision: canvas.revision,
+      })
+      if (disposed || generation !== context || owner !== agentId.value) return false
+      projects.value = projects.value.map((item) => (item.id === saved.id ? saved : item))
+      return true
+    } catch (e) {
+      if (!disposed && generation === context && owner === agentId.value) {
+        error.value = e instanceof Error ? e.message : '画布重命名失败'
+        await refreshHierarchy(owner).catch(() => {})
+      }
+      return false
+    } finally {
+      if (!disposed) releaseHierarchy()
+    }
+  }
+  async function removeProject(id: string) {
+    if (disposed || hierarchyBusy.value || loading.value || importing.value) return false
+    const owner = agentId.value,
+      generation = context
+    hierarchyBusy.value = true
+    try {
+      // 先等待在途保存结束，再按最新版本删除，避免保存请求把画布重新写回。
+      if (activeSave) await activeSave
+      await nextTick()
+      if (disposed || generation !== context || owner !== agentId.value) return false
+      const canvas = id === project.id ? project : projects.value.find((item) => item.id === id)
+      if (!canvas) return false
+      error.value = ''
+      if (canvas.revision > 0) {
+        if (!online.value) {
+          error.value = '请连接创作后台后再删除已保存的画布'
+          return false
+        }
+        await pictoria.operation(owner, 'project.delete', {
+          id,
+          expectedRevision: canvas.revision,
+        })
+      }
+      // 删除已确认后清理草稿；即使组件已关闭，也不能在下次启动时恢复旧画布。
+      let draftCleanupFailed = false
+      try {
+        localStorage.removeItem(`pictoria.canvas.${owner || 'local'}.${id}`)
+        localStorage.removeItem(`pictoria.canvas.${owner || 'local'}.${id}.conflict`)
+        const lastKey = `pictoria.last.${owner || 'local'}`
+        if (localStorage.getItem(lastKey) === id) localStorage.removeItem(lastKey)
+      } catch {
+        draftCleanupFailed = true
+      }
+      if (disposed || generation !== context || owner !== agentId.value) return false
+      projects.value = projects.value.filter((item) => item.id !== id)
+      if (project.id === id) {
+        loadDocument({
+          id: uid(),
+          get title() {
+            return __t('apps.pictoria.ui', '未命名画布')
+          },
+          revision: 0,
+          items: [],
+        })
+      }
+      notice.value = draftCleanupFailed
+        ? '画布已删除，但此设备的本地草稿清理失败'
+        : '画布已删除，素材库中的素材已保留'
+      return true
+    } catch (e) {
+      if (!disposed && generation === context && owner === agentId.value) {
+        error.value = e instanceof Error ? e.message : '画布删除失败'
+        await refreshHierarchy(owner).catch(() => {})
+      }
+      return false
+    } finally {
+      if (!disposed) releaseHierarchy()
     }
   }
   async function createRun(
@@ -1056,7 +1188,7 @@ export function useCanvas() {
         : null,
       id: uid(),
       revision: 0,
-      title: `${draft.title}（本地副本）`.slice(0, 120),
+      title: __t('apps.pictoria.ui', '{0}（本地副本）', [draft.title]).slice(0, 120),
     })
     dirty.value = true
     remember()
@@ -1073,7 +1205,7 @@ export function useCanvas() {
         : null,
       id: uid(),
       revision: 0,
-      title: `${copy.title}（副本）`.slice(0, 120),
+      title: __t('apps.pictoria.ui', '{0}（副本）', [copy.title]).slice(0, 120),
     })
     dirty.value = true
     remember()
@@ -1201,6 +1333,8 @@ export function useCanvas() {
     saveCollection,
     moveToCollection,
     removeCollection,
+    renameProject,
+    removeProject,
     steps,
     library,
     selected,

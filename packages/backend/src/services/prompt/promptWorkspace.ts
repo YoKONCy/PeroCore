@@ -10,7 +10,7 @@ import type {
   PromptRelease,
   PromptWorkspaceView,
 } from '@infos/shared'
-import { promptFormat, ST_UTILITY_FIELDS } from '@infos/shared'
+import { promptFormat, ST_UTILITY_FIELDS, WHOLESOME_MODE_KEY } from '@infos/shared'
 import type { ConfigRepository } from '../../repositories/config.repo'
 import { AppError } from '../../lib/appError'
 import { tokenCounter } from '../tokenizer/tokenCounter'
@@ -18,6 +18,7 @@ import { promptFingerprint } from '../llm/promptCache'
 import type { ChatMessage, ChatOptions } from '../llm/types'
 import type { MdpEngine, RenderedMessage } from './mdpEngine'
 import { TASK_PROMPTS } from './taskPrompts'
+import { builtinBodyHash, synchronizeBuiltinDocument } from './builtinPromptMigration'
 import { createLogger } from '../../lib/logger'
 import { assembleSillyTavern, sillyTavernIssues } from './sillyTavernFramework'
 import { SillyTavernVariableStore } from './sillyTavernVariables'
@@ -34,7 +35,9 @@ export async function readPromptPersona(filePath?: string): Promise<string> {
   }
 }
 const TEMPLATE_LABELS: Record<string, string> = {
+  'components/state/turn_context': '本轮上下文',
   'components/rules/system_core': '基础规则',
+  'components/rules/wholesome_mode': '健全模式',
   'components/output/output_constraint': '输出约定',
   'components/abilities/interaction_mode': '交互模式',
   'components/abilities/private_flow_protocol': '私有心流',
@@ -100,6 +103,10 @@ export const promptBundleSchema = z.object({
         role,
         enabled: z.boolean(),
         builtin: z.boolean().optional(),
+        builtinBodyHash: z
+          .string()
+          .regex(/^[a-f0-9]{64}$/)
+          .optional(),
         variables: z.array(id).max(100),
       }),
     )
@@ -278,6 +285,7 @@ export const PROMPT_VARIABLES = [
   ['vibe', '状态'],
   ['mind', '心声'],
   ['realm_execution', '据点执行'],
+  ['wholesome_mode_enabled', '健全模式启用'],
   ['weather_location', '天气地点'],
   ['weather_info', '当前天气'],
   ['capability_fragments', '能力模板键'],
@@ -405,10 +413,16 @@ export class PromptWorkspace {
         role: prompt.meta.role ?? 'system',
         enabled: prompt.meta.enabled !== false,
         builtin: true,
+        builtinBodyHash: builtinBodyHash(prompt.content),
         variables,
       })
     }
-    documents.push(...Object.values(TASK_PROMPTS).map(copy))
+    documents.push(
+      ...Object.values(TASK_PROMPTS).map((document) => ({
+        ...copy(document),
+        builtinBodyHash: builtinBodyHash(document.body),
+      })),
+    )
     const main: PromptFramework = {
       id: 'builtin.main',
       name: 'infOS 默认',
@@ -525,7 +539,7 @@ export class PromptWorkspace {
     )
   }
 
-  /** 后注册应用的模板只补入不存在的键，不覆盖用户已经发布的正文。 */
+  /** 补入后注册模板，并按原文指纹升级未改动的内置正文；不覆盖用户定制或发布原件。 */
   private withNewDefaults(bundle: PromptBundle): PromptBundle {
     const result = copy(bundle)
     for (const framework of result.frameworks) framework.format ??= promptFormat(framework)
@@ -614,6 +628,7 @@ export class PromptWorkspace {
         doc.body === original.body.replace('{{ agent_name }}，你好。', '{{ agent_name }，你好。')
       )
         doc.body = original.body
+      if (original) synchronizeBuiltinDocument(doc, original)
       const oldLabel = this.engine.getPrompt(doc.id)?.meta.label
       if (
         original &&
@@ -761,7 +776,54 @@ export class PromptWorkspace {
       inherited && doc?.body === original?.content
         ? inherited.content
         : (doc?.body ?? file!.content)
-    return this.renderSource(snapshot, body, vars, [...stack, target], budget)
+    const content = this.renderSource(snapshot, body, vars, [...stack, target], budget)
+    if (key === 'components/rules/system_core') {
+      const wholesome = this.wholesomeContent(snapshot, vars, [...stack, target], budget)
+      return wholesome && !content.includes(wholesome)
+        ? [content, wholesome].filter(Boolean).join('\n\n')
+        : content
+    }
+    return content
+  }
+
+  private wholesomeContent(
+    snapshot: PromptSnapshot,
+    vars: Record<string, unknown>,
+    stack: string[] = [],
+    budget: RenderBudget = { calls: 0 },
+  ): string {
+    if (vars.wholesome_mode_enabled === false) return ''
+    const key = 'components/rules/wholesome_mode'
+    if (!snapshot.bundle.documents.some((doc) => doc.id === key) && !this.engine.getPrompt(key))
+      return ''
+    return this.renderDocument(snapshot, key, vars, stack, budget)
+  }
+
+  /** 未使用 system_core 的社交或导入框架也遵守全局开关，且不改写发布原件。 */
+  private withWholesomeMode<T extends { messages: RenderedMessage[]; preview: PromptPreview }>(
+    result: T,
+    snapshot: PromptSnapshot,
+    vars: Record<string, unknown>,
+  ): T {
+    const content = this.wholesomeContent(snapshot, vars)
+    if (
+      !content ||
+      result.messages.some(
+        (message) => message.role === 'system' && message.content.includes(content),
+      )
+    )
+      return result
+    const tokens = tokenCounter.countTokens(content)
+    result.messages.unshift({ role: 'system', content, slotId: 'system_core/wholesome_mode' })
+    result.preview.segments.unshift({
+      id: 'system_core/wholesome_mode',
+      source: 'components/rules/wholesome_mode',
+      role: 'system',
+      content,
+      tokens,
+    })
+    result.preview.tokens += tokens
+    return result
   }
 
   private renderSource(
@@ -801,7 +863,17 @@ export class PromptWorkspace {
       framework && promptFormat(framework) === 'sillytavern' && sessionId
         ? await this.variableStore.snapshot(sessionId)
         : undefined
-    const result = this.assemble(snapshot, channel, agentId, input, undefined, state)
+    const result = this.assemble(
+      snapshot,
+      channel,
+      agentId,
+      {
+        ...input,
+        wholesome_mode_enabled: (await this.repo.get(WHOLESOME_MODE_KEY)) !== 'false',
+      },
+      undefined,
+      state,
+    )
     const effects = result.variableEffects
     return {
       ...result,
@@ -853,10 +925,14 @@ export class PromptWorkspace {
       __framework_id: selected,
     }
     if (promptFormat(framework) === 'sillytavern')
-      return {
-        ...assembleSillyTavern(framework, snapshot.id, vars, variableState),
-        format: 'sillytavern',
-      }
+      return this.withWholesomeMode(
+        {
+          ...assembleSillyTavern(framework, snapshot.id, vars, variableState),
+          format: 'sillytavern',
+        },
+        snapshot,
+        vars,
+      )
     for (const binding of framework.bindings) {
       if (!this.matches(snapshot, binding.when, vars)) {
         vars[binding.name] = ''
@@ -960,23 +1036,27 @@ export class PromptWorkspace {
     }
     if (segments.reduce((sum, segment) => sum + segment.content.length, 0) > 4_000_000)
       fail('提示词总内容过大，请缩小装配范围')
-    return {
-      messages: segments.map((s) => ({
-        role: s.role,
-        content: s.content,
-        slotId: s.id,
-        nativeContent: nativeContents.get(s.id),
-        historyMessage: s.source === 'native_history',
-        historyCache: historyCache.get(s.id),
-      })),
-      preview: {
-        frameworkId: framework.id,
-        revision: snapshot.id,
-        segments,
-        tokens: segments.reduce((n, s) => n + s.tokens, 0),
-        issues: [],
+    return this.withWholesomeMode(
+      {
+        messages: segments.map((s) => ({
+          role: s.role,
+          content: s.content,
+          slotId: s.id,
+          nativeContent: nativeContents.get(s.id),
+          historyMessage: s.source === 'native_history',
+          historyCache: historyCache.get(s.id),
+        })),
+        preview: {
+          frameworkId: framework.id,
+          revision: snapshot.id,
+          segments,
+          tokens: segments.reduce((n, s) => n + s.tokens, 0),
+          issues: [],
+        },
       },
-    }
+      snapshot,
+      vars,
+    )
   }
 
   prepareTask(messages: ChatMessage[], opts: ChatOptions): ChatMessage[] {

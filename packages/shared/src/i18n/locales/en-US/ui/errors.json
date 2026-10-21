@@ -1,0 +1,19 @@
+{
+  "AI 服务异常": "AI service abnormality",
+  "AI 服务繁忙": "AI service is busy",
+  "AI 响应超时": "AI response timeout",
+  "向量服务异常": "vector service exception",
+  "工具调用失败": "Tool call failed",
+  "模型未配置": "model is not configured",
+  "Agent 未找到": "Agent not found",
+  "配置异常": "configuration abnormality",
+  "数据库错误": "database error",
+  "网络连接失败": "Network connection failed",
+  "流式传输中断": "Streaming Interrupted",
+  "请求频率过高": "request frequency is too high",
+  "服务响应超时": "service response timeout",
+  "服务不可用": "service is unavailable",
+  "服务启动中": "service starting",
+  "认证失败": "authentication failed",
+  "内部错误": "internal error"
+}

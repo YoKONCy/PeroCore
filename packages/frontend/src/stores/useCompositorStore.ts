@@ -1,3 +1,4 @@
+import { t as __t } from '../i18n/index'
 /**
  * useCompositorStore — 响应式状态仓储
  *
@@ -285,7 +286,13 @@ export const useCompositorStore = defineStore('compositor', () => {
       return {
         ...node,
         revision: node.revision + 1,
-        props: { ...props, state: 'cancelled' as const, message: '已终止' },
+        props: {
+          ...props,
+          state: 'cancelled' as const,
+          get message() {
+            return __t('ui.useCompositorStore', '已终止')
+          },
+        },
       }
     })
     const next = new Map(surfaces.value)

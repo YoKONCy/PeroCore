@@ -1,3 +1,4 @@
+import { t as __t } from '../../../../i18n/index'
 /**
  * Bedrock 动画控制器
  *
@@ -156,7 +157,10 @@ export class BedrockAnimationController {
   private enterState(stateName: string): void {
     const nextState = this.states.get(stateName)
     if (!nextState) {
-      logger.warn('AnimationController', `未找到状态: ${stateName}`)
+      logger.warn(
+        'AnimationController',
+        __t('logs.frontend.avatar', '未找到状态: {0}', [stateName]),
+      )
       return
     }
 
@@ -193,10 +197,14 @@ export class BedrockAnimationController {
     this.currentState = nextState
     this.stateTime = 0
 
-    logger.debug('AnimationController', `控制器 ${this.name} 状态转换`, {
-      from: prevStateName,
-      to: stateName,
-    })
+    logger.debug(
+      'AnimationController',
+      __t('logs.frontend.avatar', '控制器 {0} 状态转换', [this.name]),
+      {
+        from: prevStateName,
+        to: stateName,
+      },
+    )
 
     // 执行新状态的进入指令 (on_entry)
     if (this.currentState.def.on_entry) {
@@ -261,7 +269,11 @@ export class AnimationControllerSystem {
       const json = (await response.json()) as IBedrockControllerJson
       this.loadFromJson(json)
     } catch (e) {
-      logger.error('AnimationControllerSystem', `从 ${url} 加载控制器出错`, e)
+      logger.error(
+        'AnimationControllerSystem',
+        __t('logs.frontend.avatar', '从 {0} 加载控制器出错', [url]),
+        e,
+      )
     }
   }
 

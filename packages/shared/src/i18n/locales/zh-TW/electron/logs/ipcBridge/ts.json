@@ -1,0 +1,8 @@
+{
+  "正在注册 IPC 通道...": "正在註冊 IPC 通道...",
+  "IPC 通道注册完成": "IPC 通道註冊完成",
+  "resize-pet-window 失败: {0}": "resize-pet-window 失敗: {0}",
+  "start-backend 已废弃：Daemon 独立运行，无需 Electron 启动": "start-backend 已廢棄：Daemon 獨立運行，無需 Electron 啟動",
+  "stop-backend 已废弃：Daemon 生命周期由自身管理": "stop-backend 已廢棄：Daemon 生命週期由自身管理",
+  "管理页入口初始化失败": "管理頁入口初始化失敗"
+}

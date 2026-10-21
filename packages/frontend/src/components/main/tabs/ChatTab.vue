@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../../i18n/index'
+
 /**
  * ChatTab — 对话 Tab (重构版)
  *
@@ -11,7 +13,8 @@
  * 设计语言: Arc 现代骨架 + 像素萌系品牌细节
  * @see .docs/S06_UI_UX_DESIGN_SPEC.md
  */
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, inject, onMounted, onBeforeUnmount, watch, nextTick, type Ref } from 'vue'
+import { useMobileLayout } from '../../../composables/ui/useMobileLayout'
 import { useConversationNavigation } from '../../../composables/chat/useConversationNavigation'
 import { ChatContainer } from '../../chat'
 import AgentStateHover from '../../agent/AgentStateHover.vue'
@@ -90,7 +93,10 @@ async function followNavigation() {
       draftRequest.value = { text: request.draft, revision: request.revision }
   } catch (error) {
     if (generation !== navigationGeneration) return
-    notify.toast(error instanceof Error ? error.message : '无法定位桌宠回复', { type: 'error' })
+    notify.toast(
+      error instanceof Error ? error.message : __t('ui.navigation', '无法定位桌宠回复'),
+      { type: 'error' },
+    )
   } finally {
     if (generation === navigationGeneration) {
       navigationBusy.value = false
@@ -124,7 +130,7 @@ async function exportCurrentHistory(options: HistoryExportOptions): Promise<void
   try {
     const response = await threadsApi.getProjection(threadStore.threadId)
     if (!response.data) throw new Error('服务端未返回会话历史')
-    const title = currentThreadTitle.value || '当前会话'
+    const title = currentThreadTitle.value || __t('ui.navigation', '当前会话')
     downloadMarkdown(
       title,
       buildConversationMarkdown(
@@ -140,16 +146,36 @@ async function exportCurrentHistory(options: HistoryExportOptions): Promise<void
       ),
     )
     showHistoryExport.value = false
-    notify.toast('历史记录已导出到客户端', { type: 'success' })
+    notify.toast(__t('ui.navigation', '历史记录已导出到客户端'), { type: 'success' })
   } catch (error) {
-    notify.toast(error instanceof Error ? error.message : '历史记录导出失败', { type: 'error' })
+    notify.toast(
+      error instanceof Error ? error.message : __t('ui.navigation', '历史记录导出失败'),
+      { type: 'error' },
+    )
   } finally {
     isExportingHistory.value = false
   }
 }
 
 // ── 侧边栏收起状态 ──
-const isSidebarCollapsed = ref(false)
+const { isMobile } = useMobileLayout()
+const sidebarCollapsed = ref(isMobile.value)
+const onboardingActive = inject<Ref<boolean>>('infos:onboarding-active', ref(false))
+// 导览期间临时展示伙伴与历史列表，结束后恢复原来的折叠状态。
+const isSidebarCollapsed = computed({
+  get: () => (onboardingActive.value && !isMobile.value ? false : sidebarCollapsed.value),
+  set: (value: boolean) => {
+    sidebarCollapsed.value = value
+  },
+})
+watch(isMobile, (value) => {
+  isSidebarCollapsed.value = value
+})
+function closeMobileSidebar(event: KeyboardEvent) {
+  if (isMobile.value && event.key === 'Escape') isSidebarCollapsed.value = true
+}
+onMounted(() => window.addEventListener('keydown', closeMobileSidebar))
+onBeforeUnmount(() => window.removeEventListener('keydown', closeMobileSidebar))
 const currentThreadTitle = ref('')
 
 function toggleSidebar() {
@@ -175,7 +201,8 @@ async function loadThreadHistory(agentId: string) {
     if (generation !== historyGeneration || activeAgent.value?.id !== agentId) return
     if (res.data?.items) threadHistory.value = res.data.items
   } catch (e) {
-    if (generation === historyGeneration) logger.warn('ChatTab', '加载历史会话失败', e)
+    if (generation === historyGeneration)
+      logger.warn('ChatTab', __t('logs.frontend.navigation', '加载历史会话失败'), e)
   } finally {
     if (generation === historyGeneration) isLoadingThreads.value = false
   }
@@ -187,7 +214,12 @@ async function requestDeleteThread(thread: ThreadInfo) {
     (threadStore.isGenerating && threadStore.threadId === thread.id) ||
     isAgentOccupied(thread.agentId)
   ) {
-    notify.toast('该角色仍有工作进行中，请先停止或等待完成', { type: 'error', title: '聊天会话' })
+    notify.toast(__t('ui.navigation', '角色忙碌中，请先停止任务'), {
+      type: 'error',
+      get title() {
+        return __t('ui.navigation', '聊天会话')
+      },
+    })
     return
   }
   threadPendingDelete.value = thread
@@ -195,7 +227,7 @@ async function requestDeleteThread(thread: ThreadInfo) {
     await rewind.open({
       threadId: thread.id,
       wholeThread: true,
-      title: thread.title || '未命名会话',
+      title: thread.title || __t('ui.navigation', '未命名会话'),
       onSuccess: async () => {
         threadHistory.value = threadHistory.value.filter((item) => item.id !== thread.id)
         if (threadStore.threadId === thread.id) {
@@ -203,14 +235,21 @@ async function requestDeleteThread(thread: ThreadInfo) {
           if (next) await switchThread(next)
           else threadStore.clearThread()
         }
-        notify.toast('会话已删除，文件保持原样', { type: 'success', title: '聊天会话' })
+        notify.toast(__t('ui.navigation', '会话已删除，文件保持原样'), {
+          type: 'success',
+          get title() {
+            return __t('ui.navigation', '聊天会话')
+          },
+        })
       },
     })
   } catch (err) {
     threadPendingDelete.value = null
-    notify.toast(err instanceof Error ? err.message : '回滚预检失败', {
+    notify.toast(err instanceof Error ? err.message : __t('ui.navigation', '回滚预检失败'), {
       type: 'error',
-      title: '聊天会话',
+      get title() {
+        return __t('ui.navigation', '聊天会话')
+      },
     })
   }
 }
@@ -226,11 +265,18 @@ async function confirmRenameThread(value?: string) {
       thread.id === target.id ? { ...thread, title } : thread,
     )
     if (threadStore.threadId === target.id) currentThreadTitle.value = title || '未命名会话'
-    notify.toast('会话标题已更新', { type: 'success', title: '聊天会话' })
+    notify.toast(__t('ui.navigation', '会话标题已更新'), {
+      type: 'success',
+      get title() {
+        return __t('ui.navigation', '聊天会话')
+      },
+    })
   } catch (err) {
-    notify.toast(err instanceof Error ? err.message : '会话改名失败', {
+    notify.toast(err instanceof Error ? err.message : __t('ui.navigation', '会话改名失败'), {
       type: 'error',
-      title: '聊天会话',
+      get title() {
+        return __t('ui.navigation', '聊天会话')
+      },
     })
   } finally {
     threadPendingRename.value = null
@@ -240,14 +286,18 @@ async function confirmRenameThread(value?: string) {
 /** 切换历史会话 */
 async function switchThread(thread: ThreadInfo) {
   if (conversationSelectionLocked.value || thread.agentId !== activeAgent.value?.id) return
-  if (thread.id === threadStore.threadId && !threadStore.navigationTarget) return
+  if (thread.id === threadStore.threadId && !threadStore.navigationTarget) {
+    if (isMobile.value) isSidebarCollapsed.value = true
+    return
+  }
   if (thread.id !== threadStore.threadId && isAgentOccupied(thread.agentId)) {
-    notify.toast('该角色正在执行后台任务或等待确认，暂不能切换会话', { type: 'error' })
+    notify.toast(__t('ui.navigation', '角色忙碌中，暂不能切换会话'), { type: 'error' })
     return
   }
   const result = await threadStore.loadThreadMessages(thread.id, thread.agentId)
   if (result.status !== 'loaded' || threadStore.threadId !== thread.id) return
   currentThreadTitle.value = thread.title || '未命名会话'
+  if (isMobile.value) isSidebarCollapsed.value = true
 }
 
 /** 格式化时间 */
@@ -260,10 +310,10 @@ function formatThreadTime(iso: string | null): string {
   const diffHours = Math.floor(diffMs / 3600000)
   const diffDays = Math.floor(diffMs / 86400000)
 
-  if (diffMins < 1) return '刚刚'
-  if (diffMins < 60) return `${diffMins}分钟前`
-  if (diffHours < 24) return `${diffHours}小时前`
-  if (diffDays < 7) return `${diffDays}天前`
+  if (diffMins < 1) return __t('ui.navigation', '刚刚')
+  if (diffMins < 60) return __t('ui.navigation', '{0}分钟前', [diffMins])
+  if (diffHours < 24) return __t('ui.navigation', '{0}小时前', [diffHours])
+  if (diffDays < 7) return __t('ui.navigation', '{0}天前', [diffDays])
   return `${date.getMonth() + 1}/${date.getDate()}`
 }
 
@@ -283,9 +333,13 @@ function getAgentAvatarUrl(agentId: string): string | null {
 }
 
 async function switchAgent(agent: { id: string; name: string }) {
-  if (conversationSelectionLocked.value || activeAgent.value?.id === agent.id) return
+  if (conversationSelectionLocked.value) return
+  if (activeAgent.value?.id === agent.id) {
+    if (isMobile.value) isSidebarCollapsed.value = true
+    return
+  }
   if (activeAgent.value && isAgentOccupied(activeAgent.value.id)) {
-    notify.toast('当前角色仍有后台任务或 ReAct 工作，暂不能切换角色', { type: 'error' })
+    notify.toast(__t('ui.navigation', '任务进行中，暂不能切换角色'), { type: 'error' })
     return
   }
   isSwitchingAgent.value = true
@@ -294,11 +348,14 @@ async function switchAgent(agent: { id: string; name: string }) {
     await agentStore.switchAgent(agent.id)
     // 主对话页必须落入目标角色的最近会话；没有历史时立即创建正式空会话。
     if (!(await threadStore.ensureLatestThread(agent.id, 'desktop'))) return
+    if (isMobile.value) isSidebarCollapsed.value = true
     void loadThreadHistory(agent.id)
   } catch (error) {
-    notify.toast(error instanceof Error ? error.message : '切换角色失败', {
+    notify.toast(error instanceof Error ? error.message : __t('ui.navigation', '切换角色失败'), {
       type: 'error',
-      title: '聊天会话',
+      get title() {
+        return __t('ui.navigation', '聊天会话')
+      },
     })
   } finally {
     isSwitchingAgent.value = false
@@ -320,11 +377,22 @@ async function createNewChatSession() {
   isCreatingSession.value = true
   try {
     await threadStore.createNewThread(agentId, 'desktop')
-    notify.toast('新会话已创建', { type: 'success', title: '聊天会话' })
+    if (isMobile.value) isSidebarCollapsed.value = true
+    notify.toast(__t('ui.navigation', '新会话已创建'), {
+      type: 'success',
+      get title() {
+        return __t('ui.navigation', '聊天会话')
+      },
+    })
     if (activeAgent.value?.id === agentId) void loadThreadHistory(agentId)
   } catch (err) {
     const message = err instanceof Error ? err.message : '新建会话失败'
-    notify.toast(message, { type: 'error', title: '聊天会话' })
+    notify.toast(message, {
+      type: 'error',
+      get title() {
+        return __t('ui.navigation', '聊天会话')
+      },
+    })
   } finally {
     isCreatingSession.value = false
   }
@@ -373,12 +441,22 @@ watch([() => threadStore.threadId, threadHistory], () => {
   <div class="chat-tab-root">
     <!-- 一体化面板容器 -->
     <div class="chat-panel">
+      <button
+        v-if="isMobile && !isSidebarCollapsed"
+        class="chat-mobile-backdrop"
+        :aria-label="__t('ui.navigation', '关闭会话列表')"
+        @click="isSidebarCollapsed = true"
+      />
       <!-- 侧边栏 -->
       <aside class="chat-sidebar" :class="{ 'chat-sidebar--collapsed': isSidebarCollapsed }">
         <!-- 收起/展开按钮 -->
         <button
           class="chat-sidebar-toggle"
-          :title="isSidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
+          :title="
+            isSidebarCollapsed
+              ? __t('ui.navigation', '展开侧边栏')
+              : __t('ui.navigation', '收起侧边栏')
+          "
           @click="toggleSidebar"
         >
           <PixelIcon :name="isSidebarCollapsed ? 'chevron-right' : 'chevron-left'" size="xs" />
@@ -388,14 +466,14 @@ watch([() => threadStore.threadId, threadHistory], () => {
         <template v-if="!isSidebarCollapsed">
           <!-- 角色舰桥式伙伴区标头 -->
           <div class="chat-partner-header">
-            <span class="chat-partner-brand">伙伴</span>
+            <span class="chat-partner-brand">{{ __t('ui.navigation', '伙伴') }}</span>
             <span class="chat-partner-signal" />
             <div class="chat-partner-search">
               <PixelIcon name="search" size="xs" class="chat-search-icon" />
               <input
                 v-model="searchQuery"
                 type="text"
-                placeholder="搜索助手..."
+                :placeholder="__t('ui.navigation', '搜索助手...')"
                 class="chat-search-input"
               />
             </div>
@@ -404,13 +482,20 @@ watch([() => threadStore.threadId, threadHistory], () => {
           <!-- Agent 列表 -->
           <div class="chat-agent-section">
             <div class="chat-agent-toolbar">
-              <button class="chat-refresh-btn" title="刷新列表" @click="loadAgents">
+              <button
+                class="chat-refresh-btn"
+                :title="__t('ui.navigation', '刷新列表')"
+                @click="loadAgents"
+              >
                 <PixelIcon name="refresh" size="xs" :animation="isLoading ? 'spin' : ''" />
               </button>
             </div>
 
             <div class="chat-agent-list chat-scrollbar">
-              <PEmpty v-if="filteredAgents.length === 0 && !isLoading" message="暂无助手" />
+              <PEmpty
+                v-if="filteredAgents.length === 0 && !isLoading"
+                :message="__t('ui.navigation', '暂无助手')"
+              />
 
               <div
                 v-for="agent in filteredAgents"
@@ -456,7 +541,11 @@ watch([() => threadStore.threadId, threadHistory], () => {
                     :class="{ 'chat-agent-status--online': activeAgent?.id === agent.id }"
                   >
                     <span class="chat-agent-status-dot" />
-                    {{ activeAgent?.id === agent.id ? '在线' : '待机' }}
+                    {{
+                      activeAgent?.id === agent.id
+                        ? __t('ui.navigation', '在线')
+                        : __t('ui.navigation', '待机')
+                    }}
                   </span>
                 </div>
               </div>
@@ -468,7 +557,7 @@ watch([() => threadStore.threadId, threadHistory], () => {
             <div class="chat-section-title">
               <div class="chat-section-title-main">
                 <PixelIcon name="chat" size="xs" />
-                <span class="chat-history-title-text">历史会话</span>
+                <span class="chat-history-title-text">{{ __t('ui.navigation', '历史会话') }}</span>
               </div>
               <span class="chat-section-title-en">HISTORY</span>
             </div>
@@ -480,11 +569,11 @@ watch([() => threadStore.threadId, threadHistory], () => {
             >
               <div v-if="isLoadingThreads && !threadHistory.length" class="chat-thread-loading">
                 <PixelIcon name="refresh" size="xs" animation="spin" />
-                <span>加载中...</span>
+                <span>{{ __t('ui.navigation', '加载中...') }}</span>
               </div>
 
               <div v-else-if="threadHistory.length === 0" class="chat-thread-empty">
-                暂无历史会话
+                {{ __t('ui.navigation', '暂无历史会话') }}
               </div>
 
               <div
@@ -506,9 +595,13 @@ watch([() => threadStore.threadId, threadHistory], () => {
                   :aria-current="threadStore.threadId === thread.id ? 'true' : undefined"
                   @click.stop="switchThread(thread)"
                 >
-                  <span class="chat-thread-title">{{ thread.title || '未命名会话' }}</span>
+                  <span class="chat-thread-title">
+                    {{ thread.title || __t('ui.navigation', '未命名会话') }}
+                  </span>
                   <span class="chat-thread-meta">
-                    <span class="chat-thread-count">{{ thread.messageCount }} 条消息</span>
+                    <span class="chat-thread-count">
+                      {{ thread.messageCount }} {{ __t('ui.navigation', '条消息') }}
+                    </span>
                     <span class="chat-thread-time">
                       {{ formatThreadTime(thread.lastMessageAt) }}
                     </span>
@@ -516,16 +609,16 @@ watch([() => threadStore.threadId, threadHistory], () => {
                 </button>
                 <button
                   class="chat-thread-delete chat-thread-rename"
-                  title="修改会话标题"
-                  aria-label="修改会话标题"
+                  :title="__t('ui.navigation', '修改会话标题')"
+                  :aria-label="__t('ui.navigation', '修改会话标题')"
                   @click.stop="threadPendingRename = thread"
                 >
                   <PixelIcon name="pencil" size="xs" />
                 </button>
                 <button
                   class="chat-thread-delete"
-                  title="删除整条会话"
-                  aria-label="删除整条会话"
+                  :title="__t('ui.navigation', '删除整条会话')"
+                  :aria-label="__t('ui.navigation', '删除整条会话')"
                   @click.stop="requestDeleteThread(thread)"
                 >
                   <PixelIcon name="trash" size="xs" />
@@ -547,7 +640,7 @@ watch([() => threadStore.threadId, threadHistory], () => {
               @click="createNewChatSession"
             >
               <PixelIcon name="plus" size="xs" :animation="isCreatingSession ? 'spin' : ''" />
-              <span>建立新会话</span>
+              <span>{{ __t('ui.navigation', '建立新会话') }}</span>
               <span class="chat-new-session-mark">NEW</span>
             </button>
           </div>
@@ -576,8 +669,17 @@ watch([() => threadStore.threadId, threadHistory], () => {
       </aside>
 
       <!-- 聊天主区 -->
-      <div class="chat-main">
+      <div class="chat-main" :inert="isMobile && !isSidebarCollapsed">
         <header class="chat-main-header">
+          <button
+            v-if="isMobile"
+            class="chat-mobile-conversations"
+            :aria-label="__t('ui.navigation', '选择角色与会话')"
+            :aria-expanded="!isSidebarCollapsed"
+            @click="toggleSidebar"
+          >
+            <PixelIcon name="users" size="sm" />
+          </button>
           <div class="chat-main-agent">
             <div class="chat-avatar-slot">
               <Transition name="identity-swap">
@@ -602,7 +704,8 @@ watch([() => threadStore.threadId, threadHistory], () => {
                 <div :key="`${activeAgent?.id}:${threadStore.threadId}`" class="chat-main-info">
                   <span class="chat-main-name">{{ activeAgent?.name ?? 'Pero' }}</span>
                   <span class="chat-main-channel">
-                    {{ currentThreadTitle || '当前会话' }} · desktop 频道
+                    {{ currentThreadTitle || __t('ui.navigation', '当前会话') }}
+                    {{ __t('ui.navigation', '· desktop 频道') }}
                   </span>
                 </div>
               </Transition>
@@ -615,18 +718,18 @@ watch([() => threadStore.threadId, threadHistory], () => {
               variant="ghost"
               size="sm"
               :disabled="!threadStore.threadId"
-              title="导出当前会话历史"
+              :title="__t('ui.navigation', '导出当前会话历史')"
               @click="showHistoryExport = true"
             >
               <PixelIcon name="download" size="xs" />
-              导出
+              {{ __t('ui.navigation', '导出') }}
             </PButton>
             <span class="chat-main-status-dot" />
             <span class="chat-main-status-text">
               {{
                 conversationSelectionLocked || isCreatingSession || threadStore.navigationTarget
-                  ? '正在切换'
-                  : `${activeAgent?.name ?? '助手'} 已就位`
+                  ? __t('ui.navigation', '正在切换')
+                  : __t('ui.navigation', '{0} 已就位', [activeAgent?.name ?? '助手'])
               }}
             </span>
           </div>
@@ -650,19 +753,21 @@ watch([() => threadStore.threadId, threadHistory], () => {
           <div class="chat-empty-icon">
             <PixelIcon name="chat" size="3xl" />
           </div>
-          <p class="chat-empty-title">等待连接...</p>
-          <p class="chat-empty-subtitle">请从左侧选择一个助手开始聊天</p>
+          <p class="chat-empty-title">{{ __t('ui.navigation', '等待连接...') }}</p>
+          <p class="chat-empty-subtitle">
+            {{ __t('ui.navigation', '请从左侧选择一个助手开始聊天') }}
+          </p>
         </div>
       </div>
     </div>
 
     <PDialog
       :model-value="Boolean(threadPendingRename)"
-      title="修改会话标题"
+      :title="__t('ui.navigation', '修改会话标题')"
       mode="prompt"
       :default-value="threadPendingRename?.title || ''"
-      placeholder="未命名会话"
-      confirm-text="保存标题"
+      :placeholder="__t('ui.navigation', '未命名会话')"
+      :confirm-text="__t('ui.navigation', '保存标题')"
       @update:model-value="
         (visible) => {
           if (!visible) threadPendingRename = null
@@ -1502,9 +1607,11 @@ watch([() => threadStore.threadId, threadHistory], () => {
   overflow: hidden;
   min-width: 0;
   position: relative;
+  isolation: isolate;
+  background: var(--convo-paper-tint);
 }
 
-/* 纸面气流：顶部粉光 + 底部蓝光，极淡不喧宾夺主 */
+/* 静态装饰直接绘制在对话区，不再被外层面板底色遮住，也不随消息滚动。 */
 .chat-main::before {
   content: '';
   position: absolute;
@@ -1512,47 +1619,29 @@ watch([() => threadStore.threadId, threadHistory], () => {
   pointer-events: none;
   z-index: 0;
   background:
-    linear-gradient(180deg, var(--convo-air-top) 0%, transparent 22%),
-    linear-gradient(0deg, var(--convo-air-bottom) 0%, transparent 22%);
+    radial-gradient(ellipse at 82% 8%, var(--convo-air-top) 0%, transparent 58%),
+    radial-gradient(ellipse at 4% 92%, var(--convo-air-bottom) 0%, transparent 58%);
 }
 
-/* 右下角"钢笔哺訧"：精细几何点缀，替代原彩虹角标 */
+/* 极淡斜纹覆盖空白区域；文字、工具卡片和输入栏始终位于纹理上方。 */
 .chat-main::after {
   content: '';
   position: absolute;
-  bottom: 20px;
-  right: 20px;
-  width: 44px;
-  height: 44px;
+  inset: 0;
   pointer-events: none;
   z-index: 0;
-  background:
-    radial-gradient(circle at 50% 50%, currentColor 1px, transparent 1px) 0 0 / 8px 8px,
-    linear-gradient(
-      135deg,
-      transparent 46%,
-      rgba(236, 72, 153, 0.28) 46%,
-      rgba(236, 72, 153, 0.28) 52%,
-      transparent 52%
-    );
-  opacity: 0.14;
-  color: #171923;
-}
-
-[data-theme='dark'] .chat-main::after {
-  background:
-    radial-gradient(circle at 50% 50%, currentColor 1px, transparent 1px) 0 0 / 8px 8px,
-    linear-gradient(
-      135deg,
-      transparent 46%,
-      rgba(244, 114, 182, 0.22) 46%,
-      rgba(244, 114, 182, 0.22) 52%,
-      transparent 52%
-    );
-  opacity: 0.11;
+  background: repeating-linear-gradient(
+    45deg,
+    transparent 0,
+    transparent 14px,
+    var(--convo-texture-line) 14px,
+    var(--convo-texture-line) 15px
+  );
 }
 
 .chat-main-header {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1712,6 +1801,8 @@ watch([() => threadStore.threadId, threadHistory], () => {
  * ═══════════════════════════════════════════════════════════════ */
 
 .chat-empty-state {
+  position: relative;
+  z-index: 1;
   flex: 1;
   display: flex;
   flex-direction: column;

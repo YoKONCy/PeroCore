@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /**
  * ToolTechnicalDrawer.vue — 界面组件
  *
@@ -30,40 +32,56 @@ function formatJson(value: string): string {
 
 <template>
   <div class="ttd-backdrop" @click.self="emit('close')">
-    <aside class="ttd" role="dialog" aria-modal="true" aria-label="工具技术详情">
+    <aside
+      class="ttd"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="__t('ui.tools', '工具技术详情')"
+    >
       <header class="ttd-header">
         <div class="ttd-title">
-          <small>工具调用详情</small>
+          <small>{{ __t('ui.tools', '工具调用详情') }}</small>
           <strong>{{ name }}</strong>
         </div>
-        <button class="ttd-close" type="button" aria-label="关闭工具详情" @click="emit('close')">
+        <button
+          class="ttd-close"
+          type="button"
+          :aria-label="__t('ui.tools', '关闭工具详情')"
+          @click="emit('close')"
+        >
           <span aria-hidden="true">×</span>
         </button>
       </header>
       <div class="ttd-content">
         <dl class="ttd-meta">
           <div>
-            <dt>执行状态</dt>
+            <dt>{{ __t('ui.tools', '执行状态') }}</dt>
             <dd :class="{ 'is-error': isError }">
               <i aria-hidden="true" />
-              {{ isError ? '失败' : result === undefined ? '执行中' : '完成' }}
+              {{
+                isError
+                  ? __t('ui.tools', '失败')
+                  : result === undefined
+                    ? __t('ui.tools', '执行中')
+                    : __t('ui.tools', '完成')
+              }}
             </dd>
           </div>
           <div>
-            <dt>执行耗时</dt>
+            <dt>{{ __t('ui.tools', '执行耗时') }}</dt>
             <dd>{{ durationMs === undefined ? '—' : `${durationMs} ms` }}</dd>
           </div>
         </dl>
         <section>
           <div class="ttd-section-title">
-            <h4>调用参数</h4>
+            <h4>{{ __t('ui.tools', '调用参数') }}</h4>
             <span>REQUEST</span>
           </div>
           <pre>{{ formattedArgs || '{}' }}</pre>
         </section>
         <section>
           <div class="ttd-section-title">
-            <h4>返回结果</h4>
+            <h4>{{ __t('ui.tools', '返回结果') }}</h4>
             <span>RESPONSE</span>
           </div>
           <pre :class="{ 'is-error': isError }">{{ formattedResult || '等待结果…' }}</pre>

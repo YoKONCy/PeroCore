@@ -52,6 +52,13 @@ export const AUDIO_TTS_GENERATE_CAPABILITY: KernelCapabilityDefinition = {
   },
 }
 
+/** 文档后台渲染无需桌面 Input Seat，也不复用用户正在浏览的页面。 */
+export const DOCUMENT_RENDER_CAPABILITY: KernelCapabilityDefinition = {
+  capabilityType: 'document.render',
+  contractVersion: '1.0',
+  operations: { renderPdf: { risk: 'interact', idempotency: 'safe' } },
+}
+
 export const AUDIO_OUTPUT_CAPABILITY: KernelCapabilityDefinition = {
   capabilityType: 'audio.output',
   contractVersion: '1.0',

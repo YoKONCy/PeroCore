@@ -1,3 +1,4 @@
+import { t as __t } from '../utils/i18n'
 import { BrowserWindow, type WebContents } from 'electron'
 import path from 'node:path'
 import type { DesktopToastAction, DesktopToastSnapshot } from '@infos/shared'
@@ -202,7 +203,10 @@ export class DesktopToastLayer {
     const url = new URL(this.hostContents!.getURL())
     url.hash = '/notification-overlay'
     void overlay.loadURL(url.href).catch((error) => {
-      logger.warn('DesktopToasts', `通知层加载失败：${String(error)}`)
+      logger.warn(
+        'DesktopToasts',
+        __t('electron.logs.windows', '通知层加载失败：{0}', [String(error)]),
+      )
       if (this.overlay === overlay) {
         this.ready = false
         this.setActive(false)
@@ -266,7 +270,10 @@ export class DesktopToastLayer {
       try {
         this.create()
       } catch (error) {
-        logger.warn('DesktopToasts', `通知层创建失败：${String(error)}`)
+        logger.warn(
+          'DesktopToasts',
+          __t('electron.logs.windows', '通知层创建失败：{0}', [String(error)]),
+        )
         this.setActive(false)
         return
       }

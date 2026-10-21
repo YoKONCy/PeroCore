@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * Agent Service — 对话核心编排（AIOS 版）
  *
@@ -80,6 +81,8 @@ export interface AgentServiceDeps {
 }
 
 export interface CompiledRunParams {
+  /** 编译上下文与执行共享同一份模型配置，避免中途重读全局配置。 */
+  modelConfig?: ModelConfig
   onExecutionMessages?: (messages: ChatMessage[]) => void
   messages: ChatMessage[]
   agentId: string
@@ -210,12 +213,17 @@ export class AgentService {
     const channel = params.channel ?? 'desktop'
     const startedAt = Date.now()
     logger.info(
-      `开始对话(编译消息): agent=${params.agentId}, thread=${params.threadId}, channel=${channel}`,
+      __t('logs.agent', '开始对话(编译消息): agent={0}, thread={1}, channel={2}', [
+        params.agentId,
+        params.threadId,
+        channel,
+      ]),
     )
 
     // 检查点恢复保留工具调用关联及协议所需思考；ReAct 入口再统一去重。
     const messages: ChatMessage[] = structuredClone(params.messages)
-    const modelConfig = await this.resolveModelConfig(params.agentId, params.modelConfigId)
+    const modelConfig =
+      params.modelConfig ?? (await this.resolveModelConfig(params.agentId, params.modelConfigId))
     await params.onModelResolved?.(modelConfig)
     const modelKey = workContextModelKey(modelConfig)
     for (const message of messages)
@@ -396,7 +404,12 @@ export class AgentService {
 
     const elapsed = Date.now() - startedAt
     logger.info(
-      `${result.executionPause ? '对话已暂停' : '对话完成'}(编译消息): 回复 ${text.length} 字, 工具 ${result.toolCalls.length} 次, 耗时 ${elapsed}ms`,
+      __t('logs.agent', '{0}(编译消息): 回复 {1} 字, 工具 {2} 次, 耗时 {3}ms', [
+        result.executionPause ? '对话已暂停' : '对话完成',
+        text.length,
+        result.toolCalls.length,
+        elapsed,
+      ]),
     )
   }
 

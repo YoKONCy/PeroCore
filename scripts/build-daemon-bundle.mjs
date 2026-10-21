@@ -1,3 +1,4 @@
+import { t as __t } from './i18n.mjs'
 /**
  * Daemon 单文件 Bundle 构建脚本
  *
@@ -104,13 +105,11 @@ await esbuild.build({
 
 function assertNoWorkspaceImports(outputFile) {
   const content = fs.readFileSync(outputFile, 'utf8')
-  const matches = [
-    ...content.matchAll(/(?:from\s+|import\s*\()(["'])(@infos\/[^"']+)\1/g),
-  ].map((match) => match[2])
+  const matches = [...content.matchAll(/(?:from\s+|import\s*\()(["'])(@infos\/[^"']+)\1/g)].map(
+    (match) => match[2],
+  )
   if (matches.length) {
-    throw new Error(
-      `Daemon 发行产物仍包含未内联的工作区依赖: ${[...new Set(matches)].join(', ')}`,
-    )
+    throw new Error(`Daemon 发行产物仍包含未内联的工作区依赖: ${[...new Set(matches)].join(', ')}`)
   }
 }
 
@@ -120,5 +119,12 @@ assertNoWorkspaceImports(SOCIAL_OUT_FILE)
 // 产物体积提示
 const sizeMB = (fs.statSync(OUT_FILE).size / 1024 / 1024).toFixed(2)
 const socialSizeMB = (fs.statSync(SOCIAL_OUT_FILE).size / 1024 / 1024).toFixed(2)
-console.log(`\n✅ Daemon bundle 已生成: ${OUT_FILE} (${sizeMB} MB)`)
-console.log(`✅ Social runtime bundle 已生成: ${SOCIAL_OUT_FILE} (${socialSizeMB} MB)`)
+console.log(
+  __t('scripts.build-daemon-bundle', '\n✅ Daemon bundle 已生成: {0} ({1} MB)', [OUT_FILE, sizeMB]),
+)
+console.log(
+  __t('scripts.build-daemon-bundle', '✅ Social runtime bundle 已生成: {0} ({1} MB)', [
+    SOCIAL_OUT_FILE,
+    socialSizeMB,
+  ]),
+)

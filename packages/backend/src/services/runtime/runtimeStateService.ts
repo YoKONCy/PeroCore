@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * Runtime State Service — 运行时状态管理
  *
@@ -26,6 +27,7 @@
  */
 
 import { createLogger } from '../../lib/logger'
+import { AppError } from '../../lib/appError'
 
 const logger = createLogger('RuntimeStateService')
 
@@ -39,6 +41,9 @@ const DEFAULT_TASK_TIMEOUT_MS = 6 * 60 * 60 * 1000
 
 /** LLM 调用任务状态 */
 interface TaskState {
+  /** 队列交接只取消模型生成，不取消已经开始的工具。 */
+  handoffRequested: boolean
+  modelController: AbortController
   /** 是否暂停 */
   paused: boolean
   /** 待注入的即时指令 */
@@ -130,10 +135,14 @@ export class RuntimeStateService {
    * @param agentId   执行任务的 Agent ID
    */
   registerTask(threadId: string, agentId?: string): void {
+    if (this.tasks.has(threadId))
+      throw new AppError('RESOURCE_BUSY', { message: '当前会话仍在执行，请先排队或等待结束' })
     // 清理可能的旧任务
     this.cleanupTask(threadId)
 
     const state: TaskState = {
+      handoffRequested: false,
+      modelController: new AbortController(),
       paused: false,
       pendingInstruction: null,
       cancelled: false,
@@ -151,7 +160,9 @@ export class RuntimeStateService {
     }, this.timeoutMs)
 
     this.tasks.set(threadId, state)
-    logger.debug(`任务注册: thread=${threadId}, agent=${agentId ?? 'default'}`)
+    logger.debug(
+      __t('logs.runtime', '任务注册: thread={0}, agent={1}', [threadId, agentId ?? 'default']),
+    )
 
     // 标记 Thread 为打字中
     this.setThreadTyping(threadId, true)
@@ -175,7 +186,7 @@ export class RuntimeStateService {
       this.broadcastProgress(threadId, 'completed', '任务完成')
     }
     this.tasks.delete(threadId)
-    logger.debug(`任务注销: thread=${threadId}`)
+    logger.debug(__t('logs.runtime', '任务注销: thread={0}', [threadId]))
 
     // 取消 Thread 打字状态
     this.setThreadTyping(threadId, false)
@@ -225,14 +236,14 @@ export class RuntimeStateService {
     const state = this.tasks.get(threadId)
     if (!state?.paused) return
 
-    logger.info(`任务暂停中: thread=${threadId}`)
+    logger.info(__t('logs.runtime', '任务暂停中: thread={0}', [threadId]))
     this.broadcastProgress(threadId, 'paused', '任务已暂停')
 
     // 等待恢复（轮询，每 500ms 检查一次）
     while (state.paused && !state.cancelled) {
       await new Promise((r) => setTimeout(r, 500))
     }
-    logger.info(`任务已恢复: thread=${threadId}`)
+    logger.info(__t('logs.runtime', '任务已恢复: thread={0}', [threadId]))
     this.broadcastProgress(threadId, 'running', '任务已恢复')
   }
 
@@ -245,12 +256,30 @@ export class RuntimeStateService {
     return instruction
   }
 
+  requestHandoff(threadId: string): boolean {
+    const state = this.tasks.get(threadId)
+    if (!state || state.cancelled) return false
+    state.handoffRequested = true
+    state.paused = false
+    state.modelController.abort(new Error('用户已提交新指令，正在交接当前执行'))
+    this.broadcastProgress(threadId, 'running', '正在保存已有进度并接续新指令')
+    return true
+  }
+
+  isHandoffRequested(threadId: string): boolean {
+    return this.tasks.get(threadId)?.handoffRequested ?? false
+  }
+
+  getModelInterruptSignal(threadId: string): AbortSignal | undefined {
+    return this.tasks.get(threadId)?.modelController.signal
+  }
+
   /** 暂停任务 */
   pauseTask(threadId: string): boolean {
     const state = this.tasks.get(threadId)
     if (!state) return false
     state.paused = true
-    logger.info(`暂停: thread=${threadId}`)
+    logger.info(__t('logs.runtime', '暂停: thread={0}', [threadId]))
     this.broadcastProgress(threadId, 'paused', '任务已暂停')
     return true
   }
@@ -260,7 +289,7 @@ export class RuntimeStateService {
     const state = this.tasks.get(threadId)
     if (!state) return false
     state.paused = false
-    logger.info(`恢复: thread=${threadId}`)
+    logger.info(__t('logs.runtime', '恢复: thread={0}', [threadId]))
     this.broadcastProgress(threadId, 'running', '任务已恢复')
     return true
   }
@@ -270,7 +299,9 @@ export class RuntimeStateService {
     const state = this.tasks.get(threadId)
     if (!state) return false
     state.pendingInstruction = instruction
-    logger.info(`注入指令: thread=${threadId} → "${instruction.slice(0, 30)}..."`)
+    logger.info(
+      __t('logs.runtime', '注入指令: thread={0} → "{1}..."', [threadId, instruction.slice(0, 30)]),
+    )
     return true
   }
 
@@ -281,7 +312,7 @@ export class RuntimeStateService {
     state.cancelled = true
     state.paused = false // 如果在暂停中则释放
     state.abortController.abort()
-    logger.info(`取消: thread=${threadId}`)
+    logger.info(__t('logs.runtime', '取消: thread={0}', [threadId]))
     this.broadcastProgress(threadId, 'cancelled', '任务已取消')
     return true
   }
@@ -336,7 +367,7 @@ export class RuntimeStateService {
   setActiveAgent(agentId: string): void {
     if (this.activeAgentId === agentId) return
     this.activeAgentId = agentId
-    logger.info(`全局活跃 Agent 已切换: ${agentId}`)
+    logger.info(__t('logs.runtime', '全局活跃 Agent 已切换: {0}', [agentId]))
   }
 
   /** 获取全局活跃 Agent；未设置时由调用方回退默认角色。 */
@@ -355,7 +386,7 @@ export class RuntimeStateService {
    */
   setWindowAgent(windowId: string, agentId: string): void {
     this.windowAgents.set(windowId, agentId)
-    logger.debug(`窗口活跃 Agent: window=${windowId}, agent=${agentId}`)
+    logger.debug(__t('logs.runtime', '窗口活跃 Agent: window={0}, agent={1}', [windowId, agentId]))
   }
 
   /**
@@ -371,7 +402,7 @@ export class RuntimeStateService {
    */
   removeWindow(windowId: string): void {
     this.windowAgents.delete(windowId)
-    logger.debug(`窗口已移除: ${windowId}`)
+    logger.debug(__t('logs.runtime', '窗口已移除: {0}', [windowId]))
   }
 
   /**
@@ -444,7 +475,9 @@ export class RuntimeStateService {
     const state = this.tasks.get(threadId)
     if (!state || state.cancelled) return
 
-    logger.warn(`任务超时: thread=${threadId} (${this.timeoutMs / 1000}s)`)
+    logger.warn(
+      __t('logs.runtime', '任务超时: thread={0} ({1}s)', [threadId, this.timeoutMs / 1000]),
+    )
     state.cancelled = true
     state.paused = false
     state.abortController.abort(
@@ -479,7 +512,7 @@ export class RuntimeStateService {
       state,
       message,
     }).catch((err) => {
-      logger.warn(`进度广播失败: ${err}`)
+      logger.warn(__t('logs.runtime', '进度广播失败: {0}', [err]))
     })
   }
 }

@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 import { randomUUID } from 'node:crypto'
 import type {
   ConversationCoverage,
@@ -206,8 +207,6 @@ export class EventMemoryService {
       const payload = existing.payload as { note: EventNote; tdbId: number }
       await this.applyCreate(operationId, payload.note, payload.tdbId, true, options.signal)
       if (options.coverageOwnerId) await this.commitCoverage(payload.note, options, input.origin)
-      if (input.origin.mode === 'active')
-        await this.repo.resetTimer(`agent-silence:${input.agentId}`)
       await this.onCommitted?.(payload.note)
       return payload.note
     }
@@ -239,7 +238,6 @@ export class EventMemoryService {
         await this.repo.saveCoverage(coverage)
       }
     }
-    if (note.origin.mode === 'active') await this.repo.resetTimer(`agent-silence:${note.agentId}`)
     await this.onCommitted?.(note)
     return note
   }
@@ -270,8 +268,6 @@ export class EventMemoryService {
       if (options.coverageOwnerId)
         await this.commitCoverage(payload.replacement, options, input.origin)
       if (!options.maintenance) {
-        if (input.origin.mode === 'active')
-          await this.repo.resetTimer(`agent-silence:${input.agentId}`)
         await this.onCommitted?.(payload.replacement)
       }
       return payload.replacement
@@ -306,9 +302,6 @@ export class EventMemoryService {
     await this.applyRevise(operationId, target, replacement, newTdbId, relations, options.signal)
     options.signal?.throwIfAborted()
     await this.commitCoverage(replacement, options, input.origin)
-    if (!options.maintenance && input.origin.mode === 'active') {
-      await this.repo.resetTimer(`agent-silence:${replacement.agentId}`)
-    }
     // 关系维护产生的修订已在当前任务中处理，不得再次触发自身。
     if (!options.maintenance) await this.onCommitted?.(replacement)
     return replacement
@@ -872,7 +865,7 @@ export class EventMemoryService {
     let hits: EventNote[]
 
     if (advanced?.enableSaPpr && this.embeddings.isAvailable) {
-      await onProgress?.({ stage: 'embedding', message: '正在拉取记忆……' })
+      await onProgress?.({ stage: 'embedding', message: __t('server.memory', '正在拉取记忆……') })
       queryEmbedding = await this.safeVector(query)
       if (stale()) return []
       if (advanced.enableContextRnn && rnnGeneration !== undefined) {
@@ -886,7 +879,7 @@ export class EventMemoryService {
       const store = this.stores.ensureTextIndexReady(agentId, channel)
       await onProgress?.({
         stage: 'retrieval',
-        message: '正在拉取记忆……',
+        message: __t('server.memory', '正在拉取记忆……'),
       })
       if (stale()) return []
       if (usedRnnGeneration !== undefined && !runtime?.peek(usedRnnGeneration)) {
@@ -913,8 +906,11 @@ export class EventMemoryService {
       await onProgress?.({
         stage: 'reranking',
         message: rerankers.length
-          ? `正在使用 ${rerankers.join(' + ')} 重排 ${advancedHits.length} 个候选`
-          : `正在筛选 ${advancedHits.length} 个候选`,
+          ? __t('server.memory', '正在使用 {0} 重排 {1} 个候选', [
+              rerankers.join(' + '),
+              advancedHits.length,
+            ])
+          : __t('server.memory', '正在筛选 {0} 个候选', [advancedHits.length]),
         candidateCount: advancedHits.length,
       })
       if (stale()) return []
@@ -934,22 +930,22 @@ export class EventMemoryService {
         })
         .slice(0, topK)
     } else {
-      await onProgress?.({ stage: 'embedding', message: '正在拉取记忆……' })
+      await onProgress?.({ stage: 'embedding', message: __t('server.memory', '正在拉取记忆……') })
       await onProgress?.({
         stage: 'retrieval',
-        message: '正在拉取记忆……',
+        message: __t('server.memory', '正在拉取记忆……'),
       })
       hits = await this.query({ agentId, query, mode: 'mixed', limit: topK })
       await onProgress?.({
         stage: 'reranking',
-        message: `基础召回已筛选出 ${hits.length} 个相关事件`,
+        message: __t('server.memory', '基础召回已筛选出 {0} 个相关事件', [hits.length]),
         candidateCount: hits.length,
       })
     }
 
     await onProgress?.({
       stage: 'timeline',
-      message: '正在补充时间轴末尾与命中事件直接前驱',
+      message: __t('server.memory', '正在补充时间轴末尾与命中事件直接前驱'),
       candidateCount: hits.length,
     })
     if (stale()) return []
@@ -984,7 +980,7 @@ export class EventMemoryService {
     }
     await onProgress?.({
       stage: 'completed',
-      message: `记忆上下文已就绪，共注入 ${notes.length} 个事件`,
+      message: __t('server.memory', '记忆上下文已就绪，共注入 {0} 个事件', [notes.length]),
       candidateCount: hits.length,
       resultCount: notes.length,
     })
@@ -1083,7 +1079,9 @@ export class EventMemoryService {
         }
       } catch (error) {
         await this.repo.markOperationFailed(operation.operationId, String(error))
-        logger.warn(`事件记忆事务重放失败: ${operation.operationId}`, { error })
+        logger.warn(__t('logs.memory', '事件记忆事务重放失败: {0}', [operation.operationId]), {
+          error,
+        })
       }
     }
   }

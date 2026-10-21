@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /** Agent 绑定的 Workspace 懒加载资源栏，提供文件浏览与全文搜索两种工作模式。 */
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { PDialog, PixelIcon } from '../pixel'
@@ -121,7 +123,9 @@ async function confirmRename(value?: string): Promise<void> {
     return
   }
   if (newName === '.' || newName === '..' || /[\\/:*?"<>|]/.test(newName)) {
-    notification.toast('名称不能包含 \\ / : * ? " < > | 等非法字符', { type: 'error' })
+    notification.toast(__t('ui.workspace', '名称不能包含 \\ / : * ? " < > | 等非法字符'), {
+      type: 'error',
+    })
     return
   }
   fileOperationPending.value = true
@@ -140,9 +144,11 @@ async function confirmRename(value?: string): Promise<void> {
     emit('renamed', res.data)
     await loadRoot()
     pendingRename.value = null
-    notification.toast(`已重命名为 ${newName}`, { type: 'success' })
+    notification.toast(__t('ui.workspace', '已重命名为 {0}', [newName]), { type: 'success' })
   } catch (error) {
-    notification.toast(error instanceof Error ? error.message : '重命名失败', { type: 'error' })
+    notification.toast(error instanceof Error ? error.message : __t('ui.workspace', '重命名失败'), {
+      type: 'error',
+    })
   } finally {
     fileOperationPending.value = false
   }
@@ -164,9 +170,11 @@ async function confirmDelete(): Promise<void> {
     emit('deleted', node.path)
     await loadRoot()
     pendingDelete.value = null
-    notification.toast(`已删除 ${node.name}`, { type: 'success' })
+    notification.toast(__t('ui.workspace', '已删除 {0}', [node.name]), { type: 'success' })
   } catch (error) {
-    notification.toast(error instanceof Error ? error.message : '删除失败', { type: 'error' })
+    notification.toast(error instanceof Error ? error.message : __t('ui.workspace', '删除失败'), {
+      type: 'error',
+    })
   } finally {
     fileOperationPending.value = false
   }
@@ -198,27 +206,31 @@ watch(() => [props.agentId, props.threadId], loadRoot, { immediate: true })
     <header class="workspace-tree__header">
       <div class="workspace-tree__identity">
         <span class="workspace-tree__eyebrow">RESOURCE RAIL</span>
-        <strong>{{ agentName }} 的工作区</strong>
+        <strong>{{ agentName }} {{ __t('ui.workspace', '的工作区') }}</strong>
       </div>
-      <button class="workspace-tree__icon-button" title="刷新资源" @click="loadRoot">
+      <button
+        class="workspace-tree__icon-button"
+        :title="__t('ui.workspace', '刷新资源')"
+        @click="loadRoot"
+      >
         <PixelIcon name="refresh" size="xs" :animation="loading ? 'spin' : ''" />
       </button>
     </header>
 
-    <nav class="workspace-tree__modes" aria-label="资源栏模式">
+    <nav class="workspace-tree__modes" :aria-label="__t('ui.workspace', '资源栏模式')">
       <button :class="{ active: mode === 'files' }" @click="selectMode('files')">
         <PixelIcon name="folder" size="xs" />
-        文件
+        {{ __t('ui.workspace', '文件') }}
       </button>
       <button :class="{ active: mode === 'search' }" @click="selectMode('search')">
         <PixelIcon name="search" size="xs" />
-        搜索
+        {{ __t('ui.workspace', '搜索') }}
       </button>
     </nav>
 
     <div v-if="mode === 'files'" class="workspace-tree__root" :title="rootPath">
       <PixelIcon name="folder" size="xs" />
-      <span>{{ rootPath || '正在解析工作区…' }}</span>
+      <span>{{ rootPath || __t('ui.workspace', '正在解析工作区…') }}</span>
     </div>
 
     <form v-else class="workspace-tree__search" @submit.prevent="runSearch">
@@ -226,16 +238,18 @@ watch(() => [props.agentId, props.threadId], loadRoot, { immediate: true })
       <input
         v-model="search"
         autofocus
-        placeholder="搜索工作区内容…"
+        :placeholder="__t('ui.workspace', '搜索工作区内容…')"
         @input="!search && (searchResults = [])"
       />
-      <button type="submit" title="执行搜索"><PixelIcon name="chevron-right" size="xs" /></button>
+      <button type="submit" :title="__t('ui.workspace', '执行搜索')">
+        <PixelIcon name="chevron-right" size="xs" />
+      </button>
     </form>
 
     <div class="workspace-tree__body workspace-tree__scrollbar">
       <template v-if="mode === 'search'">
         <div class="workspace-tree__section-title">
-          <span>搜索结果</span>
+          <span>{{ __t('ui.workspace', '搜索结果') }}</span>
           <i>{{ searchResults.length }}</i>
         </div>
         <button
@@ -254,11 +268,20 @@ watch(() => [props.agentId, props.threadId], loadRoot, { immediate: true })
             <PixelIcon name="code" size="xs" />
             {{ item.file }}
           </span>
-          <small>第 {{ item.line }} 行 · {{ item.content }}</small>
+          <small>
+            {{ __t('ui.workspace', '第') }} {{ item.line }} {{ __t('ui.workspace', '行 ·') }}
+            {{ item.content }}
+          </small>
         </button>
         <div v-if="!searchResults.length" class="workspace-tree__empty">
           <PixelIcon name="search" size="lg" />
-          <span>{{ search ? '没有找到匹配内容' : '输入关键词搜索文件内容' }}</span>
+          <span>
+            {{
+              search
+                ? __t('ui.workspace', '没有找到匹配内容')
+                : __t('ui.workspace', '输入关键词搜索文件内容')
+            }}
+          </span>
         </div>
       </template>
 
@@ -275,7 +298,7 @@ watch(() => [props.agentId, props.threadId], loadRoot, { immediate: true })
         />
         <div v-if="!loading && !roots.length" class="workspace-tree__empty">
           <PixelIcon name="folder" size="lg" />
-          <span>工作区当前为空</span>
+          <span>{{ __t('ui.workspace', '工作区当前为空') }}</span>
         </div>
       </template>
     </div>
@@ -283,24 +306,36 @@ watch(() => [props.agentId, props.threadId], loadRoot, { immediate: true })
     <PDialog
       :model-value="Boolean(pendingRename)"
       mode="prompt"
-      :title="pendingRename?.type === 'directory' ? '重命名文件夹' : '重命名文件'"
-      message="输入新名称，位置保持在当前目录中。"
-      placeholder="新名称"
+      :title="
+        pendingRename?.type === 'directory'
+          ? __t('ui.workspace', '重命名文件夹')
+          : __t('ui.workspace', '重命名文件')
+      "
+      :message="__t('ui.workspace', '输入新名称，位置保持在当前目录中。')"
+      :placeholder="__t('ui.workspace', '新名称')"
       :default-value="pendingRename?.name || ''"
-      confirm-text="重命名"
+      :confirm-text="__t('ui.workspace', '重命名')"
       @update:model-value="closeRenameDialog"
       @confirm="confirmRename"
     />
 
     <PDialog
       :model-value="Boolean(pendingDelete)"
-      :title="pendingDelete?.type === 'directory' ? '永久删除文件夹' : '永久删除文件'"
+      :title="
+        pendingDelete?.type === 'directory'
+          ? __t('ui.workspace', '永久删除文件夹')
+          : __t('ui.workspace', '永久删除文件')
+      "
       :message="
         pendingDelete?.type === 'directory'
-          ? `确定永久删除文件夹“${pendingDelete.name}”及其中的全部文件吗？此操作无法撤销。`
-          : `确定永久删除“${pendingDelete?.name || ''}”吗？此操作无法撤销。`
+          ? __t('ui.workspace', '确定永久删除文件夹“{0}”及其中的全部文件吗？此操作无法撤销。', [
+              pendingDelete.name,
+            ])
+          : __t('ui.workspace', '确定永久删除“{0}”吗？此操作无法撤销。', [
+              pendingDelete?.name || '',
+            ])
       "
-      confirm-text="永久删除"
+      :confirm-text="__t('ui.workspace', '永久删除')"
       confirm-variant="danger"
       @update:model-value="closeDeleteDialog"
       @confirm="confirmDelete"
@@ -316,11 +351,11 @@ watch(() => [props.agentId, props.threadId], loadRoot, { immediate: true })
       >
         <button @click.stop="renameSelected">
           <PixelIcon name="edit" size="xs" />
-          重命名
+          {{ __t('ui.workspace', '重命名') }}
         </button>
         <button class="danger" @click.stop="deleteSelected">
           <PixelIcon name="trash" size="xs" />
-          删除
+          {{ __t('ui.workspace', '删除') }}
         </button>
       </div>
     </Teleport>

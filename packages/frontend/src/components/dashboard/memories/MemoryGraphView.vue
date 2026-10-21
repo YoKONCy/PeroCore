@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { getDisplayLocale } from '../../../i18n/index'
+
+import { t as __t } from '../../../i18n/index'
+
 /**
  * MemoryGraphView — 记忆图谱（自研 SVG 力导向，零外部依赖）
  *
@@ -39,14 +43,62 @@ const nodeById = computed(() => new Map(layout.value.map((node) => [node.id, nod
 
 // ── 关系类型过滤 ──
 const ALL_RELATIONS: Array<{ value: EventNoteRelation; label: string; color: string }> = [
-  { value: 'temporal_next', label: '时间后继', color: '#64748b' },
-  { value: 'temporal_prev', label: '时间前驱', color: '#94a3b8' },
-  { value: 'caused_by', label: '因果', color: '#d97706' },
-  { value: 'same_event', label: '同一事件', color: '#8b5cf6' },
-  { value: 'same_topic', label: '同主题', color: '#0ea5e9' },
-  { value: 'involves_person', label: '涉及人物', color: '#db2777' },
-  { value: 'involves_place', label: '涉及地点', color: '#16a34a' },
-  { value: 'involves_object', label: '涉及物品', color: '#ea580c' },
+  {
+    value: 'temporal_next',
+    get label() {
+      return __t('ui.settings', '时间后继')
+    },
+    color: '#64748b',
+  },
+  {
+    value: 'temporal_prev',
+    get label() {
+      return __t('ui.settings', '时间前驱')
+    },
+    color: '#94a3b8',
+  },
+  {
+    value: 'caused_by',
+    get label() {
+      return __t('ui.settings', '因果')
+    },
+    color: '#d97706',
+  },
+  {
+    value: 'same_event',
+    get label() {
+      return __t('ui.settings', '同一事件')
+    },
+    color: '#8b5cf6',
+  },
+  {
+    value: 'same_topic',
+    get label() {
+      return __t('ui.settings', '同主题')
+    },
+    color: '#0ea5e9',
+  },
+  {
+    value: 'involves_person',
+    get label() {
+      return __t('ui.settings', '涉及人物')
+    },
+    color: '#db2777',
+  },
+  {
+    value: 'involves_place',
+    get label() {
+      return __t('ui.settings', '涉及地点')
+    },
+    color: '#16a34a',
+  },
+  {
+    value: 'involves_object',
+    get label() {
+      return __t('ui.settings', '涉及物品')
+    },
+    color: '#ea580c',
+  },
 ]
 
 const enabledRelations = ref<Set<EventNoteRelation>>(
@@ -337,7 +389,7 @@ function nodeRadius(note: EventNote): number {
 }
 
 function formatTime(value: string): string {
-  return new Date(value).toLocaleString('zh-CN', { hour12: false })
+  return new Date(value).toLocaleString(getDisplayLocale(), { hour12: false })
 }
 
 const usedRelations = computed(() => {
@@ -379,7 +431,7 @@ onBeforeUnmount(unbindWindowListeners)
       <div class="graph-actions">
         <PButton variant="ghost" size="sm" @click="toggleOnlyTimeline">
           <PixelIcon name="clock" size="xs" />
-          仅时间链
+          {{ __t('ui.settings', '仅时间链') }}
         </PButton>
         <PButton
           variant="ghost"
@@ -388,15 +440,15 @@ onBeforeUnmount(unbindWindowListeners)
           @click="onlyNeighborhood = !onlyNeighborhood"
         >
           <PixelIcon name="eye" size="xs" />
-          {{ onlyNeighborhood ? '显示全部' : '一阶邻域' }}
+          {{ onlyNeighborhood ? __t('ui.settings', '显示全部') : __t('ui.settings', '一阶邻域') }}
         </PButton>
         <PButton variant="ghost" size="sm" @click="fitView">
           <PixelIcon name="layout" size="xs" />
-          适应画布
+          {{ __t('ui.settings', '适应画布') }}
         </PButton>
         <PButton variant="ghost" size="sm" :disabled="!selectedId" @click="focusSelected">
           <PixelIcon name="map-pin" size="xs" />
-          聚焦选中
+          {{ __t('ui.settings', '聚焦选中') }}
         </PButton>
       </div>
     </div>
@@ -405,7 +457,7 @@ onBeforeUnmount(unbindWindowListeners)
     <div class="graph-canvas">
       <div v-if="loading && !nodes.length" class="graph-status">
         <PixelIcon name="refresh" size="sm" animation="spin" />
-        <span class="font-pixel">加载记忆图谱...</span>
+        <span class="font-pixel">{{ __t('ui.settings', '加载记忆图谱...') }}</span>
       </div>
       <div v-else-if="error" class="graph-status">
         <PixelIcon name="alert" size="sm" />
@@ -413,7 +465,7 @@ onBeforeUnmount(unbindWindowListeners)
       </div>
       <div v-else-if="!nodes.length" class="graph-status">
         <PixelIcon name="brain" size="lg" style="opacity: 0.25" />
-        <span>暂无可视化的记忆</span>
+        <span>{{ __t('ui.settings', '暂无可视化的记忆') }}</span>
       </div>
 
       <svg
@@ -475,8 +527,9 @@ onBeforeUnmount(unbindWindowListeners)
 
       <!-- 图例/统计 -->
       <div v-if="nodes.length" class="graph-meta font-pixel">
-        {{ nodes.length }} 节点 · {{ visibleEdges.length }} 关系
-        <template v-if="truncated">· 已截断</template>
+        {{ nodes.length }} {{ __t('ui.settings', '节点 ·') }} {{ visibleEdges.length }}
+        {{ __t('ui.settings', '关系') }}
+        <template v-if="truncated">{{ __t('ui.settings', '· 已截断') }}</template>
       </div>
     </div>
   </div>

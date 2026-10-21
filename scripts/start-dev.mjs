@@ -1,3 +1,4 @@
+import { t as __t } from './i18n.mjs'
 /**
  * 一键启动脚本 — 启动 Daemon、子应用界面与 Electron
  *
@@ -60,7 +61,7 @@ function shutdown(exitCode = 0) {
   if (isShuttingDown) return
   isShuttingDown = true
 
-  console.log(`\n${DIM}正在清理所有进程...${RESET}`)
+  console.log(__t('scripts.start-dev', '\n{0}正在清理所有进程...{1}', [DIM, RESET]))
   killTree(electron)
   killTree(arcaClient)
   killTree(pictoriaClient)
@@ -80,7 +81,7 @@ arcaClient = spawnPnpm(['--filter', '@infos/arca', 'dev:client'], {
 arcaClient.stdout.on('data', (d) => prefix('arca-ui', MAGENTA, d))
 arcaClient.stderr.on('data', (d) => prefix('arca-ui', MAGENTA, d))
 arcaClient.on('exit', (code) => {
-  console.log(`${DIM}[arca-ui] 进程退出 (code: ${code})${RESET}`)
+  console.log(__t('scripts.start-dev', '{0}[arca-ui] 进程退出 (code: {1}){2}', [DIM, code, RESET]))
   if (!isShuttingDown) shutdown(code ?? 1)
 })
 
@@ -102,11 +103,19 @@ pictoriaClient.stdout.on('data', (data) => {
 })
 pictoriaClient.stderr.on('data', (data) => prefix('pictoria-ui', MAGENTA, data))
 pictoriaClient.on('error', (error) => {
-  console.error(`${MAGENTA}[pictoria-ui]${RESET} 界面服务启动失败：${error.message}`)
+  console.error(
+    __t('scripts.start-dev', '{0}[pictoria-ui]{1} 界面服务启动失败：{2}', [
+      MAGENTA,
+      RESET,
+      error.message,
+    ]),
+  )
   shutdown(1)
 })
 pictoriaClient.on('exit', (code) => {
-  console.log(`${DIM}[pictoria-ui] 界面服务已退出 (code: ${code})${RESET}`)
+  console.log(
+    __t('scripts.start-dev', '{0}[pictoria-ui] 界面服务已退出 (code: {1}){2}', [DIM, code, RESET]),
+  )
   if (!isShuttingDown) shutdown(code || 1)
 })
 
@@ -120,7 +129,7 @@ daemon = spawnPnpm(['dev:daemon'], {
 daemon.stdout.on('data', (d) => prefix('daemon', CYAN, d))
 daemon.stderr.on('data', (d) => prefix('daemon', CYAN, d))
 daemon.on('exit', (code) => {
-  console.log(`${DIM}[daemon] 进程退出 (code: ${code})${RESET}`)
+  console.log(__t('scripts.start-dev', '{0}[daemon] 进程退出 (code: {1}){2}', [DIM, code, RESET]))
   if (!isShuttingDown) shutdown(code ?? 1)
 })
 
@@ -131,7 +140,12 @@ function tryStartElectron() {
   if (electronStarted || isShuttingDown || !daemonReady || !pictoriaReady) return
   electronStarted = true
 
-  console.log(`\n${MAGENTA}[electron]${RESET} 后台与子应用界面已就绪，正在启动 Electron...\n`)
+  console.log(
+    __t('scripts.start-dev', '\n{0}[electron]{1} 后台与子应用界面已就绪，正在启动 Electron...\n', [
+      MAGENTA,
+      RESET,
+    ]),
+  )
 
   electron = spawnPnpm(['dev:electron'], {
     cwd: process.cwd(),
@@ -142,7 +156,9 @@ function tryStartElectron() {
   electron.stdout.on('data', (d) => prefix('electron', MAGENTA, d))
   electron.stderr.on('data', (d) => prefix('electron', MAGENTA, d))
   electron.on('exit', (code) => {
-    console.log(`${DIM}[electron] 进程退出 (code: ${code})${RESET}`)
+    console.log(
+      __t('scripts.start-dev', '{0}[electron] 进程退出 (code: {1}){2}', [DIM, code, RESET]),
+    )
     if (!isShuttingDown) shutdown(code ?? 0)
   })
 }
@@ -152,7 +168,7 @@ const outputChunks = []
 daemon.stdout.on('data', (data) => {
   outputChunks.push(data.toString())
   const output = outputChunks.join('')
-  if (output.includes('业务 HTTP 已就绪') && output.includes('CapabilityBridge 已启动')) {
+  if (output.includes('[infOS:ready:http]') && output.includes('[infOS:ready:capability]')) {
     daemonReady = true
     tryStartElectron()
   }
@@ -161,7 +177,13 @@ daemon.stdout.on('data', (data) => {
 // 超时兜底：30秒后仍不启动Electron，直接结束并保留Daemon日志
 setTimeout(() => {
   if (!electronStarted && !isShuttingDown) {
-    console.error(`\n${MAGENTA}[electron]${RESET} 开发环境启动超时：${!daemonReady ? '后台 HTTP 与能力通道尚未就绪' : 'Pictoria 界面尚未监听 7363 端口'}。`)
+    console.error(
+      __t('scripts.start-dev', '\n{0}[electron]{1} 开发环境启动超时：{2}。', [
+        MAGENTA,
+        RESET,
+        !daemonReady ? '后台 HTTP 与能力通道尚未就绪' : 'Pictoria 界面尚未监听 7363 端口',
+      ]),
+    )
     shutdown(1)
   }
 }, 30000)

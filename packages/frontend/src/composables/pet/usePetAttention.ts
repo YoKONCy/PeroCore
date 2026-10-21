@@ -1,3 +1,4 @@
+import { t as __t } from '../../i18n/index'
 import { computed, onMounted, onUnmounted, ref, watch, type Ref } from 'vue'
 import type { PetConversationTarget } from '@infos/shared'
 import { approvalsApi } from '../../api/modules/approvalsApi'
@@ -36,7 +37,7 @@ export function usePetAttention(agentId: Ref<string>) {
         ? {
             id: approval.id,
             kind: 'approval',
-            label: '需要确认：' + approval.toolName,
+            label: __t('ui.pet', '需要确认：') + approval.toolName,
             target: { agentId: id, threadId: approval.threadId, taskId: approval.taskId },
           }
         : input
@@ -45,7 +46,7 @@ export function usePetAttention(agentId: Ref<string>) {
               kind: 'question',
               label:
                 input.questions && input.questions.length > 1
-                  ? `有 ${input.questions.length} 个问题想问你`
+                  ? __t('ui.pet', '有 {0} 个问题想问你', [input.questions.length])
                   : input.question,
               target: { agentId: id, threadId: input.threadId, taskId: input.taskId },
             }

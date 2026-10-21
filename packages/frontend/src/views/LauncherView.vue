@@ -1,4 +1,10 @@
 <script setup lang="ts">
+import { getDisplayLocale } from '../i18n/index'
+
+import { t as __t } from '../i18n/index'
+
+import { copyClientText } from '../lib/clientPlatform'
+
 /** Electron 客户端专属启动与维护中心。 */
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { PixelIcon } from '../components/pixel'
@@ -7,7 +13,7 @@ import { OnboardingOverlay } from '../components/overlays'
 import CustomTitleBar from '../components/layout/CustomTitleBar.vue'
 import InfosLogo from '../components/brands/InfosLogo.vue'
 import { useLauncher } from '../composables/launcher/useLauncher'
-import { launcherSteps } from '../composables/launcher/onboardingScripts'
+import { getLauncherSteps } from '../composables/launcher/onboardingScripts'
 import { useAgentStore, useNotificationStore } from '../stores'
 import { getApiBaseUrl } from '../api/transport'
 import { invoke, listen } from '../utils/ipcAdapter'
@@ -69,10 +75,38 @@ interface ReleaseNotice {
 }
 
 const tabs = [
-  { id: 'launch', code: '01', label: '启动', icon: 'power' },
-  { id: 'environment', code: '02', label: '运行环境', icon: 'cpu' },
-  { id: 'updates', code: '03', label: '版本公告', icon: 'download' },
-  { id: 'about', code: '04', label: '关于', icon: 'info' },
+  {
+    id: 'launch',
+    code: '01',
+    get label() {
+      return __t('ui.navigation', '启动')
+    },
+    icon: 'power',
+  },
+  {
+    id: 'environment',
+    code: '02',
+    get label() {
+      return __t('ui.navigation', '运行环境')
+    },
+    icon: 'cpu',
+  },
+  {
+    id: 'updates',
+    code: '03',
+    get label() {
+      return __t('ui.navigation', '版本公告')
+    },
+    icon: 'download',
+  },
+  {
+    id: 'about',
+    code: '04',
+    get label() {
+      return __t('ui.navigation', '关于')
+    },
+    icon: 'info',
+  },
 ] as const
 
 type TabId = (typeof tabs)[number]['id']
@@ -86,6 +120,8 @@ const launchTrigger = ref<HTMLButtonElement | null>(null)
 const launchMenu = ref<HTMLElement | null>(null)
 const launchPlacement = ref({ left: '0px', top: '0px' })
 const launchMenuBelow = ref(true)
+const launcherSteps = computed(getLauncherSteps)
+const tutorialLaunchStep = ref(false)
 
 async function showLaunchMenu() {
   if (launchMenuOpen.value) {
@@ -161,24 +197,48 @@ const {
   showOnboarding,
   finishOnboarding,
   triggerOnboarding,
+  launchDesktopOnboarding,
+  desktopGuidePending,
+  onboardingLaunching,
 } = useLauncher()
+const launchesDesktopGuide = computed(
+  () => desktopGuidePending.value || (showOnboarding.value && tutorialLaunchStep.value),
+)
 
 const editionName = computed(
   () =>
     ({
-      development: '开发版',
-      portable: '便携版',
-      steam: 'Steam 版',
-      release: '正式版',
+      get development() {
+        return __t('ui.navigation', '开发版')
+      },
+      get portable() {
+        return __t('ui.navigation', '便携版')
+      },
+      get steam() {
+        return __t('ui.navigation', 'Steam 版')
+      },
+      get release() {
+        return __t('ui.navigation', '正式版')
+      },
     })[clientInfo.value?.edition ?? 'development'],
 )
 
 const checkFriendlyLabel: Record<string, string> = {
-  backend: '后台服务',
-  database: '数据存储',
-  model: 'AI 模型',
-  memory: '记忆系统',
-  extension: '伙伴配置',
+  get backend() {
+    return __t('ui.navigation', '后台服务')
+  },
+  get database() {
+    return __t('ui.navigation', '数据存储')
+  },
+  get model() {
+    return __t('ui.navigation', 'AI 模型')
+  },
+  get memory() {
+    return __t('ui.navigation', '记忆系统')
+  },
+  get extension() {
+    return __t('ui.navigation', '伙伴配置')
+  },
 }
 
 const healthyChecks = computed(() => checks.value.filter((item) => item.status === 'ok').length)
@@ -196,7 +256,7 @@ function formatBytes(bytes: number): string {
 }
 
 function formatDate(value: string): string {
-  return value ? new Date(value).toLocaleString('zh-CN') : '未知'
+  return value ? new Date(value).toLocaleString(getDisplayLocale()) : __t('ui.navigation', '未知')
 }
 
 async function refreshClientInfo(): Promise<void> {
@@ -206,7 +266,9 @@ async function refreshClientInfo(): Promise<void> {
     updateState.value = (await invoke('get-update-state')) as UpdateState
   } catch (error) {
     notification.toast(
-      `客户端环境检测失败：${error instanceof Error ? error.message : String(error)}`,
+      __t('ui.navigation', '客户端环境检测失败：{0}', [
+        error instanceof Error ? error.message : String(error),
+      ]),
       'error',
     )
   } finally {
@@ -220,7 +282,9 @@ async function loadRelease(): Promise<void> {
     release.value = (await invoke('get-latest-release')) as ReleaseNotice
   } catch (error) {
     notification.toast(
-      `版本公告获取失败：${error instanceof Error ? error.message : String(error)}`,
+      __t('ui.navigation', '版本公告获取失败：{0}', [
+        error instanceof Error ? error.message : String(error),
+      ]),
       'warning',
     )
   } finally {
@@ -235,7 +299,9 @@ async function selectAgent(agentId: string): Promise<void> {
     await agentStore.switchAgent(agentId)
   } catch (error) {
     notification.toast(
-      `切换角色失败：${error instanceof Error ? error.message : String(error)}`,
+      __t('ui.navigation', '切换角色失败：{0}', [
+        error instanceof Error ? error.message : String(error),
+      ]),
       'error',
     )
   } finally {
@@ -246,8 +312,18 @@ async function selectAgent(agentId: string): Promise<void> {
 async function launch(target: 'pet' | 'app'): Promise<void> {
   dismissLaunchMenu()
   const success = await enterApp(target)
-  if (!success) notification.toast('启动失败，请稍后重试', 'error')
+  if (!success) notification.toast(__t('ui.navigation', '启动失败，请稍后重试'), 'error')
   await refreshClientInfo()
+}
+async function primaryLaunch(): Promise<void> {
+  if (launchesDesktopGuide.value) {
+    dismissLaunchMenu()
+    const success = await launchDesktopOnboarding()
+    if (!success) notification.toast(__t('ui.navigation', '启动失败，请稍后重试'), 'error')
+    await refreshClientInfo()
+    return
+  }
+  await showLaunchMenu()
 }
 
 async function checkUpdate(): Promise<void> {
@@ -265,11 +341,12 @@ async function installUpdate(): Promise<void> {
 async function copyUpdateCommand(): Promise<void> {
   const command = clientInfo.value?.development.updateCommand
   if (!command) return
-  await navigator.clipboard.writeText(command)
-  notification.toast('开发更新命令已复制', 'success')
+  await copyClientText(command)
+  notification.toast(__t('ui.navigation', '开发更新命令已复制'), 'success')
 }
 
-function handleOnboardingStep(step: { tab?: string }): void {
+function handleOnboardingStep(step: { tab?: string; action?: string }): void {
+  tutorialLaunchStep.value = step.action === 'launch-desktop'
   if (step.tab && tabs.some((tab) => tab.id === step.tab)) activeTab.value = step.tab as TabId
 }
 
@@ -297,15 +374,11 @@ onUnmounted(() => {
     <CustomTitleBar :is-work-mode="theme === 'dark'" />
 
     <OnboardingOverlay
-      :visible="showOnboarding"
+      v-model:visible="showOnboarding"
       :steps="launcherSteps"
       @finish="finishOnboarding"
+      @skip="finishOnboarding"
       @step="handleOnboardingStep"
-      @update:visible="
-        (visible: boolean) => {
-          if (!visible) finishOnboarding()
-        }
-      "
     />
 
     <header class="launcher-head">
@@ -313,28 +386,34 @@ onUnmounted(() => {
         <div class="brand-mark"><InfosLogo variant="mark" /></div>
         <div>
           <InfosLogo class="launcher-wordmark" variant="wordmark" />
-          <span>启动器</span>
+          <span>{{ __t('ui.navigation', '启动器') }}</span>
         </div>
       </div>
       <div class="global-signals">
         <button
           class="ghost-action"
           type="button"
-          :title="theme === 'dark' ? '切换浅色' : '切换深色'"
+          :title="
+            theme === 'dark' ? __t('ui.navigation', '切换浅色') : __t('ui.navigation', '切换深色')
+          "
           @click="toggleTheme"
         >
           <PixelIcon :name="theme === 'dark' ? 'sun' : 'moon'" size="xs" />
         </button>
         <span class="signal">
           <i :class="['ready', 'entering', 'done'].includes(phase) ? 'ok' : 'pending'" />
-          {{ ['ready', 'entering', 'done'].includes(phase) ? '服务在线' : '正在连接' }}
+          {{
+            ['ready', 'entering', 'done'].includes(phase)
+              ? __t('ui.navigation', '服务在线')
+              : __t('ui.navigation', '正在连接')
+          }}
         </span>
         <span class="badge">{{ editionName }}</span>
         <span class="ver">v{{ clientInfo?.version ?? appVersion }}</span>
       </div>
     </header>
 
-    <nav id="launcher-tabs" class="launcher-tabs" aria-label="启动器页面">
+    <nav id="launcher-tabs" class="launcher-tabs" :aria-label="__t('ui.navigation', '启动器页面')">
       <button
         v-for="tab in tabs"
         :key="tab.id"
@@ -354,13 +433,15 @@ onUnmounted(() => {
       <section v-if="activeTab === 'launch'" class="page launch-page">
         <div class="page-head">
           <div>
-            <span class="page-eyebrow">今天和谁一起</span>
-            <h1>选择你的伙伴</h1>
-            <p>选中的伙伴会出现在主界面和桌面，下次启动也会记住哦。</p>
+            <span class="page-eyebrow">{{ __t('ui.navigation', '今天和谁一起') }}</span>
+            <h1>{{ __t('ui.navigation', '选择你的伙伴') }}</h1>
+            <p>
+              {{ __t('ui.navigation', '选中的伙伴会出现在主界面和桌面，下次启动也会记住哦。') }}
+            </p>
           </div>
           <div class="check-score">
             <strong>{{ healthyChecks }}/{{ totalChecks }}</strong>
-            <span>启动检查通过</span>
+            <span>{{ __t('ui.navigation', '启动检查通过') }}</span>
           </div>
         </div>
 
@@ -375,18 +456,18 @@ onUnmounted(() => {
               <span v-else>{{ agentStore.currentAgent?.name?.[0] ?? '?' }}</span>
             </div>
             <div class="active-copy">
-              <small>当前伙伴</small>
-              <h2>{{ agentStore.currentAgent?.name ?? '还没选伙伴' }}</h2>
+              <small>{{ __t('ui.navigation', '当前伙伴') }}</small>
+              <h2>{{ agentStore.currentAgent?.name ?? __t('ui.navigation', '还没选伙伴') }}</h2>
               <p>
                 {{
                   agentStore.currentAgent?.description ||
-                  '点右侧选一个伙伴，它就会在桌面和主界面陪伴你。'
+                  __t('ui.navigation', '点右侧选一个伙伴，它就会在桌面和主界面陪伴你。')
                 }}
               </p>
               <div class="active-meta">
                 <span>
                   <i class="ok" />
-                  已连接到客户端
+                  {{ __t('ui.navigation', '已连接到客户端') }}
                 </span>
                 <span class="mono">{{ agentStore.activeAgentId }}</span>
               </div>
@@ -421,7 +502,7 @@ onUnmounted(() => {
             <div v-for="item in checks" :key="item.id">
               <i :class="item.status" />
               <span>{{ checkFriendlyLabel[item.id] ?? item.label }}</span>
-              <strong>{{ item.message ?? '等待检测' }}</strong>
+              <strong>{{ item.message ?? __t('ui.navigation', '等待检测') }}</strong>
             </div>
           </div>
           <div class="launch-actions">
@@ -431,18 +512,24 @@ onUnmounted(() => {
               class="primary-action"
               :class="{ 'is-open': launchMenuOpen }"
               type="button"
-              aria-haspopup="menu"
-              :aria-expanded="launchMenuOpen"
-              aria-controls="launcher-start-menu"
-              :disabled="!['ready', 'done'].includes(phase)"
-              @click="showLaunchMenu"
-              @keydown.down.prevent="showLaunchMenu"
+              :aria-haspopup="launchesDesktopGuide ? undefined : 'menu'"
+              :aria-expanded="launchesDesktopGuide ? undefined : launchMenuOpen"
+              :aria-controls="launchesDesktopGuide ? undefined : 'launcher-start-menu'"
+              :disabled="!['ready', 'done'].includes(phase) || onboardingLaunching"
+              @click="primaryLaunch"
+              @keydown.down.prevent="primaryLaunch"
             >
               <span class="launch-power" aria-hidden="true">
                 <PixelIcon name="power" size="sm" />
               </span>
-              <strong>{{ phase === 'entering' ? enteringText : '启动' }}</strong>
-              <span class="launch-chevron" :class="{ open: launchMenuOpen }">
+              <strong>
+                {{ phase === 'entering' ? enteringText : __t('ui.navigation', '启动') }}
+              </strong>
+              <span
+                v-if="!launchesDesktopGuide"
+                class="launch-chevron"
+                :class="{ open: launchMenuOpen }"
+              >
                 <PixelIcon name="chevron-down" size="xs" />
               </span>
             </button>
@@ -458,13 +545,13 @@ onUnmounted(() => {
       >
         <div class="page-head">
           <div>
-            <span class="page-eyebrow">这台电脑的情况</span>
-            <h1>运行环境</h1>
-            <p>看看客户端的运行状态，出问题时也能更快定位。</p>
+            <span class="page-eyebrow">{{ __t('ui.navigation', '这台电脑的情况') }}</span>
+            <h1>{{ __t('ui.navigation', '运行环境') }}</h1>
+            <p>{{ __t('ui.navigation', '看看客户端的运行状态，出问题时也能更快定位。') }}</p>
           </div>
           <button class="ghost-action" :disabled="loadingInfo" @click="refreshClientInfo">
             <PixelIcon name="refresh" size="xs" />
-            重新检测
+            {{ __t('ui.navigation', '重新检测') }}
           </button>
         </div>
 
@@ -473,25 +560,31 @@ onUnmounted(() => {
             <header>
               <PixelIcon name="desktop" size="sm" />
               <div>
-                <strong>客户端</strong>
+                <strong>{{ __t('ui.navigation', '客户端') }}</strong>
                 <span class="mono">APP</span>
               </div>
             </header>
             <dl>
               <div>
-                <dt>版本</dt>
+                <dt>{{ __t('ui.navigation', '版本') }}</dt>
                 <dd class="mono">{{ clientInfo?.version }}</dd>
               </div>
               <div>
-                <dt>渠道</dt>
+                <dt>{{ __t('ui.navigation', '渠道') }}</dt>
                 <dd>{{ editionName }}</dd>
               </div>
               <div>
-                <dt>形式</dt>
-                <dd>{{ clientInfo?.isPackaged ? '安装包' : '源码运行' }}</dd>
+                <dt>{{ __t('ui.navigation', '形式') }}</dt>
+                <dd>
+                  {{
+                    clientInfo?.isPackaged
+                      ? __t('ui.navigation', '安装包')
+                      : __t('ui.navigation', '源码运行')
+                  }}
+                </dd>
               </div>
               <div>
-                <dt>设备名</dt>
+                <dt>{{ __t('ui.navigation', '设备名') }}</dt>
                 <dd class="mono">{{ clientInfo?.hostname }}</dd>
               </div>
             </dl>
@@ -500,25 +593,25 @@ onUnmounted(() => {
             <header>
               <PixelIcon name="cpu" size="sm" />
               <div>
-                <strong>电脑</strong>
+                <strong>{{ __t('ui.navigation', '电脑') }}</strong>
                 <span class="mono">SYSTEM</span>
               </div>
             </header>
             <dl>
               <div>
-                <dt>系统</dt>
+                <dt>{{ __t('ui.navigation', '系统') }}</dt>
                 <dd>{{ clientInfo?.osName }} {{ clientInfo?.osVersion }}</dd>
               </div>
               <div>
-                <dt>架构</dt>
+                <dt>{{ __t('ui.navigation', '架构') }}</dt>
                 <dd class="mono">{{ clientInfo?.architecture }}</dd>
               </div>
               <div>
-                <dt>处理器</dt>
+                <dt>{{ __t('ui.navigation', '处理器') }}</dt>
                 <dd>{{ clientInfo?.cpuModel }}</dd>
               </div>
               <div>
-                <dt>内存</dt>
+                <dt>{{ __t('ui.navigation', '内存') }}</dt>
                 <dd class="mono">
                   {{ formatBytes(clientInfo?.memoryUsed ?? 0) }} /
                   {{ formatBytes(clientInfo?.memoryTotal ?? 0) }}
@@ -530,7 +623,7 @@ onUnmounted(() => {
             <header>
               <PixelIcon name="code" size="sm" />
               <div>
-                <strong>运行时</strong>
+                <strong>{{ __t('ui.navigation', '运行时') }}</strong>
                 <span class="mono">RUNTIME</span>
               </div>
             </header>
@@ -548,9 +641,13 @@ onUnmounted(() => {
                 <dd class="mono">{{ clientInfo?.nodeVersion }}</dd>
               </div>
               <div>
-                <dt>后台服务</dt>
+                <dt>{{ __t('ui.navigation', '后台服务') }}</dt>
                 <dd :class="phase === 'ready' ? 'ok-text' : 'warn-text'">
-                  {{ phase === 'ready' ? '已连接' : '连接中' }}
+                  {{
+                    phase === 'ready'
+                      ? __t('ui.navigation', '已连接')
+                      : __t('ui.navigation', '连接中')
+                  }}
                 </dd>
               </div>
             </dl>
@@ -559,26 +656,44 @@ onUnmounted(() => {
             <header>
               <PixelIcon name="layout" size="sm" />
               <div>
-                <strong>窗口</strong>
+                <strong>{{ __t('ui.navigation', '窗口') }}</strong>
                 <span class="mono">WINDOWS</span>
               </div>
             </header>
             <dl>
               <div>
-                <dt>启动器</dt>
-                <dd>已打开</dd>
+                <dt>{{ __t('ui.navigation', '启动器') }}</dt>
+                <dd>{{ __t('ui.navigation', '已打开') }}</dd>
               </div>
               <div>
-                <dt>主界面</dt>
-                <dd>{{ clientInfo?.windows.dashboard ? '已打开' : '未打开' }}</dd>
+                <dt>{{ __t('ui.navigation', '主界面') }}</dt>
+                <dd>
+                  {{
+                    clientInfo?.windows.dashboard
+                      ? __t('ui.navigation', '已打开')
+                      : __t('ui.navigation', '未打开')
+                  }}
+                </dd>
               </div>
               <div>
-                <dt>桌宠</dt>
-                <dd>{{ clientInfo?.windows.pet ? '已打开' : '未打开' }}</dd>
+                <dt>{{ __t('ui.navigation', '桌宠') }}</dt>
+                <dd>
+                  {{
+                    clientInfo?.windows.pet
+                      ? __t('ui.navigation', '已打开')
+                      : __t('ui.navigation', '未打开')
+                  }}
+                </dd>
               </div>
               <div>
-                <dt>桌面能力</dt>
-                <dd>{{ phase === 'ready' ? '可用' : '等待服务' }}</dd>
+                <dt>{{ __t('ui.navigation', '桌面能力') }}</dt>
+                <dd>
+                  {{
+                    phase === 'ready'
+                      ? __t('ui.navigation', '可用')
+                      : __t('ui.navigation', '等待服务')
+                  }}
+                </dd>
               </div>
             </dl>
           </article>
@@ -589,13 +704,17 @@ onUnmounted(() => {
       <section v-else-if="activeTab === 'updates'" class="page updates-page">
         <div class="page-head update-head">
           <div>
-            <span class="page-eyebrow">新版本有什么变化</span>
-            <h1>版本公告</h1>
-            <p>先看看这次更新了什么，再决定要不要升级。</p>
+            <span class="page-eyebrow">{{ __t('ui.navigation', '新版本有什么变化') }}</span>
+            <h1>{{ __t('ui.navigation', '版本公告') }}</h1>
+            <p>{{ __t('ui.navigation', '先看看这次更新了什么，再决定要不要升级。') }}</p>
           </div>
           <div class="release-identity">
             <span>{{ release?.tagName || 'LATEST' }}</span>
-            <strong>{{ release ? formatDate(release.publishedAt) : '正在连接 GitHub…' }}</strong>
+            <strong>
+              {{
+                release ? formatDate(release.publishedAt) : __t('ui.navigation', '正在连接 GitHub…')
+              }}
+            </strong>
           </div>
         </div>
 
@@ -604,14 +723,18 @@ onUnmounted(() => {
             <header class="release-notice__head">
               <div class="release-symbol"><PixelIcon name="sparkle" size="md" /></div>
               <div>
-                <small>最新版本公告</small>
-                <h2>{{ release?.name ?? '正在获取版本公告…' }}</h2>
+                <small>{{ __t('ui.navigation', '最新版本公告') }}</small>
+                <h2>{{ release?.name ?? __t('ui.navigation', '正在获取版本公告…') }}</h2>
                 <p v-if="release">
-                  发布于 {{ formatDate(release.publishedAt) }}
-                  <em v-if="release.cached">离线缓存</em>
+                  {{ __t('ui.navigation', '发布于') }} {{ formatDate(release.publishedAt) }}
+                  <em v-if="release.cached">{{ __t('ui.navigation', '离线缓存') }}</em>
                 </p>
               </div>
-              <button :disabled="loadingRelease" title="刷新公告" @click="loadRelease">
+              <button
+                :disabled="loadingRelease"
+                :title="__t('ui.navigation', '刷新公告')"
+                @click="loadRelease"
+              >
                 <PixelIcon name="refresh" size="xs" />
               </button>
             </header>
@@ -619,13 +742,13 @@ onUnmounted(() => {
               <AsyncMarkdown v-if="release?.body" :content="release.body" />
               <div v-else class="release-empty">
                 <PixelIcon name="download" size="lg" />
-                <span>正在读取 GitHub Release…</span>
+                <span>{{ __t('ui.navigation', '正在读取 GitHub Release…') }}</span>
               </div>
             </div>
             <footer v-if="release">
-              <span>内容来自项目的 GitHub Release</span>
+              <span>{{ __t('ui.navigation', '内容来自项目的 GitHub Release') }}</span>
               <button @click="invoke('open-external-url', { url: release.htmlUrl })">
-                在网页里看
+                {{ __t('ui.navigation', '在网页里看') }}
                 <PixelIcon name="external-link" size="xs" />
               </button>
             </footer>
@@ -635,18 +758,18 @@ onUnmounted(() => {
             <header>
               <div>
                 <span class="mono">CLIENT UPDATE</span>
-                <strong>客户端更新</strong>
+                <strong>{{ __t('ui.navigation', '客户端更新') }}</strong>
               </div>
               <b>{{ editionName }}</b>
             </header>
             <div class="version-stack">
               <div>
-                <small>当前版本</small>
+                <small>{{ __t('ui.navigation', '当前版本') }}</small>
                 <strong class="mono">v{{ clientInfo?.version }}</strong>
               </div>
               <PixelIcon name="arrow-right" size="sm" />
               <div>
-                <small>最新版本</small>
+                <small>{{ __t('ui.navigation', '最新版本') }}</small>
                 <strong class="mono">
                   {{
                     updateState?.selectedVersion || updateState?.latestVersion
@@ -659,8 +782,10 @@ onUnmounted(() => {
             <div class="update-state-line">
               <i :class="updateState?.phase" />
               <div>
-                <strong>{{ updateState?.message ?? '正在读取更新状态' }}</strong>
-                <span>当前是{{ editionName }}</span>
+                <strong>
+                  {{ updateState?.message ?? __t('ui.navigation', '正在读取更新状态') }}
+                </strong>
+                <span>{{ __t('ui.navigation', '当前是') }}{{ editionName }}</span>
               </div>
             </div>
             <div v-if="updateState?.phase === 'downloading'" class="progress-track">
@@ -671,36 +796,48 @@ onUnmounted(() => {
             <div v-if="clientInfo?.edition === 'development'" class="development-box">
               <header>
                 <PixelIcon name="code" size="xs" />
-                <strong>开发工作区</strong>
+                <strong>{{ __t('ui.navigation', '开发工作区') }}</strong>
               </header>
               <dl>
                 <div>
-                  <dt>分支</dt>
-                  <dd class="mono">{{ clientInfo.development.branch ?? '未知' }}</dd>
+                  <dt>{{ __t('ui.navigation', '分支') }}</dt>
+                  <dd class="mono">
+                    {{ clientInfo.development.branch ?? __t('ui.navigation', '未知') }}
+                  </dd>
                 </div>
                 <div>
-                  <dt>提交</dt>
-                  <dd class="mono">{{ clientInfo.development.commit ?? '未知' }}</dd>
+                  <dt>{{ __t('ui.navigation', '提交') }}</dt>
+                  <dd class="mono">
+                    {{ clientInfo.development.commit ?? __t('ui.navigation', '未知') }}
+                  </dd>
                 </div>
                 <div>
-                  <dt>状态</dt>
+                  <dt>{{ __t('ui.navigation', '状态') }}</dt>
                   <dd :class="clientInfo.development.dirty ? 'warn-text' : 'ok-text'">
-                    {{ clientInfo.development.dirty ? '有本地修改' : '工作区干净' }}
+                    {{
+                      clientInfo.development.dirty
+                        ? __t('ui.navigation', '有本地修改')
+                        : __t('ui.navigation', '工作区干净')
+                    }}
                   </dd>
                 </div>
               </dl>
-              <p>为了保护你的代码，启动器不会自动改仓库，只告诉你安全的手动更新方式。</p>
+              <p>{{ __t('ui.navigation', '开发版请手动更新代码。') }}</p>
             </div>
 
             <div class="update-actions">
               <template v-if="clientInfo?.edition === 'development'">
                 <button class="ghost-action" @click="invoke('open-client-path', 'app')">
-                  打开目录
+                  {{ __t('ui.navigation', '打开目录') }}
                 </button>
-                <button class="primary-small" @click="copyUpdateCommand">复制更新命令</button>
+                <button class="primary-small" @click="copyUpdateCommand">
+                  {{ __t('ui.navigation', '复制更新命令') }}
+                </button>
               </template>
               <template v-else-if="clientInfo?.edition === 'steam'">
-                <button class="ghost-action" disabled>由 Steam 管理更新</button>
+                <button class="ghost-action" disabled>
+                  {{ __t('ui.navigation', '由 Steam 管理更新') }}
+                </button>
               </template>
               <template v-else>
                 <button
@@ -708,21 +845,21 @@ onUnmounted(() => {
                   :disabled="updateState?.phase === 'checking'"
                   @click="checkUpdate"
                 >
-                  检查更新
+                  {{ __t('ui.navigation', '检查更新') }}
                 </button>
                 <button
                   v-if="updateState?.phase === 'available'"
                   class="primary-small"
                   @click="downloadUpdate"
                 >
-                  下载更新
+                  {{ __t('ui.navigation', '下载更新') }}
                 </button>
                 <button
                   v-if="updateState?.phase === 'downloaded'"
                   class="primary-small"
                   @click="installUpdate"
                 >
-                  安装并重启
+                  {{ __t('ui.navigation', '安装并重启') }}
                 </button>
               </template>
             </div>
@@ -734,16 +871,16 @@ onUnmounted(() => {
       <section v-else class="page about-page">
         <div class="page-head">
           <div>
-            <span class="page-eyebrow">关于这个伙伴</span>
-            <h1>关于客户端</h1>
-            <p>项目入口、数据位置和客户端协议都在这里。</p>
+            <span class="page-eyebrow">{{ __t('ui.navigation', '关于这个伙伴') }}</span>
+            <h1>{{ __t('ui.navigation', '关于客户端') }}</h1>
+            <p>{{ __t('ui.navigation', '项目入口、数据位置和客户端协议都在这里。') }}</p>
           </div>
         </div>
         <div class="about-hero">
           <div class="about-logo"><InfosLogo variant="mark" /></div>
           <div>
             <span class="mono">INFRASTRUCTURE · INFOMORPH · INFINITY</span>
-            <h2>萌动链接：PeroperoChat！</h2>
+            <h2>{{ __t('ui.navigation', '萌动链接：PeroperoChat！') }}</h2>
             <p>Your Warm, and Infinite Companion</p>
           </div>
           <strong class="mono">v{{ clientInfo?.version ?? appVersion }}</strong>
@@ -752,7 +889,7 @@ onUnmounted(() => {
           <button @click="invoke('open-external-url', { url: 'https://github.com/YoKONCy/infOS' })">
             <PixelIcon name="code" size="sm" />
             <span>
-              <strong>项目主页</strong>
+              <strong>{{ __t('ui.navigation', '项目主页') }}</strong>
               <small>GitHub Repository</small>
             </span>
           </button>
@@ -761,36 +898,36 @@ onUnmounted(() => {
           >
             <PixelIcon name="chat" size="sm" />
             <span>
-              <strong>问题反馈</strong>
+              <strong>{{ __t('ui.navigation', '问题反馈') }}</strong>
               <small>Issues & Feedback</small>
             </span>
           </button>
           <button @click="invoke('open-client-path', 'data')">
             <PixelIcon name="database" size="sm" />
             <span>
-              <strong>数据目录</strong>
+              <strong>{{ __t('ui.navigation', '数据目录') }}</strong>
               <small class="mono">{{ clientInfo?.dataPath }}</small>
             </span>
           </button>
           <button @click="invoke('open-client-path', 'logs')">
             <PixelIcon name="file" size="sm" />
             <span>
-              <strong>日志目录</strong>
+              <strong>{{ __t('ui.navigation', '日志目录') }}</strong>
               <small class="mono">{{ clientInfo?.logsPath }}</small>
             </span>
           </button>
           <button @click="triggerEula">
             <PixelIcon name="shield" size="sm" />
             <span>
-              <strong>用户协议</strong>
-              <small>重新查看 EULA</small>
+              <strong>{{ __t('ui.navigation', '用户协议') }}</strong>
+              <small>{{ __t('ui.navigation', '重新查看 EULA') }}</small>
             </span>
           </button>
           <button @click="triggerOnboarding">
             <PixelIcon name="book" size="sm" />
             <span>
-              <strong>新手引导</strong>
-              <small>重新看一遍引导</small>
+              <strong>{{ __t('ui.navigation', '新手引导') }}</strong>
+              <small>{{ __t('ui.navigation', '重新看一遍引导') }}</small>
             </span>
           </button>
         </div>
@@ -804,7 +941,7 @@ onUnmounted(() => {
             <div class="eula-icon"><PixelIcon name="shield" size="lg" /></div>
             <div>
               <h2>
-                用户许可协议
+                {{ __t('ui.navigation', '用户许可协议') }}
                 <em>REQUIRED</em>
               </h2>
               <span class="mono">END USER LICENSE AGREEMENT</span>
@@ -814,52 +951,80 @@ onUnmounted(() => {
           <div class="eula-body">
             <p class="eula-welcome">
               <PixelIcon name="heart" size="xs" />
-              欢迎使用 萌动链接：PeroperoChat！（以下简称“本软件”）。
+              {{ __t('ui.navigation', '欢迎使用 萌动链接：PeroperoChat！（以下简称“本软件”）。') }}
             </p>
             <p>
-              在使用本软件之前，请您务必仔细阅读并理解《最终用户许可协议》（以下简称“本协议”）。本软件是一个开源项目，我们鼓励社区共建与共享。
-            </p>
-
-            <h4>1. 开源许可与分发</h4>
-            <p>
-              本软件基于开源协议发布，您可以自由地查看、修改和分发源代码，但须遵守对应的开源许可条款。再分发时请保留原始版权声明与许可信息。
-            </p>
-
-            <h4>2. AI 生成内容免责声明</h4>
-            <p>
-              本软件作为工具平台，集成并调用第三方大语言模型（LLM）服务。所有由 AI
-              生成的文字、图像及其他内容均由模型自动产出，不代表开发者的观点或立场。开发者不对 AI
-              生成内容的准确性、合法性或适用性承担任何责任。您应自行甄别并审慎使用 AI
-              生成的内容，因使用 AI 输出内容所产生的一切后果由用户自行承担。
+              {{
+                __t(
+                  'ui.navigation',
+                  '在使用本软件之前，请您务必仔细阅读并理解《最终用户许可协议》（以下简称“本协议”）。本软件是一个开源项目，我们鼓励社区共建与共享。',
+                )
+              }}
             </p>
 
-            <h4>3. 隐私与数据安全</h4>
+            <h4>{{ __t('ui.navigation', '1. 开源许可与分发') }}</h4>
             <p>
-              本软件高度重视您的隐私。您的对话记录、角色配置和个人数据默认仅存储在本地设备上，不会被上传至开发者的服务器。若您配置了第三方
-              API（如 LLM 接口），相关数据将依据该第三方服务的隐私政策进行处理，请知悉。
+              {{
+                __t(
+                  'ui.navigation',
+                  '本软件基于开源协议发布，您可以自由地查看、修改和分发源代码，但须遵守对应的开源许可条款。再分发时请保留原始版权声明与许可信息。',
+                )
+              }}
             </p>
 
-            <h4>4. 使用规范</h4>
+            <h4>{{ __t('ui.navigation', '2. AI 生成内容免责声明') }}</h4>
             <p>
-              您不得利用本软件从事任何违反所在地区法律法规的活动，包括但不限于生成和传播违法有害信息。请遵守社区公约，共同维护友善、健康的使用环境。
+              {{
+                __t(
+                  'ui.navigation',
+                  '本软件作为工具平台，集成并调用第三方大语言模型（LLM）服务。所有由 AI 生成的文字、图像及其他内容均由模型自动产出，不代表开发者的观点或立场。开发者不对 AI 生成内容的准确性、合法性或适用性承担任何责任。您应自行甄别并审慎使用 AI 生成的内容，因使用 AI 输出内容所产生的一切后果由用户自行承担。',
+                )
+              }}
             </p>
 
-            <h4>5. 免责与风险提示</h4>
+            <h4>{{ __t('ui.navigation', '3. 隐私与数据安全') }}</h4>
             <p>
-              本软件按“原样”提供，不附带任何形式的明示或暗示担保。开发者不对因使用或无法使用本软件而导致的任何直接或间接损失承担责任。本软件可能集成第三方组件，其稳定性与安全性由各自维护者负责。
+              {{
+                __t(
+                  'ui.navigation',
+                  '本软件高度重视您的隐私。您的对话记录、角色配置和个人数据默认仅存储在本地设备上，不会被上传至开发者的服务器。若您配置了第三方 API（如 LLM 接口），相关数据将依据该第三方服务的隐私政策进行处理，请知悉。',
+                )
+              }}
+            </p>
+
+            <h4>{{ __t('ui.navigation', '4. 使用规范') }}</h4>
+            <p>
+              {{
+                __t(
+                  'ui.navigation',
+                  '您不得利用本软件从事任何违反所在地区法律法规的活动，包括但不限于生成和传播违法有害信息。请遵守社区公约，共同维护友善、健康的使用环境。',
+                )
+              }}
+            </p>
+
+            <h4>{{ __t('ui.navigation', '5. 免责与风险提示') }}</h4>
+            <p>
+              {{
+                __t(
+                  'ui.navigation',
+                  '本软件按“原样”提供，不附带任何形式的明示或暗示担保。开发者不对因使用或无法使用本软件而导致的任何直接或间接损失承担责任。本软件可能集成第三方组件，其稳定性与安全性由各自维护者负责。',
+                )
+              }}
             </p>
 
             <p class="eula-note">
               <PixelIcon name="check" size="xs" />
-              点击“同意并继续”即表示您已阅读并同意上述所有条款喵~
+              {{ __t('ui.navigation', '点击“同意并继续”即表示您已阅读并同意上述所有条款喵~') }}
             </p>
           </div>
 
           <footer class="eula-foot">
-            <button class="eula-button eula-decline" @click="declineEula">拒绝并退出</button>
+            <button class="eula-button eula-decline" @click="declineEula">
+              {{ __t('ui.navigation', '拒绝并退出') }}
+            </button>
             <button class="eula-button eula-accept" @click="acceptEula">
               <PixelIcon name="check" size="xs" />
-              <span>同意并继续</span>
+              <span>{{ __t('ui.navigation', '同意并继续') }}</span>
             </button>
           </footer>
         </div>
@@ -879,14 +1044,14 @@ onUnmounted(() => {
         >
           <button type="button" role="menuitem" @click="launch('pet')">
             <i class="launch-mode-icon" aria-hidden="true"><PixelIcon name="heart" size="sm" /></i>
-            <span>桌宠模式</span>
+            <span>{{ __t('ui.navigation', '桌宠模式') }}</span>
             <PixelIcon name="arrow-right" size="xs" />
           </button>
           <button type="button" role="menuitem" @click="launch('app')">
             <i class="launch-mode-icon is-app" aria-hidden="true">
               <PixelIcon name="layout" size="sm" />
             </i>
-            <span>应用模式</span>
+            <span>{{ __t('ui.navigation', '应用模式') }}</span>
             <PixelIcon name="arrow-right" size="xs" />
           </button>
         </div>

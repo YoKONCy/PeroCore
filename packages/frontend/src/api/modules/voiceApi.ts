@@ -1,3 +1,5 @@
+import { t as __t } from '../../i18n/index'
+import { clientFetch } from '../transport'
 /**
  * Voice API 模块 — 语音 TTS/ASR
  *
@@ -57,7 +59,7 @@ export const voiceApi = {
     mimeType = 'audio/webm',
     signal?: AbortSignal,
   ): Promise<AsrResult> => {
-    const res = await fetch(`${getBaseUrl()}/api/voice/asr`, {
+    const res = await clientFetch(`${getBaseUrl()}/api/voice/asr`, {
       method: 'POST',
       headers: { 'Content-Type': mimeType },
       body: audioData,
@@ -65,7 +67,11 @@ export const voiceApi = {
     })
 
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ message: '语音识别失败' }))
+      const err = await res.json().catch(() => ({
+        get message() {
+          return __t('ui.modules', '语音识别失败')
+        },
+      }))
       throw new Error(err.message || `ASR 请求失败: ${res.status}`)
     }
 

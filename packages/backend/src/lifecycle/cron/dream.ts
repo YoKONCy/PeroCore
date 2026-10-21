@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * dream — 梦境模式定时检查
  *
@@ -57,12 +58,12 @@ export async function runDreamCheck(deps: DreamCheckDeps): Promise<DreamCheckRes
     return { triggered: false, reason: `概率未命中 (${(roll * 100).toFixed(1)}%)` }
   }
 
-  logger.info('✨ 梦境模式触发!')
+  logger.info(__t('logs.lifecycle', '✨ 梦境模式触发!'))
   lastDreamTrigger = Date.now()
 
   // 广播梦境事件 (前端显示梦境动画)
   await deps.gatewayHub.pushNotification({
-    title: '梦境模式',
+    title: __t('server.lifecycle', '梦境模式'),
     body: '正在进入梦境，编织记忆的彩线...',
   })
 
@@ -71,9 +72,9 @@ export async function runDreamCheck(deps: DreamCheckDeps): Promise<DreamCheckRes
   if (deps.runDreamAssociation) {
     try {
       associatedCount = await deps.runDreamAssociation(deps.defaultAgentId)
-      logger.info(`梦境关联完成: 建立 ${associatedCount} 条新关联`)
+      logger.info(__t('logs.lifecycle', '梦境关联完成: 建立 {0} 条新关联', [associatedCount]))
     } catch (err) {
-      logger.error(`梦境关联失败: ${err}`)
+      logger.error(__t('logs.lifecycle', '梦境关联失败: {0}', [err]))
     }
   }
 

@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * Butler Service — 据点管家服务 (LLM 增强版)
  *
@@ -175,7 +176,7 @@ export class ButlerService {
     try {
       const modelConfig = await this.llmDeps.getModelConfig()
       if (!modelConfig) {
-        logger.warn('未配置主模型，管家回退规则引擎')
+        logger.warn(__t('logs.stronghold', '未配置主模型，管家回退规则引擎'))
         return null
       }
 
@@ -247,7 +248,7 @@ export class ButlerService {
         maintenance_actions?: unknown
       }>(rawContent)
       if (!parsed || typeof parsed !== 'object') {
-        logger.warn('管家 LLM 返回的 JSON 解析失败，回退规则引擎')
+        logger.warn(__t('logs.stronghold', '管家 LLM 返回的 JSON 解析失败，回退规则引擎'))
         return null
       }
 
@@ -272,7 +273,7 @@ export class ButlerService {
           : ''
       return { narrative, actions }
     } catch (err) {
-      logger.error(`管家 LLM 理解失败，回退规则引擎: ${err}`)
+      logger.error(__t('logs.stronghold', '管家 LLM 理解失败，回退规则引擎: {0}', [err]))
       return null
     }
   }
@@ -315,7 +316,7 @@ export class ButlerService {
             const name = String(params.name ?? '').trim()
             if (!name) break
             if (await this.strongholdService.getRoomByName(name)) {
-              logger.warn(`管家要创建的房间已存在: ${name}`)
+              logger.warn(__t('logs.stronghold', '管家要创建的房间已存在: {0}', [name]))
               break
             }
             const facilityName = String(params.facility_name ?? '我的据点').trim()
@@ -336,7 +337,7 @@ export class ButlerService {
           case 'delete_room': {
             const roomName = String(params.room_name ?? '').trim()
             if (!roomName || roomName === '客厅') {
-              logger.warn('管家尝试删除「客厅」或空房间名，已拒绝')
+              logger.warn(__t('logs.stronghold', '管家尝试删除「客厅」或空房间名，已拒绝'))
               break
             }
             const target = await this.strongholdService.getRoomByName(roomName)
@@ -345,10 +346,12 @@ export class ButlerService {
             break
           }
           default:
-            logger.warn(`管家 LLM 返回未知动作，已忽略: ${item.action}`)
+            logger.warn(__t('logs.stronghold', '管家 LLM 返回未知动作，已忽略: {0}', [item.action]))
         }
       } catch (err) {
-        logger.warn(`管家维护指令映射失败，已跳过: ${item.action} (${err})`)
+        logger.warn(
+          __t('logs.stronghold', '管家维护指令映射失败，已跳过: {0} ({1})', [item.action, err]),
+        )
       }
     }
     return mapped
@@ -391,7 +394,11 @@ export class ButlerService {
         )
         return {
           action: action.type,
-          message: `据点状态：${facilities.length} 个设施，${rooms.length} 个房间。${details.map((item) => `${item.name}（${item.agents.join('、') || '无人'}）`).join('；')}`,
+          message: __t('server.stronghold', '据点状态：{0} 个设施，{1} 个房间。{2}', [
+            facilities.length,
+            rooms.length,
+            details.map((item) => `${item.name}（${item.agents.join('、') || '无人'}）`).join('；'),
+          ]),
           data: { facilities, rooms: details },
         }
       }
@@ -400,7 +407,10 @@ export class ButlerService {
         const environment = JSON.parse(room.environmentJson ?? '{}') as Record<string, unknown>
         return {
           action: action.type,
-          message: `当前房间「${room.name}」环境：${JSON.stringify(environment)}`,
+          message: __t('server.stronghold', '当前房间「{0}」环境：{1}', [
+            room.name,
+            JSON.stringify(environment),
+          ]),
           data: { roomId: room.id, roomName: room.name, environment },
         }
       }
@@ -409,7 +419,9 @@ export class ButlerService {
         await Promise.all(agents.map((agent) => this.strongholdService.moveAgent(agent.id, roomId)))
         return {
           action: action.type,
-          message: `已将所有已启用 Agent 叫到当前房间：${agents.map((agent) => agent.name).join('、') || '无'}`,
+          message: __t('server.stronghold', '已将所有已启用 Agent 叫到当前房间：{0}', [
+            agents.map((agent) => agent.name).join('、') || '无',
+          ]),
           data: { agentIds: agents.map((agent) => agent.id), roomId },
         }
       }
@@ -420,7 +432,10 @@ export class ButlerService {
         const location = await this.strongholdService.moveAgent(agent.id, targetRoomId)
         return {
           action: action.type,
-          message: `已将 ${agent.name} 叫到「${targetRoom.name}」。`,
+          message: __t('server.stronghold', '已将 {0} 叫到「{1}」。', [
+            agent.name,
+            targetRoom.name,
+          ]),
           data: location,
         }
       }
@@ -432,7 +447,7 @@ export class ButlerService {
         const created = await this.strongholdService.createRoom(action.room)
         return {
           action: action.type,
-          message: `已创建房间「${created.name}」。`,
+          message: __t('server.stronghold', '已创建房间「{0}」。', [created.name]),
           data: created,
         }
       }
@@ -446,7 +461,11 @@ export class ButlerService {
         const updated = await this.requireRoom(targetRoomId)
         return {
           action: action.type,
-          message: `已将「${targetRoom.name}」的 ${action.key} 修改为 ${String(action.value)}。`,
+          message: __t('server.stronghold', '已将「{0}」的 {1} 修改为 {2}。', [
+            targetRoom.name,
+            action.key,
+            String(action.value),
+          ]),
           data: { roomId: targetRoomId, environment: JSON.parse(updated.environmentJson ?? '{}') },
         }
       }
@@ -457,7 +476,9 @@ export class ButlerService {
         await this.strongholdService.deleteRoom(action.roomId)
         return {
           action: action.type,
-          message: `已删除房间「${target.name}」，其中的角色已转移到客厅。`,
+          message: __t('server.stronghold', '已删除房间「{0}」，其中的角色已转移到客厅。', [
+            target.name,
+          ]),
           data: { roomId: action.roomId },
         }
       }

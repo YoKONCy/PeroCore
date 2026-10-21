@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import { computed, ref, watch } from 'vue'
 import PixelIcon from '../pixel/PixelIcon.vue'
 import { modelBrandDefinition, type ModelBrandId } from '../../lib/modelBrands'
@@ -18,7 +20,9 @@ const source = computed(() =>
   definition.value ? new URL(`model-brands/${definition.value.asset}`, document.baseURI).href : '',
 )
 const label = computed(
-  () => definition.value?.label ?? (props.fallback === 'provider' ? '自定义服务' : '模型'),
+  () =>
+    definition.value?.label ??
+    (props.fallback === 'provider' ? __t('ui.brands', '自定义服务') : __t('ui.brands', '模型')),
 )
 const glyphSize = computed(() => ({ xs: 16, sm: 18, md: 20, lg: 28 })[props.size])
 const maskStyle = computed(() => ({

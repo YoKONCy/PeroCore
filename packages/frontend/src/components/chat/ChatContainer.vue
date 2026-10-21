@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
+import { copyClientText } from '../../lib/clientPlatform'
+
 /**
  * ChatContainer — 聊天主容器
  *
@@ -22,6 +26,9 @@ import ConversationSurface from '../compositor/ConversationSurface.vue'
 import SurfaceTransition from '../motion/SurfaceTransition.vue'
 import MessageBubble from './MessageBubble.vue'
 import InputBar from './InputBar.vue'
+import ConversationQueue from './ConversationQueue.vue'
+import { useConversationQueue } from '../../composables/chat/useConversationQueue'
+import { queueErrorMessage } from '../../composables/chat/queueFeedback'
 import ThreadTodo from './ThreadTodo.vue'
 import DesktopControlStatus from '../desktop/DesktopControlStatus.vue'
 import CommandOverlay from './CommandOverlay.vue'
@@ -118,6 +125,61 @@ const {
 } = useChat({ channel: 'desktop' })
 
 const threadStore = useThreadStore()
+const queue = useConversationQueue()
+const inputBarRef = ref<InstanceType<typeof InputBar> | null>(null)
+const restoringQueueDraft = ref(false)
+const returnedWorkspaceContext = ref<ChatWorkspaceContext | undefined>()
+const draftWarnings = new Set<string>()
+
+watch(
+  () => [queue.snapshot.value.drafts, inputBarRef.value, props.switching],
+  async () => {
+    if (
+      restoringQueueDraft.value ||
+      props.switching ||
+      !inputBarRef.value ||
+      !queue.snapshot.value.drafts?.length
+    )
+      return
+    restoringQueueDraft.value = true
+    try {
+      for (const item of queue.snapshot.value.drafts ?? []) {
+        if (item.input.threadId !== threadStore.threadId) continue
+        const bar = inputBarRef.value
+        const historyVersion = queue.historyVersion.value
+        if (
+          !bar ||
+          !(await bar.restoreQueuedDraft(
+            item,
+            () =>
+              historyVersion === queue.historyVersion.value &&
+              queue.snapshot.value.drafts?.some(
+                (draft) => draft.id === item.id && draft.revision === item.revision,
+              ) === true,
+          ))
+        )
+          continue
+        returnedWorkspaceContext.value = item.input.workspaceContext
+        await queue.acknowledgeDraft(item)
+      }
+    } catch (error) {
+      const message = `${queueErrorMessage(error)}，草稿已保留`
+      if (!draftWarnings.has(message)) {
+        draftWarnings.add(message)
+        logger.warn('ChatContainer', __t('logs.frontend.chat', '队列草稿暂未取回'), error)
+        notif.toast(message, { type: 'warning' })
+      }
+    } finally {
+      restoringQueueDraft.value = false
+    }
+  },
+)
+watch(
+  () => threadStore.threadId,
+  () => {
+    returnedWorkspaceContext.value = undefined
+  },
+)
 const resumingDesktop = ref(false)
 const desktopPause = computed(() => {
   const last = chatMessages.value.at(-1)
@@ -156,7 +218,7 @@ const playingMsgId = ref<string | null>(null)
 const isLoadingAudio = ref(false)
 const excludedContext = ref({ file: false, terminal: false, selection: false })
 const includedContext = computed<ChatWorkspaceContext | undefined>(() => {
-  const source = props.workspaceContext
+  const source = returnedWorkspaceContext.value ?? props.workspaceContext
   if (!source) return undefined
   return {
     filePath: excludedContext.value.file ? undefined : source.filePath,
@@ -201,11 +263,10 @@ watch(
 function extractThinking(rawContent?: string | null): string | undefined {
   if (!rawContent) return undefined
   const blocks: string[] = []
-  const pattern =
-    /<(?:think|thinking|thought)(?:\s[^>]*)?>\s*([\s\S]*?)\s*<\/(?:think|thinking|thought)>/gi
+  const pattern = /<(selfMinding|think|thinking|thought)(?:\s[^>]*)?>\s*([\s\S]*?)\s*<\/\1>/gi
   let match: RegExpExecArray | null
   while ((match = pattern.exec(rawContent)) !== null) {
-    const content = match[1]?.trim()
+    const content = match[2]?.trim()
     if (content) blocks.push(content)
   }
   return blocks.length > 0 ? blocks.join('\n\n') : undefined
@@ -289,7 +350,7 @@ async function focusRequestedMessage(): Promise<void> {
       ...(containerRef.value?.querySelectorAll<HTMLElement>('[data-message-id]') ?? []),
     ].find((item) => item.dataset.messageId === target.messageId)
     if (!element) {
-      notif.toast('这条回复已移除或暂时无法定位', { type: 'info' })
+      notif.toast(__t('ui.chat', '这条回复已移除或暂时无法定位'), { type: 'info' })
       focusedRequest = key
       return
     }
@@ -382,7 +443,7 @@ async function handleSend(
   text: string,
   _mentions: string[],
   attachmentIds: string[],
-  attachments: AttachmentInfo[],
+  _attachments: AttachmentInfo[],
   imageMode: 'auto' | 'native' | 'relay',
   complete: (success: boolean) => void,
 ) {
@@ -390,10 +451,38 @@ async function handleSend(
     complete(false)
     return
   }
+  const requestAgentId = props.agentId
   // 工作区上下文作为隐式请求字段发送，不拼进用户正文，避免 <workspace_context> 泄漏到气泡和历史消息。
   const workspaceContext = includedContext.value
-  const success = await chatSend(text, attachmentIds, attachments, imageMode, workspaceContext)
-  if (success) {
+  if (!threadStore.threadId || threadStore.agentId !== requestAgentId) {
+    try {
+      await threadStore.ensureLatestThread(requestAgentId, 'desktop')
+    } catch {
+      complete(false)
+      return
+    }
+  }
+  if (
+    props.switching ||
+    props.agentId !== requestAgentId ||
+    threadStore.navigationTarget ||
+    !threadStore.threadId ||
+    threadStore.agentId !== requestAgentId
+  ) {
+    complete(false)
+    return
+  }
+  const requestThreadId = threadStore.threadId
+  const success = await queue.enqueue({
+    threadId: requestThreadId,
+    agentId: requestAgentId,
+    content: text,
+    attachmentIds,
+    imageMode,
+    workspaceContext,
+  })
+  if (success && threadStore.threadId === requestThreadId && props.agentId === requestAgentId) {
+    returnedWorkspaceContext.value = undefined
     excludedContext.value = { file: false, terminal: false, selection: false }
     emit('contextConsumed')
   }
@@ -483,7 +572,7 @@ async function saveEdit(regenerate = false) {
     )
     saved = true
     editingMessage.value = null
-    notif.toast('消息已保存', { type: 'success' })
+    notif.toast(__t('ui.chat', '消息已保存'), { type: 'success' })
     if (regenerate) {
       if (!stillCurrent()) throw new Error('消息已保存，会话已切换，未重新生成')
       const list = response.projection.messages
@@ -545,7 +634,8 @@ async function saveEdit(regenerate = false) {
                   )
                     void threadStore.refreshCurrentThread(context.agentId)
                 },
-                onError: (error) => notif.toast(`重新生成失败：${error.message}`, 'error'),
+                onError: (error) =>
+                  notif.toast(__t('ui.chat', '重新生成失败：{0}', [error.message]), 'error'),
               },
             )
             return
@@ -562,20 +652,23 @@ async function saveEdit(regenerate = false) {
             .then((started) => {
               if (!started && stillCurrent()) {
                 threadStore.inputText = input.content
-                notif.toast('重新生成未完成，请重试', 'error')
+                notif.toast(__t('ui.chat', '重新生成未完成，请重试'), 'error')
               }
             })
             .catch((error) => {
               if (stillCurrent())
-                notif.toast(error instanceof Error ? error.message : '重新生成失败', 'error')
+                notif.toast(
+                  error instanceof Error ? error.message : __t('ui.chat', '重新生成失败'),
+                  'error',
+                )
             })
         },
       })
     }
   } catch (err) {
-    logger.error('ChatContainer', '消息编辑保存失败', err)
+    logger.error('ChatContainer', __t('logs.frontend.chat', '消息编辑保存失败'), err)
     notif.toast(
-      `${saved ? '消息已保存。' : ''}${err instanceof Error ? err.message : '保存失败，编辑内容已保留'}`,
+      `${saved ? __t('ui.chat', '消息已保存。') : ''}${err instanceof Error ? err.message : __t('ui.chat', '保存失败，编辑内容已保留')}`,
       { type: 'error' },
     )
   } finally {
@@ -631,7 +724,7 @@ async function handleDeletePair(id: string) {
       threadId: threadStore.threadId,
       messageId: Number(target.id),
       onSuccess: async (result) => {
-        if (!result.projection) throw new Error('服务端未返回回滚后的Conversation Projection')
+        if (!result.projection) throw new Error('未能恢复会话记录，请刷新')
         threadStore.applyProjection(result.projection)
         window.dispatchEvent(
           new CustomEvent('infos:conversation-rewound', {
@@ -642,12 +735,16 @@ async function handleDeletePair(id: string) {
             },
           }),
         )
-        notif.toast(`已回滚 ${result.preview.pairCount} 轮对话`, { type: 'success' })
+        notif.toast(__t('ui.chat', '已回滚 {0} 轮对话', [result.preview.pairCount]), {
+          type: 'success',
+        })
       },
     })
   } catch (err) {
-    logger.error('ChatContainer', '删除对话对失败', err)
-    notif.toast(err instanceof Error ? err.message : '删除失败，请稍后重试', { type: 'error' })
+    logger.error('ChatContainer', __t('logs.frontend.chat', '删除对话对失败'), err)
+    notif.toast(err instanceof Error ? err.message : __t('ui.chat', '删除失败，请稍后重试'), {
+      type: 'error',
+    })
   }
 }
 
@@ -671,7 +768,7 @@ async function handleTtsPlay(message: BubbleMessage): Promise<void> {
   window.dispatchEvent(new Event('infos:stop-message-audio'))
   const text = message.spokenReply?.trim() ?? ''
   if (!text) {
-    notif.toast('这条回复没有独立口语答复', { type: 'warning' })
+    notif.toast(__t('ui.chat', '这条回复没有独立口语答复'), { type: 'warning' })
     return
   }
   const request = audioRequest
@@ -704,20 +801,20 @@ async function handleTtsPlay(message: BubbleMessage): Promise<void> {
   } catch (error) {
     if (request !== audioRequest) return
     stopMessageAudio()
-    logger.error('ChatContainer', '朗读消息失败', error)
-    notif.toast(`朗读消息失败：${(error as Error).message}`, { type: 'error' })
+    logger.error('ChatContainer', __t('logs.frontend.chat', '朗读消息失败'), error)
+    notif.toast(__t('ui.chat', '朗读消息失败：{0}', [(error as Error).message]), { type: 'error' })
   }
 }
 
 /** 复制消息内容到剪贴板 */
 async function handleCopy(content: string) {
   try {
-    await navigator.clipboard.writeText(content)
-    logger.info('ChatContainer', '消息已复制到剪贴板')
-    notif.toast('已复制到剪贴板', { type: 'success' })
+    await copyClientText(content)
+    logger.info('ChatContainer', __t('logs.frontend.chat', '消息已复制到剪贴板'))
+    notif.toast(__t('ui.chat', '已复制到剪贴板'), { type: 'success' })
   } catch (err) {
-    logger.error('ChatContainer', '复制失败', err)
-    notif.toast('复制失败', { type: 'error' })
+    logger.error('ChatContainer', __t('logs.frontend.chat', '复制失败'), err)
+    notif.toast(__t('ui.chat', '复制失败'), { type: 'error' })
   }
 }
 
@@ -755,7 +852,7 @@ watch(
       if (!threadStore.historyError) {
         threadStore.historyError = error instanceof Error ? error.message : String(error)
       }
-      logger.error('ChatContainer', '恢复聊天会话失败', error)
+      logger.error('ChatContainer', __t('logs.frontend.chat', '恢复聊天会话失败'), error)
     }
   },
   { immediate: true },
@@ -834,7 +931,7 @@ onUnmounted(() => {
       variant="conversation"
       :identity="`${agentId}:${threadStore.threadId || threadId}`"
       :pending="switching || !!threadStore.navigationTarget"
-      label="正在切换会话"
+      :label="__t('ui.chat', '正在切换会话')"
     >
       <div ref="containerRef" class="chat-messages" @scroll.passive="handleMessageScroll">
         <div
@@ -842,17 +939,17 @@ onUnmounted(() => {
           class="chat-history-state"
         >
           <PixelIcon name="refresh" size="sm" animation="spin" />
-          <span>正在同步历史聊天记录...</span>
+          <span>{{ __t('ui.chat', '正在同步历史聊天记录...') }}</span>
         </div>
 
         <div v-else-if="historyError" class="chat-history-state chat-history-error">
           <PixelIcon name="alert" size="sm" />
-          <span>历史记录同步失败：{{ historyError }}</span>
+          <span>{{ __t('ui.chat', '历史记录同步失败：') }}{{ historyError }}</span>
         </div>
 
         <div v-if="threadStore.isLoadingOlderHistory" class="chat-history-state">
           <PixelIcon name="refresh" size="sm" animation="spin" />
-          <span>正在加载更早消息...</span>
+          <span>{{ __t('ui.chat', '正在加载更早消息...') }}</span>
         </div>
 
         <MessageBubble
@@ -890,6 +987,19 @@ onUnmounted(() => {
           @vue:unmounted="onBubbleUnmounted"
         />
       </div>
+      <!-- 按钮定位在消息视口内，输入栏或队列增高时也不会遮挡输入。 -->
+      <Transition name="scroll-down">
+        <button
+          v-if="showScrollDown"
+          type="button"
+          class="chat-scroll-down"
+          :title="__t('ui.chat', '回到最新消息')"
+          :aria-label="__t('ui.chat', '回到最新消息')"
+          @click="scrollToBottom()"
+        >
+          <PixelIcon name="chevron-down" size="sm" />
+        </button>
+      </Transition>
     </SurfaceTransition>
 
     <div v-if="showApprovals && interactionSurfaces.length" class="chat-approvals">
@@ -900,13 +1010,6 @@ onUnmounted(() => {
       />
     </div>
 
-    <!-- 回到底部 -->
-    <Transition name="scroll-down">
-      <button v-if="showScrollDown" class="chat-scroll-down" @click="scrollToBottom()">
-        <PixelIcon name="chevron-down" size="sm" />
-      </button>
-    </Transition>
-
     <!-- 输入框 -->
     <div ref="inputAreaRef" class="chat-input-area">
       <ThreadTodo :thread-id="threadStore.threadId || props.threadId" :agent-id="props.agentId" />
@@ -915,7 +1018,7 @@ onUnmounted(() => {
           includedContext?.filePath || includedContext?.selection || includedContext?.terminalId
         "
         class="work-material-bar"
-        aria-label="本轮附带的工作区材料"
+        :aria-label="__t('ui.chat', '本轮附带的工作区材料')"
       >
         <span
           v-if="includedContext?.filePath"
@@ -924,23 +1027,38 @@ onUnmounted(() => {
         >
           <PixelIcon name="file" size="xs" />
           <span>{{ includedContext.filePath }}</span>
-          <button type="button" title="本轮不附带当前文件" @click="excludedContext.file = true">
+          <button
+            type="button"
+            :title="__t('ui.chat', '本轮不附带当前文件')"
+            @click="excludedContext.file = true"
+          >
             <PixelIcon name="close" size="xs" />
           </button>
         </span>
         <span v-if="includedContext?.selection" class="work-material-chip">
           <PixelIcon name="code" size="xs" />
           <span>
-            第 {{ includedContext.selection.startLine }}–{{ includedContext.selection.endLine }} 行
+            {{ __t('ui.chat', '第') }} {{ includedContext.selection.startLine }}–{{
+              includedContext.selection.endLine
+            }}
+            {{ __t('ui.chat', '行') }}
           </span>
-          <button type="button" title="本轮不附带选区" @click="excludedContext.selection = true">
+          <button
+            type="button"
+            :title="__t('ui.chat', '本轮不附带选区')"
+            @click="excludedContext.selection = true"
+          >
             <PixelIcon name="close" size="xs" />
           </button>
         </span>
         <span v-if="includedContext?.terminalId" class="work-material-chip">
           <PixelIcon name="terminal" size="xs" />
-          <span>当前终端</span>
-          <button type="button" title="本轮不附带终端" @click="excludedContext.terminal = true">
+          <span>{{ __t('ui.chat', '当前终端') }}</span>
+          <button
+            type="button"
+            :title="__t('ui.chat', '本轮不附带终端')"
+            @click="excludedContext.terminal = true"
+          >
             <PixelIcon name="close" size="xs" />
           </button>
         </span>
@@ -951,11 +1069,23 @@ onUnmounted(() => {
         :busy="isGenerating || resumingDesktop"
         @resume-task="resumeDesktopTask"
       />
+      <ConversationQueue
+        :snapshot="queue.snapshot.value"
+        :busy="queue.changing.value || restoringQueueDraft"
+        :unavailable="queue.unavailable.value"
+        @change="queue.change"
+        @move="queue.move"
+        @control="queue.control"
+      />
       <InputBar
+        ref="inputBarRef"
+        :queue-enabled="true"
+        :queue-pending="queue.hasPending.value"
+        :submission-busy="queue.changing.value || restoringQueueDraft"
         :disabled="switching || !!threadStore.navigationTarget"
         :draft-request="draftRequest"
         :compact="compactInput"
-        :is-sending="isGenerating"
+        :is-sending="isGenerating || !!queue.snapshot.value.active"
         @send="handleSend"
         @stop="handleStop"
         @new-thread="handleNewThread"
@@ -972,16 +1102,21 @@ onUnmounted(() => {
           @click.self="cancelEdit"
           @keydown.esc.stop="cancelEdit"
         >
-          <div class="chat-edit-dialog" role="dialog" aria-modal="true" aria-label="编辑消息">
+          <div
+            class="chat-edit-dialog"
+            role="dialog"
+            aria-modal="true"
+            :aria-label="__t('ui.chat', '编辑消息')"
+          >
             <header class="chat-edit-header">
               <span class="chat-edit-icon" aria-hidden="true">
                 <PixelIcon name="edit" size="sm" />
               </span>
-              <h2>编辑消息</h2>
+              <h2>{{ __t('ui.chat', '编辑消息') }}</h2>
               <button
                 class="chat-edit-close"
                 type="button"
-                aria-label="关闭编辑消息"
+                :aria-label="__t('ui.chat', '关闭编辑消息')"
                 @click="cancelEdit"
               >
                 <PixelIcon name="close" size="sm" />
@@ -992,14 +1127,14 @@ onUnmounted(() => {
                 ref="editTextarea"
                 v-model="editText"
                 class="chat-edit-textarea"
-                aria-label="消息内容"
+                :aria-label="__t('ui.chat', '消息内容')"
                 :disabled="editSaving"
                 rows="5"
               />
             </div>
             <footer class="chat-edit-actions">
               <button class="chat-edit-btn chat-edit-cancel" type="button" @click="cancelEdit">
-                取消
+                {{ __t('ui.chat', '取消') }}
               </button>
               <button
                 class="chat-edit-btn chat-edit-cancel"
@@ -1007,7 +1142,7 @@ onUnmounted(() => {
                 :disabled="editSaving || isGenerating || !editText.trim()"
                 @click="saveEdit(false)"
               >
-                仅保存
+                {{ __t('ui.chat', '仅保存') }}
               </button>
               <button
                 class="chat-edit-btn chat-edit-save"
@@ -1016,7 +1151,7 @@ onUnmounted(() => {
                 @click="saveEdit(true)"
               >
                 <PixelIcon name="check" size="xs" />
-                {{ editSaving ? '保存中…' : '保存并重新生成' }}
+                {{ editSaving ? __t('ui.chat', '保存中…') : __t('ui.chat', '保存并重新生成') }}
               </button>
             </footer>
           </div>
@@ -1177,11 +1312,10 @@ onUnmounted(() => {
 /* 回到底部按钮 */
 .chat-scroll-down {
   position: absolute;
-  bottom: 120px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 36px;
-  height: 36px;
+  right: clamp(12px, 2vw, 24px);
+  bottom: 12px;
+  width: 40px;
+  height: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1191,26 +1325,54 @@ onUnmounted(() => {
   border: 1px solid var(--ui-border-default);
   border-radius: var(--ui-radius-full);
   box-shadow: var(--ui-shadow-md);
-  transition: all var(--ui-duration-fast);
+  transition:
+    transform var(--ui-duration-fast),
+    background-color var(--ui-duration-fast),
+    color var(--ui-duration-fast),
+    box-shadow var(--ui-duration-fast);
   z-index: 10;
 }
 .chat-scroll-down:hover {
   background: var(--ui-accent-primary);
   color: white;
   box-shadow: var(--ui-glow-pink);
-  transform: translateX(-50%) translateY(-2px);
+  transform: translateY(-2px);
+}
+.chat-scroll-down:focus-visible {
+  outline: 2px solid var(--ui-accent-primary);
+  outline-offset: 3px;
+}
+.chat-container--compact .chat-scroll-down {
+  right: 12px;
+}
+@media (pointer: coarse) {
+  .chat-scroll-down {
+    width: 44px;
+    height: 44px;
+  }
 }
 
 .scroll-down-enter-active {
-  transition: all 0.2s ease-out;
+  transition:
+    opacity 0.2s ease-out,
+    transform 0.2s ease-out;
 }
 .scroll-down-leave-active {
-  transition: all 0.15s ease-in;
+  transition:
+    opacity 0.15s ease-in,
+    transform 0.15s ease-in;
 }
 .scroll-down-enter-from,
 .scroll-down-leave-to {
   opacity: 0;
-  transform: translateX(-50%) translateY(12px);
+  transform: translateY(12px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-scroll-down,
+  .scroll-down-enter-active,
+  .scroll-down-leave-active {
+    transition: none;
+  }
 }
 
 /* 不可见消息只暂停动画和媒体，不启用 content-visibility 高度占位。 */

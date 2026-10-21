@@ -1,0 +1,15 @@
+{
+  "任务注册: thread={0}, agent={1}": "task registration: thread={0}, agent={1}",
+  "任务注销: thread={0}": "task logout: thread={0}",
+  "任务暂停中: thread={0}": "task is suspended: thread={0}",
+  "任务已恢复: thread={0}": "task has been resumed: thread={0}",
+  "暂停: thread={0}": "pause: thread={0}",
+  "恢复: thread={0}": "recovery: thread={0}",
+  "注入指令: thread={0} → \"{1}...\"": "injection command: thread={0} → \"{1}...\"",
+  "取消: thread={0}": "Cancel: thread={0}",
+  "全局活跃 Agent 已切换: {0}": "Global active Agent has been switched: {0}",
+  "窗口活跃 Agent: window={0}, agent={1}": "window active Agent: window={0}, agent={1}",
+  "窗口已移除: {0}": "window removed: {0}",
+  "任务超时: thread={0} ({1}s)": "task timeout: thread={0} ({1}s)",
+  "进度广播失败: {0}": "Progress broadcast failed: {0}"
+}

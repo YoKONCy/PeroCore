@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import { computed, ref, watch } from 'vue'
 import { PixelIcon, PCard, PInput, PButton } from '../pixel'
 import { useWeather } from '../../composables/useWeather'
@@ -72,15 +74,17 @@ const symbol = computed(() => {
     class="weather-card"
     :class="{ 'weather-card--settings': settings }"
     role="region"
-    aria-label="天气"
+    :aria-label="__t('ui.weather', '天气')"
     :aria-busy="saving || status.refreshing"
   >
     <div class="weather-topline">
       <h3 class="weather-caption">
         <PixelIcon name="sun" size="sm" />
-        <span>天气</span>
+        <span>{{ __t('ui.weather', '天气') }}</span>
       </h3>
-      <span v-if="status.refreshing" class="weather-updating">更新中</span>
+      <span v-if="status.refreshing" class="weather-updating">
+        {{ __t('ui.weather', '更新中') }}
+      </span>
       <button
         v-if="!settings"
         type="button"
@@ -88,7 +92,7 @@ const symbol = computed(() => {
         :aria-expanded="editing"
         @click="edit"
       >
-        {{ status.query ? '更换城市' : '设置城市' }}
+        {{ status.query ? __t('ui.weather', '更换城市') : __t('ui.weather', '设置城市') }}
       </button>
     </div>
     <button
@@ -109,8 +113,8 @@ const symbol = computed(() => {
       <span class="weather-place">
         <strong>{{ status.query }}</strong>
         <span>
-          当前 · {{ snapshot.condition }}
-          <span v-if="status.stale">· 已过期</span>
+          {{ __t('ui.weather', '当前 ·') }} {{ __t('ui.weather', snapshot.condition) }}
+          <span v-if="status.stale">{{ __t('ui.weather', '· 已过期') }}</span>
         </span>
       </span>
       <span class="weather-temperature">
@@ -122,44 +126,52 @@ const symbol = computed(() => {
     <p v-else class="weather-empty">
       {{
         status.query
-          ? status.error || '正在获取天气…'
+          ? status.error || __t('ui.weather', '正在获取天气…')
           : loaded
-            ? '设置城市，看看今天的天气'
-            : error || '正在读取天气…'
+            ? __t('ui.weather', '设置城市，看看今天的天气')
+            : error || __t('ui.weather', '正在读取天气…')
       }}
     </p>
     <div v-if="today" class="weather-range">
       <span>{{ today.low }}～{{ today.high }}°C</span>
-      <span v-if="today.rainChance !== null">降水 {{ today.rainChance }}%</span>
+      <span v-if="today.rainChance !== null">
+        {{ __t('ui.weather', '降水') }} {{ today.rainChance }}%
+      </span>
     </div>
     <div v-if="expanded && snapshot" class="weather-details">
       <div class="weather-metrics">
-        <span>体感 {{ snapshot.feelsLike }}°C</span>
-        <span>湿度 {{ snapshot.humidity }}%</span>
-        <span>风速 {{ snapshot.windKmh }} km/h</span>
+        <span>{{ __t('ui.weather', '体感') }} {{ snapshot.feelsLike }}°C</span>
+        <span>{{ __t('ui.weather', '湿度') }} {{ snapshot.humidity }}%</span>
+        <span>{{ __t('ui.weather', '风速') }} {{ snapshot.windKmh }} km/h</span>
       </div>
-      <p class="weather-forecast-caption">三日预报</p>
+      <p class="weather-forecast-caption">{{ __t('ui.weather', '三日预报') }}</p>
       <div v-for="day in snapshot.days" :key="day.date" class="weather-day">
         <time :datetime="day.date">{{ forecastDateLabel(day.date) }}</time>
-        <span>{{ day.condition }}</span>
+        <span>{{ __t('ui.weather', day.condition) }}</span>
         <span>{{ day.low }}～{{ day.high }}°C</span>
       </div>
-      <p>匹配地点：{{ snapshot.location }} · {{ snapshot.latitude }}, {{ snapshot.longitude }}</p>
-      <p>上游观测时间：{{ snapshot.observedTime }}（未提供完整日期与时区）</p>
+      <p>
+        {{ __t('ui.weather', '匹配地点：') }}{{ snapshot.location }} · {{ snapshot.latitude }},
+        {{ snapshot.longitude }}
+      </p>
+      <p>
+        {{ __t('ui.weather', '上游观测时间：') }}{{ snapshot.observedTime
+        }}{{ __t('ui.weather', '（未提供完整日期与时区）') }}
+      </p>
     </div>
     <form v-if="editing" class="weather-form" @submit.prevent="save">
       <label>
-        所在城市
+        {{ __t('ui.weather', '所在城市') }}
         <PInput
           v-model="draft"
           maxlength="80"
-          placeholder="如 上海、上海杨浦 或 31.23,121.47"
+          :placeholder="__t('ui.weather', '如 上海、上海杨浦 或 31.23,121.47')"
           :disabled="saving"
         />
       </label>
       <div class="weather-actions">
         <PButton type="submit" :size="settings ? 'md' : 'sm'" :disabled="saving || !draft.trim()">
-          {{ saving ? '保存中…' : '保存' }}
+          {{ saving ? __t('ui.weather', '保存中…') : __t('ui.weather', '保存') }}
         </PButton>
         <PButton
           v-if="status.query"
@@ -169,7 +181,7 @@ const symbol = computed(() => {
           :disabled="saving"
           @click="clear"
         >
-          清除
+          {{ __t('ui.weather', '清除') }}
         </PButton>
         <PButton
           v-if="!settings"
@@ -179,7 +191,7 @@ const symbol = computed(() => {
           :disabled="saving"
           @click="editing = false"
         >
-          取消
+          {{ __t('ui.weather', '取消') }}
         </PButton>
       </div>
     </form>
@@ -189,8 +201,8 @@ const symbol = computed(() => {
     <div v-if="snapshot" class="weather-source">
       <a href="https://wttr.in" target="_blank" rel="noopener noreferrer">wttr.in</a>
       <span>
-        {{ updated }} 获取
-        <span v-if="status.stale">· 待更新</span>
+        {{ updated }} {{ __t('ui.weather', '获取') }}
+        <span v-if="status.stale">{{ __t('ui.weather', '· 待更新') }}</span>
       </span>
     </div>
   </PCard>

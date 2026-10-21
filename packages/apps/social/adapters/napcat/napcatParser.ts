@@ -80,8 +80,12 @@ export function cleanCQCodes(content: string): string {
     return `[文件: ${nameMatch?.[1] ?? '未知文件'}]`
   })
 
-  // 表情 → [表情]
-  content = content.replace(/\[CQ:face,[^\]]*\]/g, '[表情]')
+  // 保留系统表情的公开标识；商城凭据不能混入模型正文。
+  content = content.replace(
+    /\[CQ:face,[^\]]*\]/g,
+    (match) => `[QQ表情:${match.match(/(?:,|\[)id=(\d+)/)?.[1] ?? '未知'}]`,
+  )
+  content = content.replace(/\[CQ:mface,[^\]]*\]/g, '[QQ商城表情]')
 
   // at → @昵称
   content = content.replace(/\[CQ:at,[^\]]*\]/g, (match) => {
@@ -112,7 +116,33 @@ export function cleanCQCodes(content: string): string {
 export function extractAttachments(segments: OneBotSegment[]): Attachment[] {
   const attachments: Attachment[] = []
   for (const seg of segments) {
-    if (seg.type === 'image') {
+    if (seg.type === 'face' && /^\d+$/.test(String(seg.data.id ?? ''))) {
+      const raw =
+        seg.data.raw && typeof seg.data.raw === 'object'
+          ? (seg.data.raw as Record<string, unknown>)
+          : {}
+      attachments.push({
+        type: 'native_emoji',
+        name:
+          typeof raw.faceText === 'string' ? raw.faceText.slice(0, 100) : `QQ表情 ${seg.data.id}`,
+        nativeEmoji: { kind: 'face', faceId: String(seg.data.id) },
+      })
+    } else if (
+      seg.type === 'mface' ||
+      (seg.type === 'image' && seg.data.emoji_id && seg.data.emoji_package_id)
+    ) {
+      attachments.push({
+        type: seg.type === 'image' ? 'image' : 'native_emoji',
+        url: typeof seg.data.url === 'string' ? seg.data.url : undefined,
+        name: String(seg.data.summary ?? 'QQ商城表情'),
+        nativeEmoji: {
+          kind: 'market',
+          packageId: String(seg.data.emoji_package_id ?? ''),
+          emojiId: String(seg.data.emoji_id ?? ''),
+          key: String(seg.data.key ?? ''),
+        },
+      })
+    } else if (seg.type === 'image') {
       attachments.push({
         type: 'image',
         url: seg.data.url as string | undefined,
@@ -149,12 +179,18 @@ export function extractReplyId(segments: OneBotSegment[]): string | undefined {
  * 从 segments 重建 CQ 码字符串，再用 cleanCQCodes 清洗。
  */
 export function segmentsToCQString(segments: OneBotSegment[]): string {
+  const escape = (value: unknown) =>
+    String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/\[/g, '&#91;')
+      .replace(/\]/g, '&#93;')
+      .replace(/,/g, '&#44;')
   return segments
     .map((seg) => {
       if (seg.type === 'text') return String(seg.data.text ?? '')
       // 其他段转为 [CQ:type,key=val,...] 格式，让 cleanCQCodes 处理
       const dataStr = Object.entries(seg.data)
-        .map(([k, v]) => `${k}=${String(v)}`)
+        .map(([k, v]) => `${k}=${escape(v)}`)
         .join(',')
       return `[CQ:${seg.type},${dataStr}]`
     })
@@ -195,14 +231,37 @@ export function toOneBotSegments(content: string, attachments?: Attachment[]): O
 
   // 文本段
   if (content) {
-    segments.push({ type: 'text', data: { text: content } })
+    // 统一换行符并将连续空行合并为一次换行，兼容仅含空格或制表符的空行。
+    const text = content.replace(/\r\n?/g, '\n').replace(/\n(?:[ \t]*\n)+/g, '\n')
+    segments.push({ type: 'text', data: { text } })
   }
 
   // 附件段
   if (attachments) {
     for (const att of attachments) {
-      if (att.type === 'sticker') {
-        // 表情包: 使用 subType=1 让 QQ 显示为表情而非普通图片
+      if (att.type === 'native_emoji') {
+        const emoji = att.nativeEmoji
+        if (emoji?.kind === 'face' && /^\d+$/.test(emoji.faceId ?? ''))
+          segments.push({ type: 'face', data: { id: emoji.faceId } })
+        else if (
+          emoji?.kind === 'market' &&
+          /^\d{1,10}$/.test(emoji.packageId ?? '') &&
+          /^[a-f\d]{16,64}$/i.test(emoji.emojiId ?? '') &&
+          emoji.key
+        )
+          segments.push({
+            type: 'mface',
+            data: {
+              emoji_package_id: Number(emoji.packageId),
+              emoji_id: emoji.emojiId,
+              key: emoji.key,
+              summary: att.name ?? '[商城表情]',
+            },
+          })
+        else
+          throw Object.assign(new Error('原生表情缺少有效来源参数'), { code: 'DELIVERY_NOT_SENT' })
+      } else if (att.type === 'sticker') {
+        // 自定义表情使用 NapCat 的图片子类型，字段必须是下划线形式。
         const file = att.localPath
           ? `file:///${att.localPath.replace(/\\/g, '/')}`
           : (att.url ?? '')
@@ -210,7 +269,7 @@ export function toOneBotSegments(content: string, attachments?: Attachment[]): O
           type: 'image',
           data: {
             file,
-            subType: 1, // 关键: 告诉 NTQQ 这是表情包
+            sub_type: 1,
             summary: '[表情]', // 非图形界面的摘要显示
           },
         })

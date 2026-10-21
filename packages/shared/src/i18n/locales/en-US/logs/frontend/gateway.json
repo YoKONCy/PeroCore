@@ -1,0 +1,16 @@
+{
+  "读取 Electron 能力节点 ID 失败: {0}": "Failed to read Electron capability node ID: {0}",
+  "WS 未连接，无法发送消息": "WS is not connected and cannot send messages",
+  "发送网关消息失败": "failed to send gateway message",
+  "聚焦窗口获取 Input Seat 失败: {0}": "Focus window acquisition Input Seat failed: {0}",
+  "Input Seat 重新获取失败: {0}": "Input Seat reacquisition failed: {0}",
+  "Input Seat 续租失败: {0}": "Input Seat lease renewal failed: {0}",
+  "WS 未连接，无法发送音频流": "WS is not connected and cannot send audio stream",
+  "通配符回调错误": "wildcard callback error",
+  "回调错误 ({0})": "callback error ({0})",
+  "连接与会话握手已完成": "connection and session handshake completed",
+  "Input Seat 获取失败": "Input Seat acquisition failed",
+  "Durable Stream 恢复失败": "Durable Stream recovery failed",
+  "未知消息: type={0} action={1}": "Unknown message: type={0} action={1}\nReconnect after",
+  "{0}ms 后重连 (第 {1} 次)": "{0}ms ({1} time)"
+}

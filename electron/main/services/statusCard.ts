@@ -1,4 +1,5 @@
 import { BrowserWindow, app } from 'electron'
+import { getLocale } from '../utils/i18n'
 import { isPackagedRuntime } from '../utils/runtimeMode'
 import os from 'node:os'
 import path from 'node:path'
@@ -93,7 +94,7 @@ async function readSnapshot(tasks: StatusCardSnapshot['tasks']): Promise<StatusC
   const end = cpuTimes()
   const total = end.total - start.total
   return {
-    capturedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+    capturedAt: new Date().toLocaleString(getLocale(), { hour12: false }),
     deviceName: os.hostname(),
     platform: `${os.platform()} · ${os.arch()}`,
     uptimeSeconds: os.uptime(),

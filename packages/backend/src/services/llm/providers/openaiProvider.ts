@@ -1,3 +1,4 @@
+import { t as __t } from '../../../lib/i18n'
 /**
  * OpenAI 兼容 Provider
  *
@@ -13,6 +14,7 @@
  * @module packages/backend/src/services/llm/providers/openaiProvider
  */
 
+import { providerApiUrl } from './providerUrl'
 import { normalizeTokenUsage } from '../usage'
 import { combinedOutputLimit, fetchLlmResponse } from '../requestPolicy'
 import { compactNativeReasoning } from '../reasoning'
@@ -34,6 +36,7 @@ import { AppError } from '../../../lib/appError'
 import { normalizeSystemMessages, sanitizeToolParameters, stripBase64DataUris } from '../sanitize'
 import { createLogger } from '../../../lib/logger'
 import { temporaryUpstreamCode } from '../retryPolicy'
+import { modelNetworkDetails, safeModelDiagnostic, unsupportedModelMedia } from '../diagnostics'
 import { upstreamHttpError, upstreamWebPage } from '../../../lib/upstreamHttpError'
 
 const logger = createLogger('OpenAiProvider')
@@ -76,7 +79,13 @@ export class OpenAiProvider implements LlmProvider {
     const url = this.buildUrl('/chat/completions')
     const payload = this.buildPayload(messages, opts, false)
 
-    const response = await this.fetchWithTimeout(url, payload, opts.timeout ?? 600_000, opts.signal)
+    const response = await this.fetchWithTimeout(
+      url,
+      payload,
+      opts.timeout ?? 600_000,
+      opts.signal,
+      opts.totalTimeout,
+    )
 
     if (!response.ok || upstreamWebPage(response)) {
       await this.handleError(response, 'chat')
@@ -96,7 +105,13 @@ export class OpenAiProvider implements LlmProvider {
     const url = this.buildUrl('/chat/completions')
     const payload = this.buildPayload(messages, opts, true)
 
-    const response = await this.fetchWithTimeout(url, payload, opts.timeout ?? 600_000, opts.signal)
+    const response = await this.fetchWithTimeout(
+      url,
+      payload,
+      opts.timeout ?? 600_000,
+      opts.signal,
+      opts.totalTimeout,
+    )
 
     if (!response.ok || upstreamWebPage(response)) {
       await this.handleError(response, 'chatStream')
@@ -138,16 +153,21 @@ export class OpenAiProvider implements LlmProvider {
             chunk = JSON.parse(data) as Record<string, unknown>
           } catch {
             // 少数兼容厂商会混入非 JSON 行；跳过坏行，避免整个流式会话被中断。
-            logger.debug(`跳过无法解析的 SSE 数据: ${data.slice(0, 100)}`)
+            logger.debug(__t('logs.llm', '跳过无法解析的 SSE 数据: {0}', [data.slice(0, 100)]))
             continue
           }
           if (chunk.error && typeof chunk.error === 'object') {
             const error = chunk.error as Record<string, unknown>
             throw new AppError('LLM_ERROR', {
-              message: typeof error.message === 'string' ? error.message : '上游流式请求异常',
+              message:
+                typeof error.message === 'string'
+                  ? safeModelDiagnostic(error.message)
+                  : '上游流式请求异常',
               data: {
                 provider: 'openai',
-                retryable: temporaryUpstreamCode(error.code) || temporaryUpstreamCode(error.type),
+                retryable:
+                  !unsupportedModelMedia(String(error.message ?? '')) &&
+                  (temporaryUpstreamCode(error.code) || temporaryUpstreamCode(error.type)),
               },
             })
           }
@@ -164,8 +184,8 @@ export class OpenAiProvider implements LlmProvider {
 
   /** 仅在模型列表路由不受支持时探测兼容端点，真实失败必须交给前端。 */
   async listModels(): Promise<string[]> {
-    const modelList = await this.tryFetchModels('/v1/models')
-    const models = modelList ?? (await this.tryFetchModels('/v1/embeddings'))
+    const modelList = await this.tryFetchModels('/models')
+    const models = modelList ?? (await this.tryFetchModels('/embeddings'))
     if (models === null)
       throw new AppError('LLM_ERROR', {
         message: '服务商未提供可用的模型列表接口，请手动填写模型名称',
@@ -234,7 +254,7 @@ export class OpenAiProvider implements LlmProvider {
                 data: { provider: 'openai', operation: 'list_models', retryable: false },
               },
             )
-      logger.warn('获取模型列表失败', {
+      logger.warn(__t('logs.llm', '获取模型列表失败'), {
         endpoint,
         reason: error.message,
         details: error.data,
@@ -247,13 +267,7 @@ export class OpenAiProvider implements LlmProvider {
 
   /** 构建 API URL */
   private buildUrl(endpoint: string): string {
-    const base = this.config.apiBase.replace(/\/$/, '')
-    // endpoint 统一带 /v1 前缀，base 末尾不带 /v1，直接拼
-    // 如果 base 末尾带 /v1，则去掉 endpoint 的 /v1 前缀避免重复
-    if (base.endsWith('/v1')) {
-      return `${base}${endpoint.replace(/^\/v1/, '')}`
-    }
-    return `${base}${endpoint}`
+    return providerApiUrl(this.config.apiBase, endpoint)
   }
 
   /** 构建请求头 */
@@ -575,6 +589,7 @@ export class OpenAiProvider implements LlmProvider {
     payload: Record<string, unknown>,
     timeoutMs: number,
     signal?: AbortSignal,
+    totalTimeout?: number,
   ): Promise<Response> {
     try {
       return await fetchLlmResponse(
@@ -584,7 +599,7 @@ export class OpenAiProvider implements LlmProvider {
           headers: this.buildHeaders(),
           body: JSON.stringify(payload),
         },
-        { timeout: timeoutMs, signal },
+        { timeout: timeoutMs, totalTimeout, signal },
         'openai',
       )
     } catch (err) {
@@ -597,9 +612,27 @@ export class OpenAiProvider implements LlmProvider {
         })
       }
       if (signal?.aborted) throw err
+      const details = modelNetworkDetails(err)
+      let endpoint = 'API 基址不可解析'
+      try {
+        endpoint = new URL(url).origin
+      } catch {
+        /* 不让诊断覆盖原始网络错误。 */
+      }
+      logger.warn(__t('logs.llm', 'OpenAI 网络请求失败'), {
+        model: this.config.modelId,
+        endpoint,
+        details,
+      })
       throw new AppError('LLM_ERROR', {
-        message: `OpenAI 网络错误: ${err instanceof Error ? err.message : String(err)}`,
-        data: { provider: 'openai', model: this.config.modelId, retryable: true },
+        message: `OpenAI 网络错误: ${details.join('；') || '连接失败'}`,
+        data: {
+          provider: 'openai',
+          model: this.config.modelId,
+          retryable: true,
+          networkDetails: details,
+        },
+        cause: err,
       })
     }
   }
@@ -610,7 +643,7 @@ export class OpenAiProvider implements LlmProvider {
     const code = STATUS_TO_CODE[response.status] ?? 'LLM_ERROR'
     if (upstreamWebPage(response, text)) {
       const error = upstreamHttpError(response, text, '模型 API', code)
-      logger.error(`OpenAI ${method} 失败`, {
+      logger.error(__t('logs.llm', 'OpenAI {0} 失败', [method]), {
         status: response.status,
         reason: error.message,
         model: this.config.modelId,
@@ -634,6 +667,8 @@ export class OpenAiProvider implements LlmProvider {
     }
     const freeLimit =
       response.status === 429 && /free users|token plan|insufficient_quota/i.test(upstreamMessage)
+    const invalidMedia = unsupportedModelMedia(upstreamMessage)
+    upstreamMessage = safeModelDiagnostic(upstreamMessage)
     const message = freeLimit
       ? '模型服务已达到免费用户调用限制，请稍后重试或检查上游套餐。'
       : `模型服务请求失败 (${response.status}): ${upstreamMessage.slice(0, 500)}`
@@ -641,9 +676,9 @@ export class OpenAiProvider implements LlmProvider {
     // 尝试解析 retryAfter (429 场景)
     const retryMs = parseRetryAfterMs(response.headers.get('retry-after'))
 
-    logger.error(`OpenAI ${method} 失败`, {
+    logger.error(__t('logs.llm', 'OpenAI {0} 失败', [method]), {
       status: response.status,
-      body: text.slice(0, 300),
+      body: safeModelDiagnostic(text, 300),
       model: this.config.modelId,
     })
 
@@ -653,7 +688,7 @@ export class OpenAiProvider implements LlmProvider {
         provider: 'openai',
         model: this.config.modelId,
         status: response.status,
-        retryable: !freeLimit && RETRYABLE_STATUSES.has(response.status),
+        retryable: !freeLimit && !invalidMedia && RETRYABLE_STATUSES.has(response.status),
         upstreamMessage,
         retryAfter: retryMs,
       },

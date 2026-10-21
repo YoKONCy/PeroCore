@@ -1,3 +1,4 @@
+import { t as __t } from '../utils/i18n'
 import { createHash, randomUUID } from 'node:crypto'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import {
@@ -1062,7 +1063,7 @@ export class ElectronBrowserRuntime {
           targetId: id,
           kind: 'browser',
           icon: 'globe',
-          title: '浏览器',
+          title: __t('electron.ui.browserRuntime', '浏览器'),
           url,
           loading: true,
         },
@@ -1123,7 +1124,7 @@ export class ElectronBrowserRuntime {
       if (view.webContents.isDestroyed()) return
       const contents = view.webContents
       desktopTabs.update(target.tabId, {
-        title: contents.getTitle() || '浏览器',
+        title: contents.getTitle() || __t('electron.ui.browserRuntime', '浏览器'),
         url: contents.getURL() || url,
         loading: contents.isLoading(),
         canGoBack: contents.navigationHistory.canGoBack(),

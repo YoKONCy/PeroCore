@@ -1,3 +1,4 @@
+import { t as __t } from '../runtime/i18n'
 import type { BuiltinTool } from '@infos/backend/applicationHostAbi'
 import { createLogger } from '@infos/backend/applicationHostAbi'
 
@@ -135,8 +136,8 @@ export const socialSetOwnerPrivateOnlyTool: BuiltinTool = {
         enabled: result.enabled,
         closed_sessions: result.closedSessions,
         message: enabled
-          ? '已切换为仅主人私聊可激活；陌生人私聊与全部群聊不会再进入状态机'
-          : '已恢复正常社交激活策略',
+          ? __t('apps.social.ui', '已切换为仅主人私聊可激活；陌生人私聊与全部群聊不会再进入状态机')
+          : __t('apps.social.ui', '已恢复正常社交激活策略'),
       })
     } catch (error) {
       return JSON.stringify({
@@ -158,11 +159,13 @@ export const socialSendMessageTool: BuiltinTool = {
       await provider.sendMessage(context.agentId, target, content, type)
       return JSON.stringify({
         success: true,
-        message: `已发送消息到${type === 'group' ? `群 ${target}` : `用户 ${target}`}`,
+        message: __t('apps.social.ui', '已发送消息到{0}', [
+          type === 'group' ? `群 ${target}` : `用户 ${target}`,
+        ]),
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      logger.error(`发送消息失败: ${message}`)
+      logger.error(__t('apps.social.logs', '发送消息失败: {0}', [message]))
       return JSON.stringify({ error: `发送消息失败: ${message}` })
     }
   },
@@ -278,7 +281,10 @@ export const socialHandleRequestTool: BuiltinTool = {
         approve,
         typeof args.remark === 'string' ? args.remark : undefined,
       )
-      return JSON.stringify({ success: true, message: `已${approve ? '接受' : '拒绝'}好友请求` })
+      return JSON.stringify({
+        success: true,
+        message: __t('apps.social.ui', '已{0}好友请求', [approve ? '接受' : '拒绝']),
+      })
     } catch (err) {
       return JSON.stringify({
         error: `处理好友请求失败: ${err instanceof Error ? err.message : String(err)}`,
@@ -302,7 +308,7 @@ export const socialReadForwardMsgTool: BuiltinTool = {
         total: messages.length,
         hasNestedForward,
         hint: hasNestedForward
-          ? '内容中包含嵌套转发，可使用对应 forward_id 再次调用本工具。'
+          ? __t('apps.social.ui', '内容中包含嵌套转发，可使用对应 forward_id 再次调用本工具。')
           : undefined,
         messages: messages.map((item, index) => ({
           index: index + 1,
@@ -339,7 +345,7 @@ export const socialReadImageTool: BuiltinTool = {
       return JSON.stringify({
         success: true,
         count: images.length,
-        message: `已读取 ${images.length} 张图片`,
+        message: __t('apps.social.ui', '已读取 {0} 张图片', [images.length]),
         images,
       })
     } catch (err) {
@@ -393,7 +399,10 @@ export const socialRememberContactImpressionTool: BuiltinTool = {
       sourceChannelId:
         typeof args.source_channel_id === 'string' ? args.source_channel_id : undefined,
     })
-    return JSON.stringify({ success: true, message: `已更新对用户 ${userId} 的印象与身份` })
+    return JSON.stringify({
+      success: true,
+      message: __t('apps.social.ui', '已更新对用户 {0} 的印象与身份', [userId]),
+    })
   },
 }
 

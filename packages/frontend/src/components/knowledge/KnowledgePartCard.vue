@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import { ref } from 'vue'
 import type { KnowledgePartInfo, KnowledgeSearchHit } from '@infos/shared'
 import { knowledgeApi } from '../../api/modules/knowledgeApi'
@@ -60,7 +62,12 @@ async function expand(more = false): Promise<void> {
           hit.matchedBy
             .map(
               (method) =>
-                ({ bm25: '关键词', vector: '语义', regex: '正则', id: '指定片段' })[method],
+                ({
+                  bm25: __t('ui.knowledge', '关键词'),
+                  vector: __t('ui.knowledge', '语义'),
+                  regex: __t('ui.knowledge', '正则'),
+                  id: '指定片段',
+                })[method],
             )
             .join(' · ')
         }}
@@ -71,14 +78,14 @@ async function expand(more = false): Promise<void> {
           size="xs"
           :animation="loading ? 'spin' : undefined"
         />
-        {{ open ? '收起原文' : '查看原文' }}
+        {{ open ? __t('ui.knowledge', '收起原文') : __t('ui.knowledge', '查看原文') }}
       </button>
     </footer>
     <p v-if="error" class="part-error" role="alert">{{ error }}</p>
     <div v-if="open" class="part-original">
       <pre>{{ body }}</pre>
       <button v-if="offset !== undefined" :disabled="loading" @click="expand(true)">
-        {{ loading ? '读取中…' : '继续展开' }}
+        {{ loading ? __t('ui.knowledge', '读取中…') : __t('ui.knowledge', '继续展开') }}
       </button>
     </div>
   </article>

@@ -1,3 +1,5 @@
+import { getDisplayLocale } from '../i18n/index'
+import { t as __t } from '../i18n/index'
 /**
  * 客户端历史记录导出器
  *
@@ -28,13 +30,15 @@ function safeFileName(value: string): string {
   const normalized = Array.from(withoutReserved, (character) =>
     character.charCodeAt(0) <= 31 ? '_' : character,
   ).join('')
-  return normalized.slice(0, 80) || '历史记录'
+  return normalized.slice(0, 80) || __t('ui.historyExport', '历史记录')
 }
 
 function formatTime(value?: string | null): string {
-  if (!value) return '时间未知'
+  if (!value) return __t('ui.historyExport', '时间未知')
   const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN', { hour12: false })
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleString(getDisplayLocale(), { hour12: false })
 }
 
 function fenced(value: string, language = ''): string {
@@ -48,10 +52,10 @@ function roleName(
   names: Record<string, string> = {},
 ): string {
   if (senderId && names[senderId]) return names[senderId]
-  if (role === 'user') return '用户'
-  if (role === 'assistant') return senderId || '助手'
-  if (role === 'tool') return '工具'
-  return '系统'
+  if (role === 'user') return __t('ui.historyExport', '用户')
+  if (role === 'assistant') return senderId || __t('ui.historyExport', '助手')
+  if (role === 'tool') return __t('ui.historyExport', '工具')
+  return __t('ui.historyExport', '系统')
 }
 
 function thinkingSections(message: ConversationMessageProjection): string[] {
@@ -59,13 +63,19 @@ function thinkingSections(message: ConversationMessageProjection): string[] {
     .filter((block) => block.kind === 'thinking' || block.kind === 'native_reasoning')
     .sort((left, right) => left.sequence - right.sequence)
   if (blocks.length > 0) {
-    return blocks.map((block) => `<think>\n${block.content}\n</think>`)
+    return blocks.map((block) => {
+      const tag = block.kind === 'native_reasoning' ? 'think' : 'selfMinding'
+      return `<${tag}>\n${block.content}\n</${tag}>`
+    })
   }
 
   const raw = message.rawContent ?? ''
-  return [...raw.matchAll(/<think>([\s\S]*?)<\/think>/gi)].map(
-    (match) => `<think>${match[1] ?? ''}</think>`,
-  )
+  return [
+    ...raw.matchAll(/<(selfMinding|think|thinking|thought)(?:\s[^>]*)?>([\s\S]*?)<\/\1>/gi),
+  ].map((match) => {
+    const tag = match[1]!.toLowerCase() === 'selfminding' ? 'selfMinding' : match[1]!.toLowerCase()
+    return `<${tag}>${match[2] ?? ''}</${tag}>`
+  })
 }
 
 function toolSections(message: ConversationMessageProjection): string[] {

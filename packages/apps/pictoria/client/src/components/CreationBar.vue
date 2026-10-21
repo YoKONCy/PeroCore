@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import type {
   Asset,
@@ -394,8 +396,12 @@ defineExpose({
     <Transition name="float">
       <section v-if="picker" class="step-picker floating-panel">
         <header>
-          <strong>选择步骤</strong>
-          <button class="icon-button" aria-label="关闭步骤选择" @click="picker = false">
+          <strong>{{ __t('apps.pictoria.ui', '选择步骤') }}</strong>
+          <button
+            class="icon-button"
+            :aria-label="__t('apps.pictoria.ui', '关闭步骤选择')"
+            @click="picker = false"
+          >
             <Icon name="close" :size="16" />
           </button>
         </header>
@@ -410,7 +416,9 @@ defineExpose({
           "
         >
           <span class="step-symbol"><Icon name="note" /></span>
-          <span><strong>便签</strong></span>
+          <span>
+            <strong>{{ __t('apps.pictoria.ui', '便签') }}</strong>
+          </span>
           <Icon v-if="!stepId" name="check" :size="16" />
         </button>
         <button
@@ -438,7 +446,7 @@ defineExpose({
               }
             "
           >
-            配置模型
+            {{ __t('apps.pictoria.ui', '配置模型') }}
             <Icon name="chevron" :size="13" />
           </button>
         </div>
@@ -447,15 +455,21 @@ defineExpose({
     <Transition name="float">
       <section v-if="settings && step" class="step-fields floating-panel">
         <header>
-          <strong>{{ step.name }} · 参数</strong>
-          <button class="icon-button" aria-label="收起输入配置" @click="settings = false">
+          <strong>{{ step.name }} {{ __t('apps.pictoria.ui', '· 参数') }}</strong>
+          <button
+            class="icon-button"
+            :aria-label="__t('apps.pictoria.ui', '收起输入配置')"
+            @click="settings = false"
+          >
             <Icon name="close" :size="16" />
           </button>
         </header>
         <label v-for="[key, schema] in extraFields" :key="key" class="step-field">
           <span>
             {{ schema.title || key }}
-            <small v-if="step.inputSchema.required?.includes(key)">必填</small>
+            <small v-if="step.inputSchema.required?.includes(key)">
+              {{ __t('apps.pictoria.ui', '必填') }}
+            </small>
           </span>
           <PictoriaSelect
             v-if="schema.enum"
@@ -480,7 +494,7 @@ defineExpose({
             v-else-if="schema.type === 'object' || schema.type === 'array'"
             :value="structuredText(fields[key])"
             rows="3"
-            placeholder="填写 JSON 结构化参数"
+            :placeholder="__t('apps.pictoria.ui', '填写 JSON 结构化参数')"
             @input="fields[key] = ($event.target as HTMLTextAreaElement).value"
           />
           <textarea
@@ -511,7 +525,7 @@ defineExpose({
       <button
         v-if="step"
         class="icon-button"
-        aria-label="步骤输入设置"
+        :aria-label="__t('apps.pictoria.ui', '步骤输入设置')"
         @click="
           () => {
             settings = !settings
@@ -527,12 +541,18 @@ defineExpose({
         ref="inputPort"
         class="composer-input-port"
         data-composer-link
-        title="把素材或便签连到这里"
-        aria-label="下方创作栏输入连接点"
+        :title="__t('apps.pictoria.ui', '把素材或便签连到这里')"
+        :aria-label="__t('apps.pictoria.ui', '下方创作栏输入连接点')"
         @pointerdown.stop
       >
         <Icon name="link" :size="13" />
-        <span>{{ referenceCount ? `${referenceCount} 份参考` : '连接输入' }}</span>
+        <span>
+          {{
+            referenceCount
+              ? __t('apps.pictoria.ui', '{0} 份参考', [referenceCount])
+              : __t('apps.pictoria.ui', '连接输入')
+          }}
+        </span>
       </button>
       <div v-if="assetFields.length" class="composer-asset-fields">
         <section v-for="[key, schema] in assetFields" :key="key">
@@ -560,10 +580,14 @@ defineExpose({
       <div v-else-if="!step && selected.length" class="creation-references">
         <span v-for="item in selected.slice(0, 4)" :key="item.id">
           <Icon :name="item.content.kind === 'text' ? 'note' : 'image'" :size="12" />
-          {{ item.content.name || '画布内容' }}
+          {{ item.content.name || __t('apps.pictoria.ui', '画布内容') }}
         </span>
         <small v-if="selected.length > 4">+{{ selected.length - 4 }}</small>
-        <button class="icon-button" aria-label="取消画布选择" @click="emit('clear')">
+        <button
+          class="icon-button"
+          :aria-label="__t('apps.pictoria.ui', '取消画布选择')"
+          @click="emit('clear')"
+        >
           <Icon name="close" :size="13" />
         </button>
       </div>
@@ -577,13 +601,20 @@ defineExpose({
         @keydown.meta.enter.prevent="submit()"
       />
       <footer>
-        <button class="icon-button" aria-label="导入素材" title="导入素材" @click="emit('upload')">
+        <button
+          class="icon-button"
+          :aria-label="__t('apps.pictoria.ui', '导入素材')"
+          :title="__t('apps.pictoria.ui', '导入素材')"
+          @click="emit('upload')"
+        >
           <Icon name="plus" :size="20" />
         </button>
-        <small v-if="referenceCount">{{ referenceCount }} 份参考</small>
+        <small v-if="referenceCount">
+          {{ referenceCount }} {{ __t('apps.pictoria.ui', '份参考') }}
+        </small>
         <span />
         <button v-if="step" class="text-button" :disabled="busy" @click="submit(true)">
-          加入画布
+          {{ __t('apps.pictoria.ui', '加入画布') }}
         </button>
         <kbd>Ctrl ↵</kbd>
         <button
@@ -592,7 +623,13 @@ defineExpose({
           @click="submit()"
         >
           <Icon :name="busy ? 'refresh' : step ? 'sparkle' : 'plus'" :size="17" />
-          {{ busy ? '提交中' : step ? '开始创作' : '放入画布' }}
+          {{
+            busy
+              ? __t('apps.pictoria.ui', '提交中')
+              : step
+                ? __t('apps.pictoria.ui', '开始创作')
+                : __t('apps.pictoria.ui', '放入画布')
+          }}
         </button>
       </footer>
       <p v-if="validation" class="composer-error" role="alert">{{ validation }}</p>

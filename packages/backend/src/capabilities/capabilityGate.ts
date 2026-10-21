@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * Capability Gate — 能力门控 (AIOS)
  *
@@ -28,7 +29,7 @@ import type {
 import type { SkillLoader } from './skillLoader'
 import type { ToolRegistry } from '../services/agent/toolRegistry'
 import type { InteractionMode } from '@infos/shared'
-import { isToolAllowedInInteractionMode } from '../tools/interactionMode'
+import { isToolAllowedInInteractionMode, MINIMAL_TOOLS } from '../tools/interactionMode'
 import { isSystemProtocolTool } from '../tools/systemProtocolTools'
 import { createLogger } from '../lib/logger'
 
@@ -46,25 +47,8 @@ const EMPTY_CAPABILITY: ResolvedCapability = {
   toolPermissions: new Map(),
 }
 
-const AMBIENT_ALLOWED_TOOLS = new Set([
-  'finish_task',
-  'take_screenshot',
-  'set_reminder',
-  'list_reminders',
-  'cancel_reminder',
-  'schedule_follow_up',
-  'suggest_next_step',
-  'write_event_note',
-  'revise_event_note',
-  'query_event_notes',
-  'query_facts',
-  'search_knowledge',
-  'write_fact',
-  'supersede_fact',
-  'delete_fact',
-  'add_fact_object_alias',
-  'remove_fact_object_alias',
-])
+/** 旧请求范围只作兼容，和 Thread 极简模式共用同一集合。 */
+const AMBIENT_ALLOWED_TOOLS = MINIMAL_TOOLS
 
 /** 到期跟进允许重新读取现状和提出建议，不允许外部写入、命令执行或动态解锁。 */
 const FOLLOW_UP_ALLOWED_TOOLS = new Set([
@@ -140,17 +124,21 @@ export class CapabilityGate {
               this.buildCapabilitiesYaml(config.agent, config.channels),
               'utf-8',
             )
-            logger.info(`已迁移角色能力配置中的废弃视觉提示: ${config.agent}`)
+            logger.info(
+              __t('logs.capabilities', '已迁移角色能力配置中的废弃视觉提示: {0}', [config.agent]),
+            )
           }
           this.configs.set(config.agent, config)
-          logger.debug(`能力配置已加载: ${config.agent}`)
+          logger.debug(__t('logs.capabilities', '能力配置已加载: {0}', [config.agent]))
         } catch (err) {
-          logger.warn(`解析 ${entry}/capabilities.yaml 失败: ${err}`)
+          logger.warn(
+            __t('logs.capabilities', '解析 {0}/capabilities.yaml 失败: {1}', [entry, err]),
+          )
         }
       }
     }
 
-    logger.info(`已加载 ${this.configs.size} 个 Agent 能力配置`)
+    logger.info(__t('logs.capabilities', '已加载 {0} 个 Agent 能力配置', [this.configs.size]))
 
     // 第七阶段修复（E1）：启动时校验 channel 配置覆盖情况
     // 缺失 channel 会导致 fail-closed（该通道下 Agent 无任何工具可用），
@@ -180,8 +168,14 @@ export class CapabilityGate {
       }
       if (missing.length > 0) {
         logger.warn(
-          `Agent "${agentId}" 缺少 channel 配置: [${missing.join(', ')}]。` +
-            `未配置的 channel 将 fail-closed（无工具可用），请在 capabilities.yaml 中补齐。`,
+          __t('logs.capabilities', 'Agent "{0}" 缺少 channel 配置: [{1}]。', [
+            agentId,
+            missing.join(', '),
+          ]) +
+            __t(
+              'logs.capabilities',
+              '未配置的 channel 将 fail-closed（无工具可用），请在 capabilities.yaml 中补齐。',
+            ),
         )
       }
     }
@@ -213,8 +207,10 @@ export class CapabilityGate {
 
     if (!channelConfig) {
       logger.warn(
-        `Agent ${agentId} 未配置 channel "${channel}" 的能力，fail-closed 返回空集。` +
-          `请在 capabilities.yaml 中显式声明该 channel 的工具白名单。`,
+        __t('logs.capabilities', 'Agent {0} 未配置 channel "{1}" 的能力，fail-closed 返回空集。', [
+          agentId,
+          channel,
+        ]) + __t('logs.capabilities', '请在 capabilities.yaml 中显式声明该 channel 的工具白名单。'),
       )
       return { ...EMPTY_CAPABILITY, allowedTools: new Set() }
     }
@@ -412,7 +408,13 @@ export class CapabilityGate {
       overrides.add(tool)
     }
 
-    logger.info(`Skill ${skillId} 临时解锁工具: [${tools.join(', ')}] (session=${sessionId})`)
+    logger.info(
+      __t('logs.capabilities', 'Skill {0} 临时解锁工具: [{1}] (session={2})', [
+        skillId,
+        tools.join(', '),
+        sessionId,
+      ]),
+    )
   }
 
   isSkillUnlockedTool(sessionId: string, toolName: string): boolean {
@@ -516,7 +518,12 @@ export class CapabilityGate {
     }
     mkdirSync(path.dirname(filePath), { recursive: true })
     writeFileSync(filePath, yaml, 'utf-8')
-    logger.info(`已更新 Agent 能力矩阵: ${agentId} (${Object.keys(finalChannels).length} channels)`)
+    logger.info(
+      __t('logs.capabilities', '已更新 Agent 能力矩阵: {0} ({1} channels)', [
+        agentId,
+        Object.keys(finalChannels).length,
+      ]),
+    )
   }
 
   /** 定位 Agent 的 capabilities.yaml 路径（内部扫描目录，找不到返回 null） */

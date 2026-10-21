@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import { nextTick, ref, watch } from 'vue'
 import type { DesktopTab } from '@infos/shared'
 import { PixelIcon } from '../pixel'
@@ -42,11 +44,15 @@ function cancelEdit(): void {
 </script>
 
 <template>
-  <form class="desktop-browser-toolbar" aria-label="浏览器导航" @submit.prevent="navigate">
+  <form
+    class="desktop-browser-toolbar"
+    :aria-label="__t('ui.layout', '浏览器导航')"
+    @submit.prevent="navigate"
+  >
     <button
       type="button"
-      title="后退"
-      aria-label="后退"
+      :title="__t('ui.layout', '后退')"
+      :aria-label="__t('ui.layout', '后退')"
       :disabled="!tab.canGoBack || tab.locked"
       @click="emit('action', 'back')"
     >
@@ -54,8 +60,8 @@ function cancelEdit(): void {
     </button>
     <button
       type="button"
-      title="前进"
-      aria-label="前进"
+      :title="__t('ui.layout', '前进')"
+      :aria-label="__t('ui.layout', '前进')"
       :disabled="!tab.canGoForward || tab.locked"
       @click="emit('action', 'forward')"
     >
@@ -63,8 +69,8 @@ function cancelEdit(): void {
     </button>
     <button
       type="button"
-      :title="tab.loading ? '停止加载' : '刷新网页'"
-      :aria-label="tab.loading ? '停止加载' : '刷新网页'"
+      :title="tab.loading ? __t('ui.layout', '停止加载') : __t('ui.layout', '刷新网页')"
+      :aria-label="tab.loading ? __t('ui.layout', '停止加载') : __t('ui.layout', '刷新网页')"
       :disabled="tab.locked"
       @click="emit('action', tab.loading ? 'stop' : 'reload')"
     >
@@ -76,8 +82,8 @@ function cancelEdit(): void {
         ref="input"
         v-model="address"
         :disabled="tab.locked"
-        aria-label="网址或搜索内容"
-        placeholder="输入网址或搜索内容"
+        :aria-label="__t('ui.layout', '网址或搜索内容')"
+        :placeholder="__t('ui.layout', '输入网址或搜索内容')"
         autocomplete="off"
         spellcheck="false"
         @focus="editing = true"
@@ -87,7 +93,7 @@ function cancelEdit(): void {
     </div>
     <span v-if="tab.locked" class="desktop-browser-lock">
       <PixelIcon name="sparkle" size="xs" />
-      Agent 操作中
+      {{ __t('ui.layout', 'Agent 操作中') }}
     </span>
   </form>
 </template>

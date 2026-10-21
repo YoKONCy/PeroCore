@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 import type {
   ConversationMessageProjection,
   ConversationProjectionSnapshot,
@@ -156,7 +157,7 @@ export class ConversationProjectionService {
               inputId: input.id,
               inputKind: 'agent_question',
               principalId: input.agentId,
-              title: '想问问你',
+              title: __t('server.projections', '想问问你'),
               question: input.question,
               questions: input.questions,
               context:
@@ -167,10 +168,20 @@ export class ConversationProjectionService {
               allowFreeText: input.allowFreeText,
               required: input.required,
               actions: input.required
-                ? [{ id: 'answer', label: '回答并继续', tone: 'primary' }]
+                ? [
+                    {
+                      id: 'answer',
+                      label: __t('server.projections', '回答并继续'),
+                      tone: 'primary',
+                    },
+                  ]
                 : [
-                    { id: 'skip', label: '暂时跳过', tone: 'neutral' },
-                    { id: 'answer', label: '回答并继续', tone: 'primary' },
+                    { id: 'skip', label: __t('server.projections', '暂时跳过'), tone: 'neutral' },
+                    {
+                      id: 'answer',
+                      label: __t('server.projections', '回答并继续'),
+                      tone: 'primary',
+                    },
                   ],
             },
           },
@@ -380,6 +391,7 @@ export class ConversationProjectionService {
           turn,
           kind: 'tool',
           callId: item.callId,
+          parentCallId: typeof item.parentCallId === 'string' ? item.parentCallId : undefined,
           name: item.name,
           args: typeof item.args === 'string' ? item.args : JSON.stringify(item.args ?? {}),
           result: typeof item.result === 'string' ? item.result : undefined,
@@ -402,6 +414,7 @@ export class ConversationProjectionService {
         .filter((item) => typeof item.name === 'string')
         .map((item) => ({
           callId: typeof item.callId === 'string' ? item.callId : undefined,
+          parentCallId: typeof item.parentCallId === 'string' ? item.parentCallId : undefined,
           name: item.name as string,
           args: typeof item.args === 'string' ? item.args : JSON.stringify(item.args ?? {}),
           result: typeof item.result === 'string' ? item.result : undefined,

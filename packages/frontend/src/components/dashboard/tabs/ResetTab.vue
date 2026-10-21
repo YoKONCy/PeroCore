@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../../i18n/index'
+
 /**
  * ResetTab — 危险区域 Tab
  *
@@ -51,8 +53,12 @@ interface DangerAction {
 const dangerActions: DangerAction[] = [
   {
     action: 'clear-logs',
-    label: '清空对话记录',
-    description: '删除所有对话日志与消息历史。记忆节点和配置不受影响。',
+    get label() {
+      return __t('ui.settings', '清空对话记录')
+    },
+    get description() {
+      return __t('ui.settings', '删除所有对话日志与消息历史。记忆节点和配置不受影响。')
+    },
     severity: 'medium',
     icon: 'chat',
     buttonText: '清空',
@@ -62,8 +68,12 @@ const dangerActions: DangerAction[] = [
   },
   {
     action: 'memories',
-    label: '重置全部记忆',
-    description: '清理全部角色的记忆、共享事实、索引、关联日记及检索学习状态。保留对话和知识文档。',
+    get label() {
+      return __t('ui.settings', '重置全部记忆')
+    },
+    get description() {
+      return __t('ui.settings', '删除全部角色记忆、共享事实及关联日记，保留对话和知识文档。')
+    },
     severity: 'high',
     icon: 'brain',
     buttonText: '重置',
@@ -73,8 +83,12 @@ const dangerActions: DangerAction[] = [
   },
   {
     action: 'factory',
-    label: '恢复出厂设置',
-    description: '删除所有数据：对话、记忆、配置与模型设置。应用将回到初始状态。',
+    get label() {
+      return __t('ui.settings', '恢复出厂设置')
+    },
+    get description() {
+      return __t('ui.settings', '删除所有数据：对话、记忆、配置与模型设置。应用将回到初始状态。')
+    },
     severity: 'critical',
     icon: 'alert',
     buttonText: '恢复出厂',
@@ -124,7 +138,7 @@ function openResetDialog(action: DangerAction) {
   // 恢复出厂设置的主文案需要当前角色名（自定义角色已由 refreshAgentName 同步）
   if (action.action === 'factory') {
     action.mainText = `主人，真的要让${agentName.value}忘掉你吗？o(╥﹏╥)o`
-    action.subText = '所有数据都会被清空，一切回到最初的样子。如需继续，请在下方输入确认短语。'
+    action.subText = '所有数据将被清空。请输入确认短语。'
   }
   pendingAction.value = action
   confirmInput.value = ''
@@ -144,7 +158,10 @@ async function confirmReset() {
 
   // 校验确认短语，不匹配则抖动并提示
   if (confirmInput.value.trim() !== action.phrase) {
-    notif.toast('确认短语不匹配，操作已取消', { type: 'error', title: action.label })
+    notif.toast(__t('ui.settings', '确认短语不匹配，操作已取消'), {
+      type: 'error',
+      title: action.label,
+    })
     triggerShake()
     return
   }
@@ -154,15 +171,18 @@ async function confirmReset() {
     switch (action.action) {
       case 'clear-logs':
         await resetApi.clearLogs(action.phrase)
-        notif.toast('对话记录已清空', { type: 'success', title: action.label })
+        notif.toast(__t('ui.settings', '对话记录已清空'), { type: 'success', title: action.label })
         break
       case 'memories':
         await resetApi.resetMemories(action.phrase, includeSocial.value)
-        notif.toast('记忆已重置', { type: 'success', title: action.label })
+        notif.toast(__t('ui.settings', '记忆已重置'), { type: 'success', title: action.label })
         break
       case 'factory':
         await resetApi.factoryReset(action.phrase)
-        notif.toast('已恢复出厂设置，正在重新加载…', { type: 'success', title: action.label })
+        notif.toast(__t('ui.settings', '已恢复出厂设置，正在重新加载…'), {
+          type: 'success',
+          title: action.label,
+        })
         break
     }
     pendingAction.value = null
@@ -174,8 +194,8 @@ async function confirmReset() {
       await ctx.triggerRefresh()
     }
   } catch (err) {
-    logger.error('ResetTab', `${action.label} 执行失败`, err)
-    notif.toast('操作失败，请稍后重试', { type: 'error', title: action.label })
+    logger.error('ResetTab', __t('logs.frontend.settings', '{0} 执行失败', [action.label]), err)
+    notif.toast(__t('ui.settings', '操作失败，请稍后重试'), { type: 'error', title: action.label })
   } finally {
     isProcessing.value = false
   }
@@ -196,10 +216,20 @@ async function exportData() {
     a.download = `infos-config-export-${new Date().toISOString().slice(0, 10)}.json`
     a.click()
     URL.revokeObjectURL(url)
-    notif.toast('数据已导出', { type: 'success', title: '数据导出' })
+    notif.toast(__t('ui.settings', '数据已导出'), {
+      type: 'success',
+      get title() {
+        return __t('ui.settings', '数据导出')
+      },
+    })
   } catch (err) {
-    logger.error('ResetTab', '导出失败', err)
-    notif.toast('导出失败，请稍后重试', { type: 'error', title: '数据导出' })
+    logger.error('ResetTab', __t('logs.frontend.settings', '导出失败'), err)
+    notif.toast(__t('ui.settings', '导出失败，请稍后重试'), {
+      type: 'error',
+      get title() {
+        return __t('ui.settings', '数据导出')
+      },
+    })
   } finally {
     isExporting.value = false
   }
@@ -222,7 +252,7 @@ async function exportData() {
           >
             <PixelIcon name="alert" size="md" />
           </span>
-          <span>危险区域</span>
+          <span>{{ __t('ui.settings', '危险区域') }}</span>
         </h2>
         <p
           class="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--rz-sub)] mt-1 ml-9 font-pixel"
@@ -238,16 +268,18 @@ async function exportData() {
             <PixelIcon name="download" size="sm" />
           </div>
           <div class="min-w-0">
-            <h3 class="text-sm font-black text-[var(--rz-text)] font-pixel">数据导出</h3>
+            <h3 class="text-sm font-black text-[var(--rz-text)] font-pixel">
+              {{ __t('ui.settings', '数据导出') }}
+            </h3>
             <p class="text-[11px] text-[var(--rz-sub)] mt-0.5">
-              将全部配置、记忆与对话记录导出为 JSON 文件，便于备份或迁移
+              {{ __t('ui.settings', '导出配置、记忆与对话记录') }}
             </p>
           </div>
         </div>
         <button class="rz-btn rz-btn-sky" :disabled="isExporting" @click="exportData">
           <PixelIcon v-if="isExporting" name="refresh" size="xs" animation="spin" />
           <PixelIcon v-else name="download" size="xs" />
-          {{ isExporting ? '导出中…' : '导出全部数据' }}
+          {{ isExporting ? __t('ui.settings', '导出中…') : __t('ui.settings', '导出全部数据') }}
         </button>
       </div>
 
@@ -267,7 +299,10 @@ async function exportData() {
               <h4 class="rz-card-title font-pixel">{{ action.label }}</h4>
               <p class="rz-card-desc">{{ action.description }}</p>
               <!-- 确认短语提示，降低误触概率 -->
-              <p class="rz-card-phrase font-pixel">需输入「{{ action.phrase }}」确认</p>
+              <p class="rz-card-phrase font-pixel">
+                {{ __t('ui.settings', '需输入「') }}{{ action.phrase
+                }}{{ __t('ui.settings', '」确认') }}
+              </p>
             </div>
           </div>
           <button
@@ -292,8 +327,10 @@ async function exportData() {
                 <PixelIcon name="alert" size="sm" animation="pulse" />
               </div>
               <div>
-                <h3 class="rz-dialog-title font-pixel">危险操作确认</h3>
-                <p class="rz-dialog-subtitle">此操作不可撤销，请仔细核对确认短语</p>
+                <h3 class="rz-dialog-title font-pixel">{{ __t('ui.settings', '危险操作确认') }}</h3>
+                <p class="rz-dialog-subtitle">
+                  {{ __t('ui.settings', '此操作不可撤销，请仔细核对确认短语') }}
+                </p>
               </div>
             </div>
 
@@ -304,7 +341,7 @@ async function exportData() {
               <input
                 v-model="confirmInput"
                 class="rz-input rz-pixel-border"
-                :placeholder="`请输入「${pendingAction.phrase}」以继续`"
+                :placeholder="__t('ui.settings', '请输入「{0}」以继续', [pendingAction.phrase])"
                 :disabled="isProcessing"
                 @keydown.enter="confirmReset"
               />
@@ -316,7 +353,7 @@ async function exportData() {
               class="flex items-center gap-2 text-ui-text-secondary"
             >
               <input v-model="includeSocial" type="checkbox" :disabled="isProcessing" />
-              同时遗忘社交长记忆并取消社交任务
+              {{ __t('ui.settings', '同时遗忘社交长记忆并取消社交任务') }}
             </label>
             <div class="rz-dialog-footer">
               <button
@@ -324,14 +361,14 @@ async function exportData() {
                 :disabled="isProcessing"
                 @click="cancelReset"
               >
-                取消
+                {{ __t('ui.settings', '取消') }}
               </button>
               <button
                 class="rz-btn rz-btn-danger rz-pixel-border"
                 :disabled="isProcessing"
                 @click="confirmReset"
               >
-                {{ isProcessing ? '处理中…' : '继续' }}
+                {{ isProcessing ? __t('ui.settings', '处理中…') : __t('ui.settings', '继续') }}
               </button>
             </div>
           </div>

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import Icon from './PictoriaIcon.vue'
 import ResourceThumbnail from './ResourceThumbnail.vue'
@@ -242,48 +244,52 @@ onBeforeUnmount(() => {
     :class="{ 'is-resource-dragging': dragging }"
     data-ui
     role="dialog"
-    aria-label="创作资源库"
+    :aria-label="__t('apps.pictoria.ui', '创作资源库')"
     :aria-modal="!dragging"
     @dragend="dragging = false"
   >
     <header class="resource-header">
       <div>
         <small>YOUR CREATIVE COLLECTION</small>
-        <h2>资源库</h2>
+        <h2>{{ __t('apps.pictoria.ui', '资源库') }}</h2>
       </div>
-      <button class="icon-button" aria-label="关闭资源库" @click="emit('close')">
+      <button
+        class="icon-button"
+        :aria-label="__t('apps.pictoria.ui', '关闭资源库')"
+        @click="emit('close')"
+      >
         <Icon name="close" />
       </button>
     </header>
-    <nav class="resource-tabs" aria-label="资源分类">
+    <nav class="resource-tabs" :aria-label="__t('apps.pictoria.ui', '资源分类')">
       <button :class="{ active: tab === 'materials' }" @click="tab = 'materials'">
         <Icon name="image" :size="16" />
-        素材库
+        {{ __t('apps.pictoria.ui', '素材库') }}
       </button>
       <button :class="{ active: tab === 'artworks' }" @click="tab = 'artworks'">
         <Icon name="sparkle" :size="16" />
-        成品库
+        {{ __t('apps.pictoria.ui', '成品库') }}
       </button>
       <button :class="{ active: tab === 'prompts' }" @click="tab = 'prompts'">
         <Icon name="note" :size="16" />
-        提示词库
+        {{ __t('apps.pictoria.ui', '提示词库') }}
       </button>
     </nav>
     <div class="resource-filters">
       <label>
         <Icon name="search" :size="15" />
-        <input v-model="query" placeholder="搜索…" maxlength="200" />
+        <input v-model="query" :placeholder="__t('apps.pictoria.ui', '搜索…')" maxlength="200" />
       </label>
       <PictoriaSelect
         v-if="tab !== 'prompts'"
         v-model="type"
         :options="[
-          { value: 'all', label: '全部格式' },
-          { value: 'image', label: '图片' },
-          { value: 'video', label: '视频' },
-          { value: 'audio', label: '音频' },
+          { value: 'all', label: __t('apps.pictoria.ui', '全部格式') },
+          { value: 'image', label: __t('apps.pictoria.ui', '图片') },
+          { value: 'video', label: __t('apps.pictoria.ui', '视频') },
+          { value: 'audio', label: __t('apps.pictoria.ui', '音频') },
         ]"
-        label="素材类型"
+        :label="__t('apps.pictoria.ui', '素材类型')"
       />
       <button
         v-if="tab !== 'prompts'"
@@ -292,7 +298,7 @@ onBeforeUnmount(() => {
         @click="favorites = !favorites"
       >
         <Icon name="heart" :size="15" />
-        收藏
+        {{ __t('apps.pictoria.ui', '收藏') }}
       </button>
       <button
         v-if="tab === 'artworks'"
@@ -300,22 +306,26 @@ onBeforeUnmount(() => {
         :aria-pressed="finals"
         @click="finals = !finals"
       >
-        最终稿
+        {{ __t('apps.pictoria.ui', '最终稿') }}
       </button>
       <button class="create-button" @click="tab === 'prompts' ? editPrompt() : emit('upload')">
         <Icon name="plus" :size="15" />
-        {{ tab === 'prompts' ? '新建提示词' : '导入素材' }}
+        {{
+          tab === 'prompts'
+            ? __t('apps.pictoria.ui', '新建提示词')
+            : __t('apps.pictoria.ui', '导入素材')
+        }}
       </button>
     </div>
     <p v-if="problem" class="resource-problem" role="alert">
       {{ problem }}
-      <button class="text-button" @click="load">重试</button>
+      <button class="text-button" @click="load">{{ __t('apps.pictoria.ui', '重试') }}</button>
     </p>
     <div class="resource-content" :class="{ 'has-detail': detail || editing }">
       <div class="resource-scroll" :aria-busy="busy">
         <div v-if="busy" class="resource-empty">
           <Icon name="refresh" />
-          正在读取…
+          {{ __t('apps.pictoria.ui', '正在读取…') }}
         </div>
         <div v-else-if="tab === 'prompts'" class="prompt-grid">
           <article
@@ -328,7 +338,11 @@ onBeforeUnmount(() => {
             <header>
               <Icon name="note" :size="16" />
               <strong>{{ prompt.title }}</strong>
-              <button class="icon-button" aria-label="编辑提示词" @click="editPrompt(prompt)">
+              <button
+                class="icon-button"
+                :aria-label="__t('apps.pictoria.ui', '编辑提示词')"
+                @click="editPrompt(prompt)"
+              >
                 <Icon name="settings" :size="15" />
               </button>
             </header>
@@ -338,8 +352,12 @@ onBeforeUnmount(() => {
               <span v-for="tag in prompt.tags" :key="tag">{{ tag }}</span>
             </div>
             <footer>
-              <button class="text-button" @click="emit('prompt', prompt, false)">填入创作栏</button>
-              <button class="text-button" @click="emit('prompt', prompt, true)">放进画布</button>
+              <button class="text-button" @click="emit('prompt', prompt, false)">
+                {{ __t('apps.pictoria.ui', '填入创作栏') }}
+              </button>
+              <button class="text-button" @click="emit('prompt', prompt, true)">
+                {{ __t('apps.pictoria.ui', '放进画布') }}
+              </button>
             </footer>
           </article>
         </div>
@@ -362,7 +380,7 @@ onBeforeUnmount(() => {
             <small>
               {{ asset.mimeType.split('/')[1]?.toUpperCase() }} ·
               {{ (asset.sizeBytes / 1048576).toFixed(1) }} MB
-              <span v-if="asset.meta?.final">· 最终稿</span>
+              <span v-if="asset.meta?.final">{{ __t('apps.pictoria.ui', '· 最终稿') }}</span>
             </small>
           </button>
         </div>
@@ -374,70 +392,92 @@ onBeforeUnmount(() => {
           <strong>
             {{
               query
-                ? '没有找到匹配内容'
+                ? __t('apps.pictoria.ui', '没有找到匹配内容')
                 : tab === 'artworks'
-                  ? '下一份作品，从画布开始'
+                  ? __t('apps.pictoria.ui', '下一份作品，从画布开始')
                   : tab === 'prompts'
-                    ? '收藏一句好灵感'
-                    : '给画布准备一点素材'
+                    ? __t('apps.pictoria.ui', '收藏一句好灵感')
+                    : __t('apps.pictoria.ui', '给画布准备一点素材')
             }}
           </strong>
           <span>
             {{
               tab === 'artworks'
-                ? '生成和编辑结果会自动保存在这里。'
-                : '可以搜索、收藏，或拖进画布继续创作。'
+                ? __t('apps.pictoria.ui', '生成和编辑结果会自动保存在这里。')
+                : __t('apps.pictoria.ui', '可以搜索、收藏，或拖进画布继续创作。')
             }}
           </span>
         </div>
       </div>
       <aside v-if="editing" class="resource-detail">
         <header>
-          <strong>{{ editing.revision ? '编辑提示词' : '新建提示词' }}</strong>
-          <button class="icon-button" aria-label="关闭编辑" @click="editing = undefined">
+          <strong>
+            {{
+              editing.revision
+                ? __t('apps.pictoria.ui', '编辑提示词')
+                : __t('apps.pictoria.ui', '新建提示词')
+            }}
+          </strong>
+          <button
+            class="icon-button"
+            :aria-label="__t('apps.pictoria.ui', '关闭编辑')"
+            @click="editing = undefined"
+          >
             <Icon name="close" :size="16" />
           </button>
         </header>
         <label class="panel-field">
-          标题
+          {{ __t('apps.pictoria.ui', '标题') }}
           <input v-model="editing.title" maxlength="120" />
         </label>
         <label class="panel-field">
-          提示词
+          {{ __t('apps.pictoria.ui', '提示词') }}
           <textarea v-model="editing.text" rows="9" maxlength="64000" />
         </label>
         <label class="panel-field">
-          适用说明
+          {{ __t('apps.pictoria.ui', '适用说明') }}
           <input
             v-model="editing.usage"
-            placeholder="如：自然语言编辑／SDXL 正向 tags"
+            :placeholder="__t('apps.pictoria.ui', '如：自然语言编辑／SDXL 正向 tags')"
             maxlength="1000"
           />
         </label>
         <label class="panel-field">
-          标签
-          <input v-model="tags" placeholder="以逗号分隔" maxlength="1500" />
+          {{ __t('apps.pictoria.ui', '标签') }}
+          <input
+            v-model="tags"
+            :placeholder="__t('apps.pictoria.ui', '以逗号分隔')"
+            maxlength="1500"
+          />
         </label>
         <button class="create-button" :disabled="saving" @click="savePrompt()">
-          {{ saving ? '保存中' : '保存' }}
+          {{ saving ? __t('apps.pictoria.ui', '保存中') : __t('apps.pictoria.ui', '保存') }}
         </button>
         <button
           v-if="editing.revision && !confirmingDelete"
           class="text-button danger-button"
           @click="confirmingDelete = true"
         >
-          删除提示词
+          {{ __t('apps.pictoria.ui', '删除提示词') }}
         </button>
         <div v-if="confirmingDelete" class="inline-confirm">
-          <span>删除这条提示词？</span>
-          <button class="text-button" :disabled="saving" @click="savePrompt(true)">确认删除</button>
-          <button class="text-button" @click="confirmingDelete = false">取消</button>
+          <span>{{ __t('apps.pictoria.ui', '删除这条提示词？') }}</span>
+          <button class="text-button" :disabled="saving" @click="savePrompt(true)">
+            {{ __t('apps.pictoria.ui', '确认删除') }}
+          </button>
+          <button class="text-button" @click="confirmingDelete = false">
+            {{ __t('apps.pictoria.ui', '取消') }}
+          </button>
         </div>
       </aside>
       <aside v-else-if="detail" class="resource-detail">
         <header>
-          <strong>作品与素材</strong>
-          <button class="icon-button" aria-label="关闭详情" @click="detail = undefined">
+          <strong>{{ __t('apps.pictoria.ui', '作品与素材') }}</strong>
+          <button
+            class="icon-button"
+            :aria-label="__t('apps.pictoria.ui', '关闭详情')"
+            @click="detail = undefined"
+          >
             <Icon name="close" :size="16" />
           </button>
         </header>
@@ -461,19 +501,23 @@ onBeforeUnmount(() => {
           <Icon v-else name="image" :size="30" />
         </div>
         <label class="panel-field">
-          名称
+          {{ __t('apps.pictoria.ui', '名称') }}
           <input v-model="title" maxlength="180" />
         </label>
         <label class="panel-field">
-          标签
-          <input v-model="tags" placeholder="以逗号分隔" maxlength="1500" />
+          {{ __t('apps.pictoria.ui', '标签') }}
+          <input
+            v-model="tags"
+            :placeholder="__t('apps.pictoria.ui', '以逗号分隔')"
+            maxlength="1500"
+          />
         </label>
         <button
           class="text-button"
           :disabled="saving"
           @click="updateMeta({ title, tags: tagValues() })"
         >
-          保存名称与标签
+          {{ __t('apps.pictoria.ui', '保存名称与标签') }}
         </button>
         <div class="detail-flags">
           <button
@@ -483,7 +527,11 @@ onBeforeUnmount(() => {
             @click="updateMeta({ favorite: !detail.meta?.favorite })"
           >
             <Icon name="heart" :size="15" />
-            {{ detail.meta?.favorite ? '已收藏' : '收藏' }}
+            {{
+              detail.meta?.favorite
+                ? __t('apps.pictoria.ui', '已收藏')
+                : __t('apps.pictoria.ui', '收藏')
+            }}
           </button>
           <button
             v-if="tab === 'artworks'"
@@ -493,14 +541,18 @@ onBeforeUnmount(() => {
             @click="updateMeta({ final: !detail.meta?.final })"
           >
             <Icon name="check" :size="15" />
-            {{ detail.meta?.final ? '最终稿' : '标记最终稿' }}
+            {{
+              detail.meta?.final
+                ? __t('apps.pictoria.ui', '最终稿')
+                : __t('apps.pictoria.ui', '标记最终稿')
+            }}
           </button>
         </div>
         <div v-if="detail.meta?.origin === 'output'" class="artwork-provenance">
           <small>{{ detail.meta.model }}</small>
           <p v-if="detail.meta.inputs?.prompt">{{ detail.meta.inputs.prompt }}</p>
           <details>
-            <summary>创作参数</summary>
+            <summary>{{ __t('apps.pictoria.ui', '创作参数') }}</summary>
             <pre>{{ JSON.stringify(detail.meta.inputs, null, 2) }}</pre>
           </details>
           <time>
@@ -508,26 +560,32 @@ onBeforeUnmount(() => {
           </time>
         </div>
         <div class="detail-actions">
-          <button class="create-button" @click="emit('asset', detail, false)">放入画布</button>
+          <button class="create-button" @click="emit('asset', detail, false)">
+            {{ __t('apps.pictoria.ui', '放入画布') }}
+          </button>
           <button
             v-if="detail.mimeType.startsWith('image/')"
             class="quiet-button outlined"
             @click="emit('asset', detail, true)"
           >
-            再次编辑
+            {{ __t('apps.pictoria.ui', '再次编辑') }}
           </button>
-          <button class="icon-button" aria-label="下载资源" @click="download(detail)">
+          <button
+            class="icon-button"
+            :aria-label="__t('apps.pictoria.ui', '下载资源')"
+            @click="download(detail)"
+          >
             <Icon name="download" :size="17" />
           </button>
         </div>
       </aside>
     </div>
     <footer class="resource-pagination">
-      <small>拖入画布 · 双击添加</small>
+      <small>{{ __t('apps.pictoria.ui', '拖入画布 · 双击添加') }}</small>
       <span>{{ pages }}</span>
       <button
         class="icon-button"
-        aria-label="上一页"
+        :aria-label="__t('apps.pictoria.ui', '上一页')"
         :disabled="busy || offset === 0"
         @click="page(-1)"
       >
@@ -535,7 +593,7 @@ onBeforeUnmount(() => {
       </button>
       <button
         class="icon-button"
-        aria-label="下一页"
+        :aria-label="__t('apps.pictoria.ui', '下一页')"
         :disabled="busy || offset + 30 >= total"
         @click="page(1)"
       >

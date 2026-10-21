@@ -1,3 +1,4 @@
+import { t as __t } from '../i18n'
 const ratios = [
   [1, 1],
   [4, 3],
@@ -31,7 +32,7 @@ export function resolutionRatio(value: string, aspectRatio?: string): string | u
     return `${width / divisor}:${height / divisor}`
   }
   if (/^[124]k$/i.test(value)) {
-    if (aspectRatio === 'auto') return '自动比例'
+    if (aspectRatio === 'auto') return __t('apps.pictoria.ui', '自动比例')
     if (aspectRatio && /^\d+(?:\.\d+)?:\d+(?:\.\d+)?$/.test(aspectRatio)) return aspectRatio
   }
   return undefined

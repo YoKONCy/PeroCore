@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * socialOps/notifyOwner — 通知用户工具（保留在主 Agent 内核）
  *
@@ -115,10 +116,10 @@ export const socialNotifyOwnerTool: BuiltinTool = {
 
     try {
       await provider.notifyOwner(content, importance)
-      return JSON.stringify({ success: true, message: '已通知用户' })
+      return JSON.stringify({ success: true, message: __t('server.tools', '已通知用户') })
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err)
-      logger.error(`通知用户失败: ${errMsg}`)
+      logger.error(__t('logs.tools', '通知用户失败: {0}', [errMsg]))
       return JSON.stringify({ error: `通知用户失败: ${errMsg}` })
     }
   },

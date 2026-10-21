@@ -1,0 +1,8 @@
+{
+  "正在拉取记忆……": "is retrieving memory...",
+  "正在使用 {0} 重排 {1} 个候选": "is rearranging {1} candidates using {0}",
+  "正在筛选 {0} 个候选": "is screening {0} candidates",
+  "基础召回已筛选出 {0} 个相关事件": "basic recall has filtered out {0} related events",
+  "正在补充时间轴末尾与命中事件直接前驱": "is adding the end of the timeline and the direct precursor to the hit event",
+  "记忆上下文已就绪，共注入 {0} 个事件": "memory context is ready, a total of {0} events have been injected"
+}

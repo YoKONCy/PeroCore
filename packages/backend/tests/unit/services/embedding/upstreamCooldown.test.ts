@@ -3,6 +3,7 @@ import { ApiEmbeddingProvider } from '@infos/backend/services/embedding/provider
 import { EmbeddingService } from '@infos/backend/services/embedding/embeddingService'
 
 const config = {
+  enabled: true,
   apiBase: 'https://embedding.test/v1',
   apiKey: 'test-key',
   model: 'test-model',

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { createClientUuid } from '../../lib/clientPlatform'
+
 /**
  * MermaidSurfaceNode.vue — 界面组件
  *
@@ -41,7 +43,7 @@ async function render(): Promise<void> {
     if (generation !== renderGeneration || !props.active || !mainVisible.value || !pageActive.value)
       return
     mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'neutral' })
-    const result = await mermaid.render(`infos-mermaid-${crypto.randomUUID()}`, props.source)
+    const result = await mermaid.render(`infos-mermaid-${createClientUuid()}`, props.source)
     if (generation !== renderGeneration) return
     html.value = result.svg
     renderedSource = props.source

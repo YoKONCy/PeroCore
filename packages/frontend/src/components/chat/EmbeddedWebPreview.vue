@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
+import { createClientUuid } from '../../lib/clientPlatform'
+
 /**
  * EmbeddedWebPreview.vue — 界面组件
  *
@@ -9,7 +13,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { buildEmbeddedWebDocument } from '../../lib/embeddedWebPreview'
 
 const props = withDefaults(defineProps<{ source: string; active?: boolean }>(), { active: true })
-const channel = `preview-${crypto.randomUUID()}`
+const channel = `preview-${createClientUuid()}`
 const iframe = ref<HTMLIFrameElement>()
 const height = ref(180)
 const loaded = ref(false)
@@ -36,7 +40,7 @@ watch([() => props.active, () => props.source], ([active]) => {
   <section class="embedded-web-preview" :class="{ 'is-loaded': loaded }">
     <div class="embedded-web-preview__hint">
       <span class="embedded-web-preview__signal" />
-      <span>隔离预览</span>
+      <span>{{ __t('ui.chat', '隔离预览') }}</span>
     </div>
     <iframe
       v-if="active"
@@ -45,7 +49,7 @@ watch([() => props.active, () => props.source], ([active]) => {
       :style="{ height: `${height}px` }"
       sandbox="allow-scripts"
       referrerpolicy="no-referrer"
-      title="隔离的内嵌网页预览"
+      :title="__t('ui.chat', '隔离的内嵌网页预览')"
       @load="loaded = true"
     />
     <div v-else class="embedded-web-preview__placeholder" :style="{ height: `${height}px` }" />

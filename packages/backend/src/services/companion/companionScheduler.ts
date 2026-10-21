@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * Companion Scheduler — 陪伴模式主动对话调度
  *
@@ -111,7 +112,7 @@ export class CompanionScheduler {
    */
   start(): void {
     if (this.running) {
-      logger.warn('陪伴调度已在运行中')
+      logger.warn(__t('logs.companion', '陪伴调度已在运行中'))
       return
     }
 
@@ -122,11 +123,16 @@ export class CompanionScheduler {
     // 启动后等一个间隔再首次执行
     this.timer = setInterval(() => {
       this.tick().catch((err) => {
-        logger.error(`陪伴调度 tick 失败: ${err}`)
+        logger.error(__t('logs.companion', '陪伴调度 tick 失败: {0}', [err]))
       })
     }, 10_000) // 每 10 秒检查一次
 
-    logger.info(`陪伴调度已启动: agent=${this.agentId}, interval=${this.config.intervalMs}ms`)
+    logger.info(
+      __t('logs.companion', '陪伴调度已启动: agent={0}, interval={1}ms', [
+        this.agentId,
+        this.config.intervalMs,
+      ]),
+    )
   }
 
   /**
@@ -146,10 +152,10 @@ export class CompanionScheduler {
     try {
       await this.onSummarize(this.agentId)
     } catch (err) {
-      logger.warn(`陪伴模式总结失败: ${err}`)
+      logger.warn(__t('logs.companion', '陪伴模式总结失败: {0}', [err]))
     }
 
-    logger.info(`陪伴调度已停止: agent=${this.agentId}`)
+    logger.info(__t('logs.companion', '陪伴调度已停止: agent={0}', [this.agentId]))
   }
 
   /**
@@ -181,7 +187,7 @@ export class CompanionScheduler {
 
     // 连续主动次数过多 → 冷却
     if (this.consecutiveCount >= this.config.maxConsecutiveProactive) {
-      logger.debug('连续主动对话达上限，冷却中')
+      logger.debug(__t('logs.companion', '连续主动对话达上限，冷却中'))
       return
     }
 
@@ -197,7 +203,13 @@ export class CompanionScheduler {
     try {
       const trigger = await this.generateTrigger(timeSlot)
       if (!this.running) return
-      logger.info(`触发主动对话: agent=${this.agentId}, timeSlot=${timeSlot}, trigger=${trigger}`)
+      logger.info(
+        __t('logs.companion', '触发主动对话: agent={0}, timeSlot={1}, trigger={2}', [
+          this.agentId,
+          timeSlot,
+          trigger,
+        ]),
+      )
       const terminal = await this.kernelScheduler.submitAndWait({
         principalId: this.agentId,
         taskId: `companion:${this.agentId}:${now}`,
@@ -221,7 +233,7 @@ export class CompanionScheduler {
               timeSlot,
             })
             this.consecutiveCount++
-            logger.info(`主动对话已推送: ${reply.slice(0, 50)}...`)
+            logger.info(__t('logs.companion', '主动对话已推送: {0}...', [reply.slice(0, 50)]))
           }
         },
       })
@@ -230,7 +242,7 @@ export class CompanionScheduler {
       }
       this.lastActivityAt = Date.now()
     } catch (err) {
-      logger.error(`主动对话生成失败: ${err}`)
+      logger.error(__t('logs.companion', '主动对话生成失败: {0}', [err]))
     } finally {
       this.proactiveInFlight = false
       // 静默结束和失败同样冷却，避免每十秒重新请求模型。

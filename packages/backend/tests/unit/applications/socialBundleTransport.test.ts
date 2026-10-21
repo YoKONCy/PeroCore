@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createRequire } from 'node:module'
-import { mkdtempSync, rmSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+} from 'node:fs'
 import { resolve, join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createServer, type Server } from 'node:http'
@@ -9,6 +17,7 @@ import { WebSocket } from 'ws'
 import { Hono } from 'hono'
 
 const backendRoot = fileURLToPath(new URL('../../../', import.meta.url))
+const temporaryRoot = resolve(backendRoot, '../../TEMP')
 let outputDir = ''
 let server: Server | undefined
 let runtime:
@@ -26,7 +35,7 @@ afterEach(async () => {
   if (server?.listening) await new Promise<void>((done) => server!.close(() => done()))
   server = undefined
   vi.unstubAllEnvs()
-  if (outputDir && dirname(outputDir) === resolve(backendRoot))
+  if (outputDir && dirname(resolve(outputDir)) === temporaryRoot)
     rmSync(outputDir, { recursive: true, force: true })
 })
 
@@ -34,7 +43,22 @@ describe('独立 bundle 的社交传输', () => {
   it('真实 Social runtime 通过宿主注入注册，反向 WS 与状态接口共享同一个适配器', async () => {
     const require = createRequire(import.meta.url)
     const { build } = createRequire(require.resolve('vite/package.json'))('esbuild')
-    outputDir = mkdtempSync(join(backendRoot, '.social-bundle-test-'))
+    mkdirSync(temporaryRoot, { recursive: true })
+    outputDir = mkdtempSync(join(temporaryRoot, 'social-bundle-test-'))
+    const modules = join(outputDir, 'node_modules')
+    mkdirSync(modules)
+    // 与发行包相同，独立产物同时拥有宿主和社交应用声明的外部依赖。
+    for (const source of [
+      join(backendRoot, 'node_modules'),
+      resolve(backendRoot, '../apps/social/node_modules'),
+    ]) {
+      for (const entry of readdirSync(source, { withFileTypes: true })) {
+        if (entry.name.startsWith('.')) continue
+        const target = join(modules, entry.name)
+        if (existsSync(target)) continue
+        symlinkSync(realpathSync(join(source, entry.name)), target, 'junction')
+      }
+    }
     const hostFile = join(outputDir, 'host.mjs')
     const socialFile = join(outputDir, 'social.mjs')
     const options = {

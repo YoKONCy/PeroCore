@@ -1,3 +1,4 @@
+import { t as __t } from '../../../../i18n/index'
 /**
  * 标准 Bedrock JSON 模型提供者
  *
@@ -122,7 +123,7 @@ export class StandardBedrockProvider implements IModelProvider {
     if (!response.ok) throw new Error(`加载模型文件失败: ${this.config.model}`)
     const arrayBuffer = await response.arrayBuffer()
 
-    logger.info('StandardBedrockProvider', '使用JavaScript解析模型')
+    logger.info('StandardBedrockProvider', __t('logs.frontend.avatar', '使用JavaScript解析模型'))
     const jsonStr = new TextDecoder().decode(arrayBuffer)
     const json = JSON.parse(jsonStr)
 
@@ -207,7 +208,11 @@ export class StandardBedrockProvider implements IModelProvider {
             })
           }
         } catch (e) {
-          logger.warn('StandardBedrockProvider', `加载动画失败: ${path}`, e)
+          logger.warn(
+            'StandardBedrockProvider',
+            __t('logs.frontend.avatar', '加载动画失败: {0}', [path]),
+            e,
+          )
         }
       }
     }

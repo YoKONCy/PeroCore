@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 import { z } from 'zod'
 import { MAX_READ_IMAGE_COUNT, MAX_READ_IMAGE_BATCH_BYTES } from '@infos/shared'
 import type { BuiltinTool } from '../index'
@@ -11,7 +12,7 @@ const inputSchema = z
     file_paths: z.array(imagePath).min(1).max(MAX_READ_IMAGE_COUNT).optional(),
   })
   .refine((value) => Boolean(value.file_path) !== Boolean(value.file_paths), {
-    message: '请提供 file_path 或 file_paths，二者只能填写一项',
+    message: __t('server.tools', '请提供 file_path 或 file_paths，二者只能填写一项'),
   })
 let resources: ResourceService | undefined
 

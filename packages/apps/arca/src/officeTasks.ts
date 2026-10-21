@@ -1,3 +1,4 @@
+import { t as __t } from './i18n'
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import {
@@ -203,7 +204,7 @@ export class ArcaOfficeTasks {
         changeSetId: proposal.changeSetId,
         reviewerPrincipalId: owner,
         decision: 'reject',
-        message: '取消文稿协作任务',
+        message: __t('apps.arca.ui', '取消文稿协作任务'),
       })
     }
     task.status = 'cancelled'

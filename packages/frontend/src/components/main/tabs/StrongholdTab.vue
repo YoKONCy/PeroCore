@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../../i18n/index'
+
 /**
  * StrongholdTab — 据点 Tab (重制版)
  *
@@ -13,7 +15,8 @@
  *
  * @see .docs/S06_UI_UX_DESIGN_SPEC.md §13.6
  */
-import { ref, computed } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { useMobileLayout } from '../../../composables/ui/useMobileLayout'
 import { PixelIcon, PButton, PDialog } from '../../pixel'
 import HistoryExportDialog from '../../chat/HistoryExportDialog.vue'
 import StrongholdChat from '../../stronghold/StrongholdChat.vue'
@@ -64,7 +67,7 @@ async function exportCurrentHistory(_options: HistoryExportOptions): Promise<voi
     const participantNames = Object.fromEntries(
       [...agentProfiles.value].map(([agentId, profile]) => [agentId, profile.name]),
     )
-    const title = `${currentRoom.value.name}-据点历史`
+    const title = __t('ui.navigation', '{0}-据点历史', [currentRoom.value.name])
     downloadMarkdown(
       title,
       buildStrongholdMarkdown({
@@ -74,11 +77,14 @@ async function exportCurrentHistory(_options: HistoryExportOptions): Promise<voi
       }),
     )
     showHistoryExport.value = false
-    notification.toast('据点房间历史已导出到客户端', { type: 'success' })
+    notification.toast(__t('ui.navigation', '据点房间历史已导出到客户端'), { type: 'success' })
   } catch (error) {
-    notification.toast(error instanceof Error ? error.message : '历史记录导出失败', {
-      type: 'error',
-    })
+    notification.toast(
+      error instanceof Error ? error.message : __t('ui.navigation', '历史记录导出失败'),
+      {
+        type: 'error',
+      },
+    )
   } finally {
     isExportingHistory.value = false
   }
@@ -86,15 +92,43 @@ async function exportCurrentHistory(_options: HistoryExportOptions): Promise<voi
 
 // ── 侧边栏收起状态 ──
 
-const isLeftCollapsed = ref(false)
-const isRightCollapsed = ref(false)
+const { isMobile } = useMobileLayout()
+const isLeftCollapsed = ref(isMobile.value)
+const isRightCollapsed = ref(isMobile.value)
+function dismissMobilePanels() {
+  isLeftCollapsed.value = true
+  isRightCollapsed.value = true
+}
+function selectMobileRoom(room: Room) {
+  selectRoom(room)
+  if (isMobile.value) isLeftCollapsed.value = true
+}
+watch(isMobile, (value) => {
+  if (value) {
+    isLeftCollapsed.value = true
+    isRightCollapsed.value = true
+  }
+})
+watch(currentRoom, () => {
+  if (isMobile.value) isLeftCollapsed.value = true
+})
+function closeMobilePanels(event: KeyboardEvent) {
+  if (isMobile.value && event.key === 'Escape') {
+    isLeftCollapsed.value = true
+    isRightCollapsed.value = true
+  }
+}
+onMounted(() => window.addEventListener('keydown', closeMobilePanels))
+onBeforeUnmount(() => window.removeEventListener('keydown', closeMobilePanels))
 
 function toggleLeft(): void {
   isLeftCollapsed.value = !isLeftCollapsed.value
+  if (isMobile.value) isRightCollapsed.value = true
 }
 
 function toggleRight(): void {
   isRightCollapsed.value = !isRightCollapsed.value
+  if (isMobile.value) isLeftCollapsed.value = true
 }
 
 // ── 房间环境变量 ──
@@ -164,9 +198,24 @@ const isCalling = ref(false)
 
 /** 快捷指令 (对应 ButlerService 的自然语言映射) */
 const shortcuts = [
-  { label: '查看状态', cmd: '查看当前据点状态' },
-  { label: '召唤全员', cmd: '把所有成员叫到这里来' },
-  { label: '检查环境', cmd: '扫描当前房间环境' },
+  {
+    get label() {
+      return __t('ui.navigation', '查看状态')
+    },
+    cmd: '查看当前据点状态',
+  },
+  {
+    get label() {
+      return __t('ui.navigation', '召唤全员')
+    },
+    cmd: '把所有成员叫到这里来',
+  },
+  {
+    get label() {
+      return __t('ui.navigation', '检查环境')
+    },
+    cmd: '扫描当前房间环境',
+  },
 ]
 
 function applyShortcut(cmd: string): void {
@@ -201,11 +250,30 @@ async function submitButler(): Promise<void> {
   <div class="stronghold-tab-root">
     <!-- 一体化面板容器 -->
     <div class="stronghold-panel">
+      <nav v-if="isMobile" class="sh-mobile-toolbar" :aria-label="__t('ui.navigation', '据点面板')">
+        <button :aria-expanded="!isLeftCollapsed" @click="toggleLeft">
+          {{ __t('ui.navigation', '房间') }}
+        </button>
+        <span>{{ currentRoom?.name || __t('ui.navigation', '选择房间') }}</span>
+        <button :aria-expanded="!isRightCollapsed" @click="toggleRight">
+          {{ __t('ui.navigation', '成员') }}
+        </button>
+      </nav>
+      <button
+        v-if="isMobile && (!isLeftCollapsed || !isRightCollapsed)"
+        class="sh-mobile-backdrop"
+        :aria-label="__t('ui.navigation', '关闭据点面板')"
+        @click="dismissMobilePanels"
+      />
       <!-- ═══ 左侧: 据点品牌头 + 房间导航 ═══ -->
       <aside class="sh-left" :class="{ 'sh-left--collapsed': isLeftCollapsed }">
         <button
           class="sh-toggle sh-toggle-left"
-          :title="isLeftCollapsed ? '展开房间导航' : '收起房间导航'"
+          :title="
+            isLeftCollapsed
+              ? __t('ui.navigation', '展开房间导航')
+              : __t('ui.navigation', '收起房间导航')
+          "
           @click="toggleLeft"
         >
           <PixelIcon :name="isLeftCollapsed ? 'chevron-right' : 'chevron-left'" size="xs" />
@@ -274,7 +342,9 @@ async function submitButler(): Promise<void> {
               />
             </svg>
             <div class="sh-brand-text">
-              <h2 class="sh-brand-title">{{ currentFacility?.name ?? '我的据点' }}</h2>
+              <h2 class="sh-brand-title">
+                {{ currentFacility?.name ?? __t('ui.navigation', '我的据点') }}
+              </h2>
               <span class="sh-brand-sub">HOME BASE · STRONGHOLD</span>
             </div>
           </div>
@@ -296,13 +366,13 @@ async function submitButler(): Promise<void> {
           <!-- 房间列表 -->
           <div class="sh-rooms">
             <div class="sh-rooms-header">
-              <span class="sh-rooms-title">房间</span>
+              <span class="sh-rooms-title">{{ __t('ui.navigation', '房间') }}</span>
               <span class="sh-rooms-title-en">ROOMS</span>
             </div>
 
             <div v-if="isLoading" class="sh-loading">
               <PixelIcon name="refresh" size="md" animation="spin" />
-              <span>正在巡视据点...</span>
+              <span>{{ __t('ui.navigation', '正在巡视据点...') }}</span>
             </div>
 
             <template v-else>
@@ -311,7 +381,7 @@ async function submitButler(): Promise<void> {
                 :key="room.id"
                 class="sh-room"
                 :class="{ 'sh-room--active': currentRoom?.id === room.id }"
-                @click="selectRoom(room)"
+                @click="selectMobileRoom(room)"
               >
                 <div
                   class="sh-room-icon"
@@ -325,7 +395,7 @@ async function submitButler(): Promise<void> {
                 <div class="sh-room-info">
                   <span class="sh-room-name">{{ room.name }}</span>
                   <span class="sh-room-desc">
-                    {{ room.description || '这里还没有留下说明' }}
+                    {{ room.description || __t('ui.navigation', '这里还没有留下说明') }}
                   </span>
                 </div>
                 <span v-if="roomAgentCount(room) > 0" class="sh-room-count">
@@ -335,7 +405,7 @@ async function submitButler(): Promise<void> {
 
               <div v-if="rooms.length === 0" class="sh-empty-rooms">
                 <PixelIcon name="paw" size="md" />
-                <span>据点还没有房间喵～</span>
+                <span>{{ __t('ui.navigation', '据点还没有房间喵～') }}</span>
               </div>
             </template>
           </div>
@@ -344,7 +414,10 @@ async function submitButler(): Promise<void> {
         <!-- 收起态: 只显示房间图标 -->
         <template v-else>
           <div class="sh-collapsed-rooms">
-            <div class="sh-collapsed-brand" :title="currentFacility?.name ?? '我的据点'">
+            <div
+              class="sh-collapsed-brand"
+              :title="currentFacility?.name ?? __t('ui.navigation', '我的据点')"
+            >
               <!-- 迷你五边形据点徽章 -->
               <svg
                 class="sh-brand-mark--sm"
@@ -396,7 +469,7 @@ async function submitButler(): Promise<void> {
               class="sh-collapsed-room"
               :class="{ 'sh-collapsed-room--active': currentRoom?.id === room.id }"
               :title="room.name"
-              @click="selectRoom(room)"
+              @click="selectMobileRoom(room)"
             >
               <PixelIcon
                 :name="currentRoom?.id === room.id ? 'door-open' : 'door-closed'"
@@ -408,7 +481,7 @@ async function submitButler(): Promise<void> {
       </aside>
 
       <!-- ═══ 中间: 房间工作台 ═══ -->
-      <main class="sh-main">
+      <main class="sh-main" :inert="isMobile && (!isLeftCollapsed || !isRightCollapsed)">
         <template v-if="currentRoom">
           <!-- 房间概况头 -->
           <header class="sh-main-header">
@@ -424,7 +497,7 @@ async function submitButler(): Promise<void> {
                   </span>
                 </h1>
                 <p class="sh-main-room-desc">
-                  {{ currentRoom.description || '这里是据点的一个房间' }}
+                  {{ currentRoom.description || __t('ui.navigation', '这里是据点的一个房间') }}
                 </p>
               </div>
             </div>
@@ -434,11 +507,11 @@ async function submitButler(): Promise<void> {
                 variant="ghost"
                 size="sm"
                 :disabled="messages.length === 0"
-                title="导出当前房间历史"
+                :title="__t('ui.navigation', '导出当前房间历史')"
                 @click="showHistoryExport = true"
               >
                 <PixelIcon name="download" size="xs" />
-                导出
+                {{ __t('ui.navigation', '导出') }}
               </PButton>
               <!-- 环境状态 chips -->
               <div v-if="roomEnvChips.length > 0" class="sh-env-chips">
@@ -459,7 +532,7 @@ async function submitButler(): Promise<void> {
                   v-for="agent in headerMemberStack"
                   :key="agent.agentId"
                   class="sh-member-face"
-                  :title="`${agent.name} · 在本房间`"
+                  :title="__t('ui.navigation', '{0} · 在本房间', [agent.name])"
                 >
                   <img v-if="agent.avatarUrl" :src="agent.avatarUrl" :alt="agent.name" />
                   <span v-else class="sh-member-face-fallback">{{ agent.name[0] }}</span>
@@ -497,8 +570,10 @@ async function submitButler(): Promise<void> {
           <div class="sh-empty-icon">
             <PixelIcon name="home" size="3xl" />
           </div>
-          <h3 class="sh-empty-title">请选择一个房间</h3>
-          <p class="sh-empty-sub">从左侧房间导航中选择要去的地方，和角色们聊聊吧</p>
+          <h3 class="sh-empty-title">{{ __t('ui.navigation', '请选择一个房间') }}</h3>
+          <p class="sh-empty-sub">
+            {{ __t('ui.navigation', '从左侧房间导航中选择要去的地方，和角色们聊聊吧') }}
+          </p>
         </div>
       </main>
 
@@ -506,7 +581,11 @@ async function submitButler(): Promise<void> {
       <aside class="sh-right" :class="{ 'sh-right--collapsed': isRightCollapsed }">
         <button
           class="sh-toggle sh-toggle-right"
-          :title="isRightCollapsed ? '展开成员雷达' : '收起成员雷达'"
+          :title="
+            isRightCollapsed
+              ? __t('ui.navigation', '展开成员雷达')
+              : __t('ui.navigation', '收起成员雷达')
+          "
           @click="toggleRight"
         >
           <PixelIcon :name="isRightCollapsed ? 'chevron-left' : 'chevron-right'" size="xs" />
@@ -515,13 +594,13 @@ async function submitButler(): Promise<void> {
         <template v-if="!isRightCollapsed">
           <div class="sh-right-header">
             <div class="sh-right-title-wrap">
-              <span class="sh-right-title">成员态势</span>
+              <span class="sh-right-title">{{ __t('ui.navigation', '成员态势') }}</span>
               <span class="sh-right-title-en">MEMBERS</span>
             </div>
             <div class="sh-butler-call-btn">
               <PButton variant="primary" size="sm" @click="openButler">
                 <PixelIcon name="bot" size="xs" />
-                呼叫管家
+                {{ __t('ui.navigation', '呼叫管家') }}
               </PButton>
             </div>
           </div>
@@ -530,8 +609,10 @@ async function submitButler(): Promise<void> {
             <!-- 本房间成员 -->
             <section class="sh-section">
               <div class="sh-section-header">
-                <span class="sh-section-title">本房间</span>
-                <span class="sh-section-count">{{ currentRoomAgents.length }} 位</span>
+                <span class="sh-section-title">{{ __t('ui.navigation', '本房间') }}</span>
+                <span class="sh-section-count">
+                  {{ currentRoomAgents.length }} {{ __t('ui.navigation', '位') }}
+                </span>
               </div>
               <div v-if="currentRoomAgents.length > 0" class="sh-roommates">
                 <div v-for="agent in currentRoomAgents" :key="agent.agentId" class="sh-roommate">
@@ -542,22 +623,22 @@ async function submitButler(): Promise<void> {
                   </div>
                   <div class="sh-roommate-info">
                     <span class="sh-roommate-name">{{ agent.name }}</span>
-                    <span class="sh-roommate-status">在本房间</span>
+                    <span class="sh-roommate-status">{{ __t('ui.navigation', '在本房间') }}</span>
                   </div>
                 </div>
               </div>
               <div v-else class="sh-empty-agents">
                 <PixelIcon name="paw" size="sm" />
-                <span>这个房间还没人哦</span>
+                <span>{{ __t('ui.navigation', '这个房间还没人哦') }}</span>
               </div>
             </section>
 
             <!-- 据点全部居民 -->
             <section class="sh-section">
               <div class="sh-section-header">
-                <span class="sh-section-title">据点居民</span>
+                <span class="sh-section-title">{{ __t('ui.navigation', '据点居民') }}</span>
                 <span class="sh-section-count sh-section-count--all">
-                  {{ agentsStatus.length }} 位
+                  {{ agentsStatus.length }} {{ __t('ui.navigation', '位') }}
                 </span>
               </div>
               <div class="sh-residents">
@@ -565,7 +646,7 @@ async function submitButler(): Promise<void> {
                   v-for="agent in agentsStatus"
                   :key="agent.agentId"
                   class="sh-resident"
-                  :title="`召唤 ${agent.name} 到当前房间`"
+                  :title="__t('ui.navigation', '召唤 {0} 到当前房间', [agent.name])"
                   @click="summonAgent(agent.name)"
                 >
                   <div class="sh-avatar sh-avatar--sm">
@@ -574,7 +655,9 @@ async function submitButler(): Promise<void> {
                   </div>
                   <div class="sh-resident-info">
                     <span class="sh-resident-name">{{ agent.name }}</span>
-                    <span class="sh-resident-loc">在 {{ agent.roomName }}</span>
+                    <span class="sh-resident-loc">
+                      {{ __t('ui.navigation', '在') }} {{ agent.roomName }}
+                    </span>
                   </div>
                   <PixelIcon name="send" size="xs" class="sh-resident-summon" />
                 </button>
@@ -608,9 +691,11 @@ async function submitButler(): Promise<void> {
     />
 
     <!-- ═══ 管家弹窗 ═══ -->
-    <PDialog v-model="showButler" title="呼叫管家">
+    <PDialog v-model="showButler" :title="__t('ui.navigation', '呼叫管家')">
       <div class="sh-butler-dialog">
-        <p class="sh-butler-dialog-sub">告诉管家你想做什么，它会帮你管理房间和成员。</p>
+        <p class="sh-butler-dialog-sub">
+          {{ __t('ui.navigation', '告诉管家你想做什么，它会帮你管理房间和成员。') }}
+        </p>
 
         <!-- 快捷指令 -->
         <div class="sh-butler-shortcuts">
@@ -627,19 +712,21 @@ async function submitButler(): Promise<void> {
         <textarea
           v-model="butlerQuery"
           class="sh-butler-input"
-          placeholder="例如: 把娜娜叫到客厅来..."
+          :placeholder="__t('ui.navigation', '例如: 把娜娜叫到客厅来...')"
           @keydown.ctrl.enter="submitButler"
         />
-        <div class="sh-butler-hint">Ctrl + Enter 发送</div>
+        <div class="sh-butler-hint">{{ __t('ui.navigation', 'Ctrl + Enter 发送') }}</div>
 
         <div class="sh-butler-actions">
-          <PButton variant="ghost" @click="showButler = false">取消</PButton>
+          <PButton variant="ghost" @click="showButler = false">
+            {{ __t('ui.navigation', '取消') }}
+          </PButton>
           <PButton
             variant="primary"
             :disabled="!butlerQuery.trim() || isCalling"
             @click="submitButler"
           >
-            {{ isCalling ? '发送中...' : '发送指令' }}
+            {{ isCalling ? __t('ui.navigation', '发送中...') : __t('ui.navigation', '发送指令') }}
           </PButton>
         </div>
       </div>

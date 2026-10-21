@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import { onMounted, onUnmounted, ref } from 'vue'
 import { socialApi, type SocialStickerPage } from '../../api/modules/socialApi'
 import { PixelIcon, PButton } from '../pixel'
@@ -151,18 +153,18 @@ onMounted(() => {
         <span class="stickers-kicker">ACCOUNT COLLECTION</span>
         <h3>
           <PixelIcon name="image" size="sm" />
-          收藏表情
+          {{ __t('ui.social', '收藏表情') }}
         </h3>
-        <p>属于 QQ 账号，随聊天慢慢积累。</p>
+        <p>{{ __t('ui.social', '属于 QQ 账号，随聊天慢慢积累。') }}</p>
       </div>
       <PButton size="sm" variant="secondary" :disabled="busy" @click="sync">
         <PixelIcon name="refresh" size="xs" />
-        同步
+        {{ __t('ui.social', '同步') }}
       </PButton>
     </header>
     <form v-if="accounts.length" class="stickers-toolbar" @submit.prevent="search">
       <label>
-        QQ 账号
+        {{ __t('ui.social', 'QQ 账号') }}
         <select v-model="accountId" :disabled="busy" @change="changeAccount">
           <option v-for="account in accounts" :key="account" :value="account">{{ account }}</option>
         </select>
@@ -171,20 +173,26 @@ onMounted(() => {
         v-model="query"
         :disabled="busy"
         maxlength="200"
-        placeholder="按描述找表情…"
-        aria-label="搜索收藏表情"
+        :placeholder="__t('ui.social', '按描述找表情…')"
+        :aria-label="__t('ui.social', '搜索收藏表情')"
       />
-      <PButton size="sm" variant="secondary" :disabled="busy" type="submit">搜索</PButton>
-      <span v-if="page" class="stickers-count">{{ page.total }} 张</span>
+      <PButton size="sm" variant="secondary" :disabled="busy" type="submit">
+        {{ __t('ui.social', '搜索') }}
+      </PButton>
+      <span v-if="page" class="stickers-count">{{ page.total }} {{ __t('ui.social', '张') }}</span>
     </form>
     <p v-if="error" class="stickers-error" role="alert">{{ error }}</p>
     <p v-if="notice" class="stickers-notice" role="status">{{ notice }}</p>
-    <p v-if="busy && !page" class="stickers-empty">正在同步收藏…</p>
+    <p v-if="busy && !page" class="stickers-empty">{{ __t('ui.social', '正在同步收藏…') }}</p>
     <p v-else-if="!accounts.length && !error" class="stickers-empty">
-      连接 QQ 后，点同步查看账号收藏。
+      {{ __t('ui.social', '连接 QQ 后，点同步查看账号收藏。') }}
     </p>
     <p v-else-if="page && !page.stickers.length" class="stickers-empty">
-      {{ query ? '没找到匹配的表情。' : '收藏还是空的。Agent 可以从收到的消息中收藏表情。' }}
+      {{
+        query
+          ? __t('ui.social', '没找到匹配的表情。')
+          : __t('ui.social', '收藏还是空的。Agent 可以从收到的消息中收藏表情。')
+      }}
     </p>
     <TransitionGroup name="sticker" tag="div" class="stickers-grid">
       <article
@@ -196,18 +204,22 @@ onMounted(() => {
           <img
             v-if="previews[item.id]"
             :src="previews[item.id]"
-            :alt="item.description || '收藏表情'"
+            :alt="item.description || __t('ui.social', '收藏表情')"
             loading="lazy"
           />
-          <span v-else>{{ failedImages[item.id] ? '预览暂不可用' : '加载中…' }}</span>
+          <span v-else>
+            {{
+              failedImages[item.id] ? __t('ui.social', '预览暂不可用') : __t('ui.social', '加载中…')
+            }}
+          </span>
         </div>
         <textarea
           v-model="drafts[item.id]"
           maxlength="200"
           rows="2"
           :disabled="busy"
-          placeholder="画面含义、适用语境…"
-          aria-label="表情描述"
+          :placeholder="__t('ui.social', '画面含义、适用语境…')"
+          :aria-label="__t('ui.social', '表情描述')"
         />
         <footer v-if="deleting !== item.id">
           <PButton
@@ -216,31 +228,35 @@ onMounted(() => {
             :disabled="busy || drafts[item.id] === item.description"
             @click="save(item.id)"
           >
-            保存描述
+            {{ __t('ui.social', '保存描述') }}
           </PButton>
           <PButton size="sm" variant="ghost" :disabled="busy" @click="deleting = item.id">
             <PixelIcon name="trash" size="xs" />
           </PButton>
         </footer>
         <footer v-else class="sticker-confirm">
-          <span>移除 QQ 收藏？</span>
+          <span>{{ __t('ui.social', '移除 QQ 收藏？') }}</span>
           <PButton size="sm" variant="danger" :disabled="busy" @click="remove(item.id)">
-            移除
+            {{ __t('ui.social', '移除') }}
           </PButton>
-          <PButton size="sm" variant="ghost" :disabled="busy" @click="deleting = ''">取消</PButton>
+          <PButton size="sm" variant="ghost" :disabled="busy" @click="deleting = ''">
+            {{ __t('ui.social', '取消') }}
+          </PButton>
         </footer>
       </article>
     </TransitionGroup>
     <footer v-if="page && (offset > 0 || page.hasMore)" class="stickers-pagination">
       <PButton size="sm" variant="secondary" :disabled="busy || offset === 0" @click="turnPage(-1)">
-        上一页
+        {{ __t('ui.social', '上一页') }}
       </PButton>
       <span>{{ Math.floor(offset / 30) + 1 }}</span>
       <PButton size="sm" variant="secondary" :disabled="busy || !page.hasMore" @click="turnPage(1)">
-        下一页
+        {{ __t('ui.social', '下一页') }}
       </PButton>
     </footer>
-    <p v-if="page?.truncated" class="stickers-hint">本次仅同步到部分收藏，数量为当前已同步范围。</p>
+    <p v-if="page?.truncated" class="stickers-hint">
+      {{ __t('ui.social', '本次仅同步到部分收藏，数量为当前已同步范围。') }}
+    </p>
   </section>
 </template>
 

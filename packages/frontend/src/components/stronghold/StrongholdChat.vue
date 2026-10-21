@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
+import { copyClientText } from '../../lib/clientPlatform'
+
 /**
  * StrongholdChat — 据点群聊数据适配器
  *
@@ -162,12 +166,12 @@ function handleSend(
   complete: (success: boolean) => void,
 ): void {
   if (props.participantCount === 0) {
-    notify.toast('当前房间没有角色，无法发言', { type: 'warning' })
+    notify.toast(__t('ui.stronghold', '当前房间没有角色，无法发言'), { type: 'warning' })
     complete(false)
     return
   }
   if (attachmentIds.length > 0) {
-    notify.toast('据点群聊暂不支持附件，请使用文本消息', { type: 'warning' })
+    notify.toast(__t('ui.stronghold', '据点群聊暂不支持附件，请使用文本消息'), { type: 'warning' })
     complete(false)
     return
   }
@@ -176,10 +180,10 @@ function handleSend(
 
 async function copyMessage(content: string): Promise<void> {
   try {
-    await navigator.clipboard.writeText(content)
-    notify.toast('已复制到剪贴板', { type: 'success' })
+    await copyClientText(content)
+    notify.toast(__t('ui.stronghold', '已复制到剪贴板'), { type: 'success' })
   } catch {
-    notify.toast('复制失败', { type: 'error' })
+    notify.toast(__t('ui.stronghold', '复制失败'), { type: 'error' })
   }
 }
 
@@ -211,17 +215,20 @@ watch(
       variant="conversation"
       :identity="roomId ?? roomName"
       :pending="initialLoad && isLoading"
-      label="正在切换房间"
+      :label="__t('ui.stronghold', '正在切换房间')"
     >
       <div ref="messageList" class="stronghold-message-list">
         <div v-if="isLoading && messages.length === 0" class="stronghold-chat-state">
           <PixelIcon name="refresh" size="sm" animation="spin" />
-          <span>正在同步「{{ roomName }}」的群聊记录...</span>
+          <span>
+            {{ __t('ui.stronghold', '正在同步「') }}{{ roomName
+            }}{{ __t('ui.stronghold', '」的群聊记录...') }}
+          </span>
         </div>
         <div v-else-if="messages.length === 0" class="stronghold-chat-state">
           <PixelIcon name="message" size="lg" />
-          <strong>这个房间还很安静</strong>
-          <span>发送消息后，房间里的角色会根据群聊上下文接话。</span>
+          <strong>{{ __t('ui.stronghold', '这个房间还很安静') }}</strong>
+          <span>{{ __t('ui.stronghold', '发送消息后，房间里的角色会根据群聊上下文接话。') }}</span>
         </div>
 
         <MessageBubble
@@ -250,8 +257,14 @@ watch(
           </div>
           <header>
             <div>
-              <strong>{{ roundState?.completed ? '本轮发言完成' : '房间对话进行中' }}</strong>
-              <span>{{ replyStatus || '角色正在依次接话…' }}</span>
+              <strong>
+                {{
+                  roundState?.completed
+                    ? __t('ui.stronghold', '本轮发言完成')
+                    : __t('ui.stronghold', '房间对话进行中')
+                }}
+              </strong>
+              <span>{{ replyStatus || __t('ui.stronghold', '角色正在依次接话…') }}</span>
             </div>
             <i v-if="roundState">
               {{ roundState.agents.filter((a) => a.status === 'completed').length }}/{{
@@ -281,11 +294,19 @@ watch(
               </AgentStateHover>
               <div>
                 <b>{{ profileName(agent.agentId) }}</b>
-                <small v-if="agent.status === 'queued'">等待接话</small>
-                <small v-else-if="agent.status === 'streaming'">正在实时回复</small>
-                <small v-else-if="agent.status === 'tool'">正在调用 {{ agent.toolName }}</small>
-                <small v-else-if="agent.status === 'completed'">已完成</small>
-                <small v-else>{{ agent.error || '回复失败' }}</small>
+                <small v-if="agent.status === 'queued'">
+                  {{ __t('ui.stronghold', '等待接话') }}
+                </small>
+                <small v-else-if="agent.status === 'streaming'">
+                  {{ __t('ui.stronghold', '正在实时回复') }}
+                </small>
+                <small v-else-if="agent.status === 'tool'">
+                  {{ __t('ui.stronghold', '正在调用') }} {{ agent.toolName }}
+                </small>
+                <small v-else-if="agent.status === 'completed'">
+                  {{ __t('ui.stronghold', '已完成') }}
+                </small>
+                <small v-else>{{ agent.error || __t('ui.stronghold', '回复失败') }}</small>
               </div>
               <PixelIcon
                 :name="
@@ -310,16 +331,18 @@ watch(
     <div class="stronghold-input-area">
       <InputBar
         channel="group"
-        :context-label="roomName || '据点房间'"
+        :context-label="roomName || __t('ui.stronghold', '据点房间')"
         :participant-label="
-          participantCount > 0 ? `${participantCount} 位角色在场` : '当前房间暂无角色'
+          participantCount > 0
+            ? __t('ui.stronghold', '{0} 位角色在场', [participantCount])
+            : __t('ui.stronghold', '当前房间暂无角色')
         "
         :placeholder="
           !roomName
-            ? '向据点群聊发送消息...'
+            ? __t('ui.stronghold', '向据点群聊发送消息...')
             : participantCount === 0
-              ? '当前房间没有角色，暂时无法发言'
-              : `在「${roomName}」的群聊中发言...`
+              ? __t('ui.stronghold', '当前房间没有角色，暂时无法发言')
+              : __t('ui.stronghold', '在「{0}」的群聊中发言...', [roomName])
         "
         :mention-candidates="mentionCandidates"
         :is-sending="isSending || isAwaitingReply"

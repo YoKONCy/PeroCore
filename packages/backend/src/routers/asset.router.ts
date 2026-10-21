@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * Asset Router — 资源管理 API
  *
@@ -43,21 +44,21 @@ export function createAssetRouter(ctx: AppContext) {
   // GET /api/assets — 获取所有已注册资产
   router.get('/', (c) => {
     const assets = ctx.assetRegistry.getAllAssets()
-    return c.json({ code: 'OK', message: '获取成功', data: assets })
+    return c.json({ code: 'OK', message: __t('server.routers', '获取成功'), data: assets })
   })
 
   // GET /api/assets/by-type/:type — 按类型获取
   router.get('/by-type/:type', (c) => {
     const type = c.req.param('type') as AssetType
     const assets = ctx.assetRegistry.getAssetsByType(type)
-    return c.json({ code: 'OK', message: '获取成功', data: assets })
+    return c.json({ code: 'OK', message: __t('server.routers', '获取成功'), data: assets })
   })
 
   // GET /api/assets/by-source/:source — 按来源获取
   router.get('/by-source/:source', (c) => {
     const source = c.req.param('source') as AssetSource
     const assets = ctx.assetRegistry.getAssetsBySource(source)
-    return c.json({ code: 'OK', message: '获取成功', data: assets })
+    return c.json({ code: 'OK', message: __t('server.routers', '获取成功'), data: assets })
   })
 
   // POST /api/assets/rescan — 强制重新扫描 (B6-4)
@@ -66,7 +67,7 @@ export function createAssetRouter(ctx: AppContext) {
     const count = ctx.assetRegistry.getAllAssets().length
     return c.json({
       code: 'OK',
-      message: `资产重新扫描完成`,
+      message: __t('server.routers', '资产重新扫描完成'),
       data: { totalAssets: count },
     })
   })
@@ -84,7 +85,7 @@ export function createAssetRouter(ctx: AppContext) {
       const exportedPath = await ctx.promptTemplateLoader.exportToCustom(templatePath)
       return c.json({
         code: 'OK',
-        message: `模板已导出到自定义层`,
+        message: __t('server.routers', '模板已导出到自定义层'),
         data: { templatePath, exportedPath },
       })
     } catch (err) {
@@ -107,14 +108,14 @@ export function createAssetRouter(ctx: AppContext) {
     if (!restored) {
       return c.json({
         code: 'OK',
-        message: '该模板本就是官方版本，无需恢复',
+        message: __t('server.routers', '该模板本就是官方版本，无需恢复'),
         data: { templatePath, restored: false },
       })
     }
 
     return c.json({
       code: 'OK',
-      message: '模板已恢复为官方版本',
+      message: __t('server.routers', '模板已恢复为官方版本'),
       data: { templatePath, restored: true },
     })
   })
@@ -127,7 +128,7 @@ export function createAssetRouter(ctx: AppContext) {
 
     return c.json({
       code: 'OK',
-      message: '获取成功',
+      message: __t('server.routers', '获取成功'),
       data: { templatePath, source, isCustomized },
     })
   })

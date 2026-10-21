@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /**
  * FileSearchModal — 文件搜索结果对话框
  *
@@ -65,7 +67,7 @@ async function openFile(path: string) {
   try {
     await systemApi.openPath(path)
   } catch (err) {
-    logger.error('FileSearch', '打开文件失败', err)
+    logger.error('FileSearch', __t('logs.frontend.overlays', '打开文件失败'), err)
   }
 }
 
@@ -91,7 +93,7 @@ useEventListener(window, 'keydown', (e: Event) => {
         >
           <div class="flex items-center gap-2 text-sm font-bold text-slate-800">
             <PixelIcon name="search" size="sm" />
-            <span>找到的文件 ({{ files.length }})</span>
+            <span>{{ __t('ui.overlays', '找到的文件 (') }}{{ files.length }})</span>
           </div>
           <button
             class="p-1 bg-none border-none text-slate-400 cursor-pointer transition-colors hover:text-rose-500"
@@ -124,7 +126,7 @@ useEventListener(window, 'keydown', (e: Event) => {
             class="flex flex-col items-center justify-center h-[200px] text-slate-400 font-bold gap-2"
           >
             <PixelIcon name="folder" size="xl" />
-            <p>没有找到相关文件</p>
+            <p>{{ __t('ui.overlays', '没有找到相关文件') }}</p>
           </div>
         </div>
 
@@ -132,8 +134,10 @@ useEventListener(window, 'keydown', (e: Event) => {
         <div
           class="px-4 py-3 flex items-center justify-between border-t-2 border-slate-200 bg-sky-50"
         >
-          <span class="text-[11px] text-slate-400">点击文件可在资源管理器中定位</span>
-          <PButton variant="primary" @click="close">确定</PButton>
+          <span class="text-[11px] text-slate-400">
+            {{ __t('ui.overlays', '点击文件可在资源管理器中定位') }}
+          </span>
+          <PButton variant="primary" @click="close">{{ __t('ui.overlays', '确定') }}</PButton>
         </div>
       </div>
     </div>

@@ -51,10 +51,13 @@ describe('voiceApi', () => {
     expect(result).toBe(audio)
     expect(fetchMock).toHaveBeenCalledWith('http://localhost:7359/api/voice/tts', {
       method: 'POST',
-      headers: expect.any(Headers),
+      headers: expect.objectContaining({ get: expect.any(Function) }),
+      credentials: 'include',
       body: JSON.stringify({ text: '你好', voice: 'pero', speed: 1.2, format: 'mp3' }),
       signal: undefined,
     })
+    const request = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(new Headers(request[1].headers).get('Content-Type')).toBe('application/json')
   })
 
   it('TTS 使用当前远程服务器鉴权并透传取消信号', async () => {
@@ -121,10 +124,13 @@ describe('voiceApi', () => {
     expect(result).toEqual({ text: '你好主人', confidence: 0.98 })
     expect(fetchMock).toHaveBeenCalledWith('http://localhost:7359/api/voice/asr', {
       method: 'POST',
-      headers: { 'Content-Type': 'audio/wav' },
+      headers: expect.objectContaining({ get: expect.any(Function) }),
+      credentials: 'include',
       body: audio,
       signal: undefined,
     })
+    const request = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(new Headers(request[1].headers).get('Content-Type')).toBe('audio/wav')
   })
 
   it('recognize 透传真实编码与取消信号', async () => {
@@ -139,10 +145,13 @@ describe('voiceApi', () => {
       expect.any(String),
       expect.objectContaining({
         signal: controller.signal,
-        headers: { 'Content-Type': 'audio/ogg;codecs=opus' },
+        headers: expect.objectContaining({ get: expect.any(Function) }),
+        credentials: 'include',
         body: audio,
       }),
     )
+    const request = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(new Headers(request[1].headers).get('Content-Type')).toBe('audio/ogg;codecs=opus')
   })
 
   it('recognize 应当在失败响应中返回识别错误', async () => {

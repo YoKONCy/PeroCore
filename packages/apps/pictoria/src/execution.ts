@@ -1,3 +1,4 @@
+import { t as __t } from './i18n'
 import type { HostPort, NodeRun, Run } from './domain'
 import { resolve } from './workflows'
 import { validate } from './schema'
@@ -147,7 +148,12 @@ export class ExecutionEngine {
         .catch((error) => {
           if (requestError(error)?.persistenceFailure) {
             this.storagePauseUntil = Date.now() + 5000
-            console.error('[Pictoria] 执行记录暂时无法保存，已停止发送新请求，稍后恢复')
+            console.error(
+              __t(
+                'apps.pictoria.logs',
+                '[Pictoria] 执行记录暂时无法保存，已停止发送新请求，稍后恢复',
+              ),
+            )
           } else if (!this.stopping && run.state !== 'cancelled') {
             run.state = 'failed'
             run.error = message(error)

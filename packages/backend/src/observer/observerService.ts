@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 import type { KernelEventEnvelope } from '@infos/shared'
 import type { KernelEventBus } from '../kernel/kernelOutboxPublisher'
 import { createLogger } from '../lib/logger'
@@ -50,7 +51,12 @@ export class ObserverService {
         const measurements = await this.analyzer.measure(event)
         await this.repository.commitEvent(event, measurements)
       } catch (error) {
-        logger.warn(`Observer处理事件失败: event=${event.eventId}, error=${error}`)
+        logger.warn(
+          __t('logs.observer', 'Observer处理事件失败: event={0}, error={1}', [
+            event.eventId,
+            error,
+          ]),
+        )
       }
     }
     this.processing = false

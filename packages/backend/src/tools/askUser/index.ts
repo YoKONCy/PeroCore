@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 import {
   isUnansweredAgentInput,
   type AgentInputService,
@@ -81,7 +82,11 @@ export const askUserTool: BuiltinTool = {
         skipped: true,
         ...(isUnansweredAgentInput(resolved)
           ? {
-              message: `${resolved.responseMessage}可在原任务授权范围内采用合理假设继续，或跳过相关部分；不要反复提问，未回应不代表同意。`,
+              message: __t(
+                'server.tools',
+                '{0}可在原任务授权范围内采用合理假设继续，或跳过相关部分；不要反复提问，未回应不代表同意。',
+                [resolved.responseMessage],
+              ),
             }
           : {}),
       })
@@ -89,7 +94,7 @@ export const askUserTool: BuiltinTool = {
     return JSON.stringify({
       answered: false,
       cancelled: true,
-      message: resolved.responseMessage ?? '用户回答请求已取消。',
+      message: resolved.responseMessage ?? __t('server.tools', '用户回答请求已取消。'),
     })
   },
 }

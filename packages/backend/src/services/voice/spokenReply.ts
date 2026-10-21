@@ -1,7 +1,11 @@
 /** 清洗仅作用于独立口语答复，不能用完整回复作为缺省输入。 */
 export function cleanTextForTts(text: string): string {
   return text
-    .replace(/<(think|thinking|thought|plan|action|observation)\b[^>]*>[\s\S]*?<\/\1>/gi, '')
+    .replace(
+      /<(selfMinding|think|thinking|thought|plan|action|observation)\b[^>]*>[\s\S]*?<\/\1>/gi,
+      '',
+    )
+    .replace(/<(selfMinding|think|thinking|thought)\b[^>]*>[\s\S]*$/gi, '')
     .replace(/```[\s\S]*?```/g, '')
     .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
     .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')

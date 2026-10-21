@@ -14,6 +14,7 @@ import type {
   InboundEvent,
   AdapterStatus,
   SocialHistoryMessageRecord,
+  SocialDeliveryReceipt,
 } from '../runtime/types'
 import type { SocialContact, SocialGroup } from '../tools'
 
@@ -64,7 +65,10 @@ export abstract class AbstractSocialAdapter extends EventEmitter {
   // ━━ 消息 ━━
 
   /** 发送消息到指定会话 */
-  abstract sendMessage(msg: OutboundMessage, signal?: AbortSignal): Promise<void>
+  abstract sendMessage(
+    msg: OutboundMessage,
+    signal?: AbortSignal,
+  ): Promise<SocialDeliveryReceipt | void>
 
   /** 获取当前连接状态 */
   abstract getStatus(): Promise<AdapterStatus>

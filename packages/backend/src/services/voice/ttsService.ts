@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * TTS 服务 — 文本转语音
  *
@@ -98,7 +99,12 @@ export class TtsService {
 
   constructor(config?: Partial<TtsConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config }
-    logger.info(`初始化完成 (Provider: ${this.config.provider}, 声音: ${this.config.voice})`)
+    logger.info(
+      __t('logs.voice', '初始化完成 (Provider: {0}, 声音: {1})', [
+        this.config.provider,
+        this.config.voice,
+      ]),
+    )
   }
 
   /** 返回当前 TTS 配置是否有效可用 */
@@ -111,7 +117,7 @@ export class TtsService {
   /** 更新配置 */
   updateConfig(partial: Partial<TtsConfig>): void {
     this.config = { ...this.config, ...partial }
-    logger.info(`配置已更新 (Provider: ${this.config.provider})`)
+    logger.info(__t('logs.voice', '配置已更新 (Provider: {0})', [this.config.provider]))
   }
 
   /**
@@ -137,7 +143,7 @@ export class TtsService {
         throw new AppError('CONFIG_ERROR', { message: '本地TTS尚未实现' })
       default:
         // 未知 Provider → 回退到 Edge
-        logger.warn(`未知 Provider "${provider}"，回退到 Edge TTS`)
+        logger.warn(__t('logs.voice', '未知 Provider "{0}"，回退到 Edge TTS', [provider]))
         return this.synthesizeEdge(request)
     }
   }
@@ -175,7 +181,12 @@ export class TtsService {
     const pitch = request.pitch ?? this.config.pitch
 
     logger.info(
-      `[Edge] 合成: "${request.text.slice(0, 50)}..." (声音: ${voice}, 语速: ${rate}, 音调: ${pitch})`,
+      __t('logs.voice', '[Edge] 合成: "{0}..." (声音: {1}, 语速: {2}, 音调: {3})', [
+        request.text.slice(0, 50),
+        voice,
+        rate,
+        pitch,
+      ]),
     )
     const startTime = Date.now()
 
@@ -193,7 +204,10 @@ export class TtsService {
 
     const durationMs = Date.now() - startTime
     logger.info(
-      `[Edge] 合成完成 (${(buffer.byteLength / 1024).toFixed(1)}KB, 耗时 ${durationMs}ms)`,
+      __t('logs.voice', '[Edge] 合成完成 ({0}KB, 耗时 {1}ms)', [
+        (buffer.byteLength / 1024).toFixed(1),
+        durationMs,
+      ]),
     )
 
     return {
@@ -239,7 +253,11 @@ export class TtsService {
     }
 
     logger.info(
-      `[OpenAI] 合成: "${request.text.slice(0, 50)}..." (声音: ${voice}, 格式: ${format})`,
+      __t('logs.voice', '[OpenAI] 合成: "{0}..." (声音: {1}, 格式: {2})', [
+        request.text.slice(0, 50),
+        voice,
+        format,
+      ]),
     )
     const startTime = Date.now()
 
@@ -260,7 +278,7 @@ export class TtsService {
 
     if (!response.ok) {
       const body = await response.text()
-      logger.error(`OpenAI TTS API 失败: ${response.status} — ${body}`)
+      logger.error(__t('logs.voice', 'OpenAI TTS API 失败: {0} — {1}', [response.status, body]))
       throw new AppError('EXTERNAL_ERROR', {
         message: `TTS API调用失败: ${response.status}`,
         data: { status: response.status },
@@ -271,7 +289,10 @@ export class TtsService {
     const durationMs = Date.now() - startTime
 
     logger.info(
-      `[OpenAI] 合成完成 (${(audio.byteLength / 1024).toFixed(1)}KB, 耗时 ${durationMs}ms)`,
+      __t('logs.voice', '[OpenAI] 合成完成 ({0}KB, 耗时 {1}ms)', [
+        (audio.byteLength / 1024).toFixed(1),
+        durationMs,
+      ]),
     )
 
     return {

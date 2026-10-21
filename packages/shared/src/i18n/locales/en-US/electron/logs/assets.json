@@ -1,0 +1,7 @@
+{
+  "解析模型元数据失败: {0} - {1}": "failed to parse model metadata: {0} - {1}",
+  "asset:// 请求失败: {0}": "asset:// request failed: {0}",
+  "asset:// 安全资产协议已注册": "asset:// safe asset protocol has been registered",
+  "扫描模型源失败: {0} - {1}": "failed to scan model source: {0} - {1}",
+  "扫描到 {0} 个 3D 模型（官方/本地/Workshop 联邦）": "scanned to {0} 3D models (official/local/Workshop federation)"
+}

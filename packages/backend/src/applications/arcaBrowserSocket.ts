@@ -11,7 +11,7 @@ interface ArcaBrowserStatus {
 export function createArcaBrowserSocket(status: () => ArcaBrowserStatus | undefined) {
   const server = new WebSocketServer({ noServer: true, maxPayload: 32 * 1024 * 1024 })
   return {
-    upgrade(request: IncomingMessage, socket: Duplex, head: Buffer): void {
+    upgrade(request: IncomingMessage, socket: Duplex, head: Buffer, authenticated = false): void {
       const reject = (code: number, reason: string) => {
         socket.end(`HTTP/1.1 ${code} ${reason}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`)
       }
@@ -19,7 +19,7 @@ export function createArcaBrowserSocket(status: () => ArcaBrowserStatus | undefi
       try {
         const url = new URL(request.url ?? '/', 'http://localhost')
         const token = process.env.INFOS_API_TOKEN
-        if (token && url.searchParams.get('token') !== token) {
+        if (!authenticated && token && url.searchParams.get('token') !== token) {
           reject(401, 'Unauthorized')
           return
         }

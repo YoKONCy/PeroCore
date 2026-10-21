@@ -1,3 +1,4 @@
+import { t as __t } from '../lib/i18n'
 /**
  * Maintenance Router — 记忆运行配置与新版后台任务 API
  *
@@ -41,14 +42,17 @@ export function createMaintenanceRouter(ctx: AppContext) {
     async (c) => {
       const input = c.req.valid('json')
       const data = await indexes.rebuild(input.scope, input.agentId)
-      return c.json({ code: 'ACCEPTED', message: '索引重建已安排', data }, 202)
+      return c.json(
+        { code: 'ACCEPTED', message: __t('server.routers', '索引重建已安排'), data },
+        202,
+      )
     },
   )
 
   // GET /api/maintenance/memory-config — 获取经过校验的主 Agent 记忆运行配置
   router.get('/memory-config', async (c) => {
     const config = await loadMemoryRuntimeConfig(ctx.configRepo)
-    return c.json({ code: 'OK', message: '获取成功', data: config })
+    return c.json({ code: 'OK', message: __t('server.routers', '获取成功'), data: config })
   })
 
   // PUT /api/maintenance/memory-config — 保存主 Agent 记忆运行配置
@@ -56,7 +60,11 @@ export function createMaintenanceRouter(ctx: AppContext) {
     const config = c.req.valid('json')
     await ctx.configRepo.setJson(MEMORY_RUNTIME_CONFIG_KEY, config)
     ctx.eventMemoryService.syncAdvancedRetrievalConfig(config)
-    return c.json({ code: 'OK', message: '记忆运行配置已更新', data: config })
+    return c.json({
+      code: 'OK',
+      message: __t('server.routers', '记忆运行配置已更新'),
+      data: config,
+    })
   })
 
   // POST /api/maintenance/trigger — 手动触发维护任务
@@ -83,7 +91,7 @@ export function createMaintenanceRouter(ctx: AppContext) {
     return c.json(
       {
         code: 'ACCEPTED',
-        message: `维护任务 "${taskName}" 已触发`,
+        message: __t('server.routers', '维护任务 "{0}" 已触发', [taskName]),
         data: { taskName },
       },
       202,

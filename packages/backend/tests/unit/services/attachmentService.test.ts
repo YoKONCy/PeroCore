@@ -88,13 +88,41 @@ describe('AttachmentService', () => {
     expect(repo.bind).toHaveBeenCalledWith(['preview-1'], 'thread-1', 42)
   })
 
-  it('未配置解析来源时阻止 PDF 入库并提示缺少配置', async () => {
+  it('即使按 PDF 命名也拒绝无效 PDF，不将未知字节交给解析器', async () => {
     const { service, repo } = createService()
     const file = new File([new Uint8Array([1, 2, 3])], 'test.pdf', { type: 'application/pdf' })
     await expect(service.upload(file, 'thread-1')).rejects.toMatchObject({
-      code: 'NOT_CONFIGURED',
+      code: 'INVALID_FORMAT',
     })
     expect(repo.create).not.toHaveBeenCalled()
+  })
+
+  it('未配置外部来源时保存 PDF 原件，等待工作模式按需读取', async () => {
+    const rootDir = await mkdtemp(path.join(tmpdir(), 'infos-document-upload-'))
+    const { service, repo } = createService(rootDir)
+    repo.create.mockImplementation(async (value) => ({
+      ...value,
+      messageId: null,
+      contextPolicy: 'once',
+    }))
+    try {
+      const file = new File(['%PDF-1.7\n%%EOF'], '资料.pdf', { type: 'application/pdf' })
+      expect(await service.upload(file, 'thread-1')).toMatchObject({
+        kind: 'pdf',
+        status: 'uploaded',
+      })
+      expect(repo.create.mock.calls[0]?.[0].extractedText).toBeUndefined()
+      expect(service.capabilities()).toMatchObject({ pdf: true, office: true })
+      const office = new File([new Uint8Array([0x50, 0x4b, 3, 4])], '预算.xlsx', {
+        type: 'application/octet-stream',
+      })
+      expect(await service.upload(office, 'thread-1')).toMatchObject({
+        kind: 'file',
+        status: 'uploaded',
+      })
+    } finally {
+      await rm(rootDir, { recursive: true, force: true })
+    }
   })
 
   it('允许 20MB 图片并拒绝超过 20MB 的图片', async () => {

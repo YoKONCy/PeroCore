@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 /**
  * ConfirmOverlay — 指令确认遮罩
  *
@@ -60,8 +62,18 @@ function respond(approved: boolean) {
 /** 风险等级标签 */
 function getRiskLabel(level?: number): string {
   if (!level) return ''
-  const labels: Record<number, string> = { 1: '低风险', 2: '中风险', 3: '高风险' }
-  return labels[level] ?? '未知风险'
+  const labels: Record<number, string> = {
+    get 1() {
+      return __t('ui.chat', '低风险')
+    },
+    get 2() {
+      return __t('ui.chat', '中风险')
+    },
+    get 3() {
+      return __t('ui.chat', '高风险')
+    },
+  }
+  return labels[level] ?? __t('ui.chat', '未知风险')
 }
 
 /** 风险等级颜色 */
@@ -83,7 +95,7 @@ function getRiskColor(level?: number): string {
           </div>
           <div>
             <h3 class="confirm-title">
-              请求执行终端指令
+              {{ __t('ui.chat', '请求执行终端指令') }}
               <span
                 v-if="confirmation.riskInfo?.level"
                 :class="[
@@ -94,7 +106,9 @@ function getRiskColor(level?: number): string {
                 {{ getRiskLabel(confirmation.riskInfo.level) }}
               </span>
             </h3>
-            <p class="confirm-subtitle">{{ agentName }} 申请在您的系统中执行以下命令</p>
+            <p class="confirm-subtitle">
+              {{ agentName }} {{ __t('ui.chat', '申请在您的系统中执行以下命令') }}
+            </p>
           </div>
         </div>
 
@@ -115,21 +129,19 @@ function getRiskColor(level?: number): string {
             </div>
             <div class="confirm-warning-text">
               <p class="confirm-warning-title">
-                系统警告：{{ confirmation.riskInfo.reason ?? '敏感操作' }}
+                {{ __t('ui.chat', '系统警告：')
+                }}{{ confirmation.riskInfo.reason ?? __t('ui.chat', '敏感操作') }}
               </p>
               <p class="confirm-warning-desc">
-                此指令包含可能修改系统关键配置或删除文件的操作。请务必确认指令来源和意图。
+                {{ __t('ui.chat', '可能修改系统配置或删除文件，请核对指令。') }}
               </p>
             </div>
           </div>
 
           <!-- 低风险说明 -->
           <p v-else class="confirm-tip">
-            说明:
-            {{
-              confirmation.riskInfo?.reason ??
-              '请仔细检查指令内容。此操作将在您的系统终端中真实执行。'
-            }}
+            {{ __t('ui.chat', '说明:') }}
+            {{ confirmation.riskInfo?.reason ?? __t('ui.chat', '将在系统终端执行，请核对指令。') }}
           </p>
         </div>
 
@@ -140,22 +152,22 @@ function getRiskColor(level?: number): string {
             class="confirm-rationale-input pixel-border-moe"
             rows="2"
             maxlength="200"
-            placeholder="附言（可选）：告诉对方为什么批准/拒绝，将随决定一并反馈"
+            :placeholder="__t('ui.chat', '附言或执行要求（可选）')"
           ></textarea>
         </div>
 
         <!-- 操作按钮 -->
         <div class="confirm-actions">
           <button class="confirm-btn confirm-reject pixel-border-moe" @click="respond(false)">
-            拒绝执行
+            {{ __t('ui.chat', '拒绝执行') }}
           </button>
           <button class="confirm-btn confirm-approve pixel-border-moe" @click="respond(true)">
             <PixelIcon name="check" size="xs" />
             <span>
               {{
                 confirmation.riskInfo?.level && confirmation.riskInfo.level >= 3
-                  ? '确认授权并执行'
-                  : '批准并执行'
+                  ? __t('ui.chat', '确认授权并执行')
+                  : __t('ui.chat', '批准并执行')
               }}
             </span>
           </button>

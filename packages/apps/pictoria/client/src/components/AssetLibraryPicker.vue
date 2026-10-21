@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../i18n'
+
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Asset } from '../types'
 import { pictoria } from '../services/transport'
@@ -104,26 +106,35 @@ onBeforeUnmount(() => {
         class="floating-panel asset-library-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="选择参考素材"
+        :aria-label="__t('apps.pictoria.ui', '选择参考素材')"
       >
         <header>
-          <strong>选择素材</strong>
-          <button class="icon-button" aria-label="关闭" @click="emit('close')">
+          <strong>{{ __t('apps.pictoria.ui', '选择素材') }}</strong>
+          <button
+            class="icon-button"
+            :aria-label="__t('apps.pictoria.ui', '关闭')"
+            @click="emit('close')"
+          >
             <Icon name="close" :size="18" />
           </button>
         </header>
         <div class="asset-library-tools">
           <nav>
             <button :class="{ active: kind === 'materials' }" @click="kind = 'materials'">
-              素材
+              {{ __t('apps.pictoria.ui', '素材') }}
             </button>
             <button :class="{ active: kind === 'artworks' }" @click="kind = 'artworks'">
-              成品
+              {{ __t('apps.pictoria.ui', '成品') }}
             </button>
           </nav>
           <label class="reference-search">
             <Icon name="search" :size="15" />
-            <input ref="search" v-model="query" maxlength="200" placeholder="搜索资源库…" />
+            <input
+              ref="search"
+              v-model="query"
+              maxlength="200"
+              :placeholder="__t('apps.pictoria.ui', '搜索资源库…')"
+            />
           </label>
         </div>
         <div class="asset-library-list" :aria-busy="busy">
@@ -156,20 +167,29 @@ onBeforeUnmount(() => {
             </span>
             <Icon :name="selected.includes(asset.id) ? 'check' : 'plus'" :size="16" />
           </button>
-          <p v-if="!items.length">{{ error || (busy ? '读取中…' : '暂无素材') }}</p>
+          <p v-if="!items.length">
+            {{
+              error ||
+              (busy ? __t('apps.pictoria.ui', '读取中…') : __t('apps.pictoria.ui', '暂无素材'))
+            }}
+          </p>
         </div>
         <footer>
           <span>{{ selected.length }} / {{ limit }}</span>
-          <button v-if="error" class="text-button" :disabled="busy" @click="load()">重试</button>
+          <button v-if="error" class="text-button" :disabled="busy" @click="load()">
+            {{ __t('apps.pictoria.ui', '重试') }}
+          </button>
           <button
             v-else-if="items.length < total"
             class="text-button"
             :disabled="busy"
             @click="load(true)"
           >
-            {{ busy ? '读取中…' : '加载更多' }}
+            {{ busy ? __t('apps.pictoria.ui', '读取中…') : __t('apps.pictoria.ui', '加载更多') }}
           </button>
-          <button class="create-button" @click="emit('close')">完成</button>
+          <button class="create-button" @click="emit('close')">
+            {{ __t('apps.pictoria.ui', '完成') }}
+          </button>
         </footer>
       </section>
     </div>

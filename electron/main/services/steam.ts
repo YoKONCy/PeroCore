@@ -1,3 +1,4 @@
+import { t as __t } from '../utils/i18n'
 /**
  * @file Steam 集成
  * @description 延迟加载 steamworks.js，始终尝试连接 Steam。
@@ -34,13 +35,19 @@ function loadSteamworks(): any {
     const hasDll = fs.existsSync(dllPath)
 
     if (!hasDll && isPackagedRuntime) {
-      logger.info('Steam', 'steam_api64.dll 未找到，跳过 Steamworks 加载 (非 Steam 版本)')
+      logger.info(
+        'Steam',
+        __t('electron.logs.steam', 'steam_api64.dll 未找到，跳过 Steamworks 加载 (非 Steam 版本)'),
+      )
       return null
     }
 
     steamworks = require(getSteamworksModuleName())
   } catch (e) {
-    logger.warn('Steam', `无法加载 steamworks.js (可能缺少 steam_api64.dll): ${e}`)
+    logger.warn(
+      'Steam',
+      __t('electron.logs.steam', '无法加载 steamworks.js (可能缺少 steam_api64.dll): {0}', [e]),
+    )
     steamworks = null
   }
   return steamworks
@@ -59,7 +66,7 @@ export function initSteam(): 'ok' | 'not-available' | 'restarting' | 'failed' {
 
   // 检查是否显式禁用
   if (process.env.PERO_DISABLE_STEAM || process.env.IS_DOCKER || process.env.DOCKER_ENV) {
-    logger.info('Steam', 'Steam 已被环境变量禁用')
+    logger.info('Steam', __t('electron.logs.steam', 'Steam 已被环境变量禁用'))
     return 'not-available'
   }
 
@@ -79,14 +86,17 @@ export function initSteam(): 'ok' | 'not-available' | 'restarting' | 'failed' {
     if (isSteamLibrary || hasAppIdFile) {
       try {
         if (sw.restartAppIfNecessary(appId)) {
-          logger.info('Steam', '应用未通过 Steam 启动，正在请求 Steam 重启...')
+          logger.info(
+            'Steam',
+            __t('electron.logs.steam', '应用未通过 Steam 启动，正在请求 Steam 重启...'),
+          )
           return 'restarting'
         }
       } catch (e) {
-        logger.warn('Steam', `restartAppIfNecessary 失败: ${e}`)
+        logger.warn('Steam', __t('electron.logs.steam', 'restartAppIfNecessary 失败: {0}', [e]))
       }
     } else {
-      logger.info('Steam', '检测为非 Steam 环境启动，跳过强制重启逻辑')
+      logger.info('Steam', __t('electron.logs.steam', '检测为非 Steam 环境启动，跳过强制重启逻辑'))
     }
   }
 
@@ -95,7 +105,7 @@ export function initSteam(): 'ok' | 'not-available' | 'restarting' | 'failed' {
     if (isPackagedRuntime) {
       sw.electronEnableSteamOverlay()
     } else {
-      logger.info('Steam', '开发模式，跳过 Overlay 注入')
+      logger.info('Steam', __t('electron.logs.steam', '开发模式，跳过 Overlay 注入'))
     }
 
     // 初始化 Steamworks
@@ -103,8 +113,11 @@ export function initSteam(): 'ok' | 'not-available' | 'restarting' | 'failed' {
     isInitialized = true
 
     logger.info('Steam', '════════════════════════════════════════════')
-    logger.info('Steam', '初始化成功')
-    logger.info('Steam', `当前用户: ${steamApi.localplayer.getName()}`)
+    logger.info('Steam', __t('electron.logs.steam', '初始化成功'))
+    logger.info(
+      'Steam',
+      __t('electron.logs.steam', '当前用户: {0}', [steamApi.localplayer.getName()]),
+    )
     logger.info('Steam', `Steam ID: ${steamApi.localplayer.getSteamId().steamId64}`)
     logger.info('Steam', '════════════════════════════════════════════')
 
@@ -115,8 +128,8 @@ export function initSteam(): 'ok' | 'not-available' | 'restarting' | 'failed' {
       return 'ok'
     }
     logger.warn('Steam', '════════════════════════════════════════════')
-    logger.warn('Steam', `初始化失败: ${e}`)
-    logger.warn('Steam', 'Steam 是否正在运行？或当前用户未拥有此 AppID')
+    logger.warn('Steam', __t('electron.logs.steam', '初始化失败: {0}', [e]))
+    logger.warn('Steam', __t('electron.logs.steam', 'Steam 是否正在运行？或当前用户未拥有此 AppID'))
     logger.warn('Steam', '════════════════════════════════════════════')
     return 'failed'
   }
@@ -176,7 +189,7 @@ export function getWorkshopInstallations(): WorkshopInstallation[] {
       })
     }
   } catch (e) {
-    logger.warn('Steam', `获取 Workshop 安装目录失败: ${e}`)
+    logger.warn('Steam', __t('electron.logs.steam', '获取 Workshop 安装目录失败: {0}', [e]))
   }
   return installations
 }

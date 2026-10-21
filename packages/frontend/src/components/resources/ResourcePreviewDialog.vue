@@ -1,46 +1,89 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue'
+import '@infos/shared/i18n/catalogs/resourcePreview'
+import { t } from '../../i18n'
 import { PButton, PDialog } from '../pixel'
 import ResourceAudioPlayer from './ResourceAudioPlayer.vue'
+import ResourceVideoPlayer from './ResourceVideoPlayer.vue'
 import ResourceGlyph from './ResourceGlyph.vue'
+import WorkspaceImageViewer from '../workspace/WorkspaceImageViewer.vue'
+import { createPreviewState } from '../workspace/workspacePreview'
+import '../workspace/workspace-file-preview.css'
+import { resourcePreviewKind } from '../../lib/resourceLinks'
 import {
   openResource,
   resourcePreview,
   resourceTextPreview,
+  resourceDocumentPreview,
+  resourceHtmlPreview,
   resourceUrl,
   resourceSize,
 } from '../../composables/resources/useResources'
+const tr = (source: string) => t('ui.resource-preview', source)
+const PdfViewer = defineAsyncComponent(() => import('../workspace/WorkspacePdfViewer.vue'))
 const url = computed(() => (resourcePreview.value ? resourceUrl(resourcePreview.value) : ''))
-const text = ref('')
-const error = ref('')
-const truncated = ref(false)
-const loading = ref(false)
+const kind = computed(() =>
+  resourcePreview.value ? resourcePreviewKind(resourcePreview.value) : '',
+)
+const text = ref(''),
+  html = ref(''),
+  frameUrl = ref(''),
+  error = ref('')
+const truncated = ref(false),
+  loading = ref(false)
+const camera = ref(createPreviewState())
 let revision = 0
+let controller: AbortController | undefined
 function openSource() {
   const item = resourcePreview.value
   resourcePreview.value = null
   if (item) openResource(item, true)
 }
-watch(resourcePreview, async (item) => {
-  const version = ++revision
-  text.value = ''
-  error.value = ''
-  truncated.value = false
-  loading.value = false
-  if (!item || item.kind !== 'text') return
-  loading.value = true
-  try {
-    const result = await resourceTextPreview(item)
-    if (version === revision) {
-      text.value = result.text
-      truncated.value = result.truncated
+watch(
+  resourcePreview,
+  async (item) => {
+    const version = ++revision
+    controller?.abort()
+    text.value = ''
+    html.value = ''
+    frameUrl.value = ''
+    error.value = ''
+    truncated.value = false
+    loading.value = false
+    camera.value = createPreviewState()
+    if (!item || !['text', 'markdown', 'office', 'web'].includes(kind.value)) return
+    if (item.origin?.type === 'url' && !item.id && kind.value !== 'web') return
+    const request = new AbortController()
+    controller = request
+    loading.value = true
+    try {
+      if (kind.value === 'web') {
+        const url = await resourceHtmlPreview(item, request.signal)
+        if (version === revision) frameUrl.value = url
+      } else {
+        const result = await (
+          kind.value === 'office' ? resourceDocumentPreview : resourceTextPreview
+        )(item, request.signal)
+        if (version !== revision) return
+        text.value = result.text
+        truncated.value = result.truncated
+        if (kind.value === 'office' || kind.value === 'markdown') {
+          const { renderChatRichText } = await import('../../lib/chatRichRenderer')
+          if (version === revision) html.value = renderChatRichText(text.value, { cache: false })
+        }
+      }
+    } catch {
+      if (version === revision && !request.signal.aborted)
+        error.value = tr('无法预览，可打开源文件')
+    } finally {
+      if (version === revision) loading.value = false
     }
-  } catch (failure) {
-    if (version === revision)
-      error.value = failure instanceof Error ? failure.message : '无法读取文件'
-  } finally {
-    if (version === revision) loading.value = false
-  }
+  },
+  { immediate: true },
+)
+onBeforeUnmount(() => {
+  ++revision
+  controller?.abort()
 })
 </script>
 <template>
@@ -48,9 +91,9 @@ watch(resourcePreview, async (item) => {
     :model-value="Boolean(resourcePreview)"
     :title="resourcePreview?.name"
     :width="
-      ['audio', 'file'].includes(resourcePreview?.kind || '')
-        ? 'min(460px, calc(100vw - 32px))'
-        : 'min(820px, calc(100vw - 32px))'
+      kind === 'audio' || kind === 'file'
+        ? 'min(480px, calc(100vw - 24px))'
+        : 'min(960px, calc(100vw - 24px))'
     "
     @update:model-value="
       (visible) => {
@@ -58,32 +101,74 @@ watch(resourcePreview, async (item) => {
       }
     "
   >
-    <div v-if="resourcePreview" class="resource-preview">
-      <img v-if="resourcePreview.kind === 'image'" :src="url" :alt="resourcePreview.name" />
-      <video v-else-if="resourcePreview.kind === 'video'" :src="url" controls preload="metadata" />
-      <ResourceAudioPlayer v-else-if="resourcePreview.kind === 'audio'" :src="url" />
-      <iframe v-else-if="resourcePreview.kind === 'pdf'" :src="url" title="PDF 预览" />
-      <template v-else-if="resourcePreview.kind === 'text'">
-        <p v-if="loading || error">{{ loading ? '读取中…' : error }}</p>
-        <pre v-else>{{ text }}</pre>
-        <small v-if="truncated">部分预览</small>
-      </template>
+    <div v-if="resourcePreview" class="resource-preview" :class="`resource-preview--${kind}`">
+      <p v-if="error" role="alert">{{ error }}</p>
+      <p v-else-if="loading">{{ tr('读取中…') }}</p>
+      <WorkspaceImageViewer
+        v-else-if="kind === 'image'"
+        :key="url"
+        :src="url"
+        :name="resourcePreview.name"
+        :state="camera"
+        :active="true"
+        @state="Object.assign(camera, $event)"
+        @error="error = $event"
+      />
+      <ResourceVideoPlayer
+        v-else-if="kind === 'video'"
+        :key="url"
+        :src="url"
+        :name="resourcePreview.name"
+        expanded
+      />
+      <ResourceAudioPlayer
+        v-else-if="kind === 'audio'"
+        :key="url"
+        :src="url"
+        :name="resourcePreview.name"
+      />
+      <PdfViewer
+        v-else-if="kind === 'pdf'"
+        :key="url"
+        :src="url"
+        :state="camera"
+        @state="Object.assign(camera, $event)"
+        @error="error = $event"
+      />
+      <iframe
+        v-else-if="kind === 'web' && frameUrl"
+        :src="frameUrl"
+        :title="resourcePreview.name"
+        sandbox="allow-scripts"
+        referrerpolicy="no-referrer"
+        @error="error = tr('无法预览，可打开源文件')"
+      />
+      <!-- eslint-disable-next-line vue/no-v-html -->
+      <div v-else-if="html" class="resource-preview__document chat-rich-text" v-html="html" />
+      <pre v-else-if="text">{{ text }}</pre>
       <div v-else class="resource-preview__file">
-        <ResourceGlyph kind="file" />
+        <ResourceGlyph :kind="kind" />
+        <strong>{{ resourcePreview.name }}</strong>
         <small>{{ resourceSize(resourcePreview.sizeBytes) }}</small>
+        <small>{{ tr('可打开源文件或下载') }}</small>
       </div>
+      <small v-if="truncated">{{ tr('内容节选') }}</small>
     </div>
     <template #footer>
       <PButton
-        v-if="resourcePreview?.id && resourcePreview.origin"
+        v-if="
+          resourcePreview?.origin &&
+          resourcePreview.origin.type !== 'application' &&
+          !(resourcePreview.origin.type === 'workspace' && resourcePreview.origin.taskId)
+        "
         variant="secondary"
         size="sm"
         @click="openSource"
       >
-        源文件
+        {{ tr('打开源文件') }}
       </PButton>
       <PButton
-        v-if="resourcePreview"
+        v-if="resourcePreview && resourceUrl(resourcePreview, true)"
         variant="secondary"
         size="sm"
         :href="resourceUrl(resourcePreview, true)"
@@ -93,52 +178,74 @@ watch(resourcePreview, async (item) => {
         "
         rel="noopener noreferrer"
       >
-        下载
+        {{ tr('下载') }}
       </PButton>
-      <PButton variant="secondary" size="sm" @click="resourcePreview = null">关闭</PButton>
+      <PButton variant="secondary" size="sm" @click="resourcePreview = null">
+        {{ tr('关闭') }}
+      </PButton>
     </template>
   </PDialog>
 </template>
 <style scoped>
 .resource-preview {
-  display: grid;
-  place-items: center;
-  min-height: 90px;
-  max-height: 66vh;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 100px;
+  max-height: 70vh;
   overflow: auto;
 }
-.resource-preview img,
-.resource-preview video {
-  display: block;
-  max-width: 100%;
-  max-height: 62vh;
-  object-fit: contain;
+.resource-preview--image,
+.resource-preview--pdf {
+  height: 65vh;
+  min-height: 260px;
+}
+.resource-preview--image > :deep(.workspace-image),
+.resource-preview--pdf > :deep(.workspace-pdf) {
+  flex: 1;
+  min-height: 0;
 }
 .resource-preview :deep(.resource-audio) {
-  width: min(100%, 420px);
+  margin: 0 auto;
+  width: min(100%, 440px);
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: 10px;
+}
+.resource-preview :deep(.resource-video) {
+  flex-shrink: 0;
+  overflow: hidden;
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: 8px;
 }
 .resource-preview__file {
   display: grid;
   justify-items: center;
   gap: 12px;
-  padding: 10px;
+  padding: 20px;
+  overflow-wrap: anywhere;
 }
 .resource-preview iframe {
   width: 100%;
-  height: 62vh;
+  height: 65vh;
+  flex-shrink: 0;
   border: 1px solid var(--ui-border-default);
-  background: var(--ui-bg-surface);
+  background: white;
 }
 .resource-preview pre {
   width: 100%;
   margin: 0;
-  padding: 14px;
+  padding: 16px;
   font: 12px/1.7 var(--ui-font-mono);
   color: var(--ui-text-primary);
   background: var(--ui-bg-surface-soft);
-  user-select: text;
-  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   tab-size: 4;
+}
+.resource-preview__document {
+  padding: 20px;
+  background: var(--ui-bg-surface);
+  user-select: text;
 }
 .resource-preview small,
 .resource-preview p {

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t as __t } from '../../i18n/index'
+
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import DOMPurify from 'dompurify'
 import type { WorkspaceFileDescriptor } from '@infos/shared'
@@ -45,13 +47,26 @@ const downloadUrl = computed(() =>
 const label = computed(
   () =>
     ({
-      image: props.file.mimeType === 'image/gif' ? 'GIF 动图' : '图片',
-      svg: 'SVG 矢量图',
-      pdf: 'PDF 文档',
-      audio: '音频',
+      image:
+        props.file.mimeType === 'image/gif'
+          ? __t('ui.workspace', 'GIF 动图')
+          : __t('ui.workspace', '图片'),
+      get svg() {
+        return __t('ui.workspace', 'SVG 矢量图')
+      },
+      get pdf() {
+        return __t('ui.workspace', 'PDF 文档')
+      },
+      get audio() {
+        return __t('ui.workspace', '音频')
+      },
       video: '视频',
-      text: '文本',
-      file: '文件',
+      get text() {
+        return __t('ui.workspace', '文本')
+      },
+      get file() {
+        return __t('ui.workspace', '文件')
+      },
     })[props.file.kind],
 )
 const size = computed(() =>
@@ -181,9 +196,11 @@ onBeforeUnmount(() => {
       <span>{{ label }}</span>
       <small>{{ size }}</small>
       <span class="file-view-spacer" />
-      <button type="button" @click="emit('reload')">重新载入</button>
-      <a :href="downloadUrl" :download="file.name">下载</a>
-      <button type="button" :disabled="opening" @click="openSystem">系统打开</button>
+      <button type="button" @click="emit('reload')">{{ __t('ui.workspace', '重新载入') }}</button>
+      <a :href="downloadUrl" :download="file.name">{{ __t('ui.workspace', '下载') }}</a>
+      <button type="button" :disabled="opening" @click="openSystem">
+        {{ __t('ui.workspace', '系统打开') }}
+      </button>
     </div>
     <small v-if="actionError" class="workspace-file-preview__action-error" role="alert">
       {{ actionError }}
@@ -191,7 +208,7 @@ onBeforeUnmount(() => {
     <div v-if="failure" class="file-view-state" role="alert">
       <WorkspaceFileGlyph :kind="file.kind" />
       <span>{{ failure }}</span>
-      <small>重新载入，或用系统应用查看</small>
+      <small>{{ __t('ui.workspace', '重新载入，或用系统应用查看') }}</small>
     </div>
     <template v-else>
       <WorkspaceImageViewer
@@ -204,7 +221,9 @@ onBeforeUnmount(() => {
         @error="failure = $event"
       />
       <div v-else-if="file.kind === 'svg'" class="file-view-state">
-        {{ svgLoading ? '正在读取 SVG…' : 'SVG 预览已暂停' }}
+        {{
+          svgLoading ? __t('ui.workspace', '正在读取 SVG…') : __t('ui.workspace', 'SVG 预览已暂停')
+        }}
       </div>
       <template v-else-if="file.kind === 'pdf'">
         <PdfViewer
@@ -214,7 +233,7 @@ onBeforeUnmount(() => {
           @state="emit('state', state, $event)"
           @error="failure = $event"
         />
-        <div v-else class="file-view-state">PDF 预览已暂停</div>
+        <div v-else class="file-view-state">{{ __t('ui.workspace', 'PDF 预览已暂停') }}</div>
       </template>
       <WorkspaceMediaViewer
         v-else-if="file.kind === 'audio' || file.kind === 'video'"
@@ -229,7 +248,7 @@ onBeforeUnmount(() => {
       <div v-else class="file-view-state">
         <WorkspaceFileGlyph kind="file" />
         <span>{{ file.name }}</span>
-        <small>可下载或用系统应用打开</small>
+        <small>{{ __t('ui.workspace', '可下载或用系统应用打开') }}</small>
       </div>
     </template>
   </div>

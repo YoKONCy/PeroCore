@@ -1,3 +1,4 @@
+import { t as __t } from '../../lib/i18n'
 /**
  * Stronghold Service — 据点管理服务
  *
@@ -68,17 +69,17 @@ export class StrongholdService {
    * 3. 无房间的 Agent 归位到客厅
    */
   async ensureDefaults(agentIds: string[] = []): Promise<void> {
-    logger.info('检查据点默认数据...')
+    logger.info(__t('logs.stronghold', '检查据点默认数据...'))
 
     // 1. 确保默认设施
     let facility = await this.getFacilityByName('我的据点')
     if (!facility) {
       facility = await this.createFacility({
         name: '我的据点',
-        description: '温馨的家',
+        description: __t('server.stronghold', '温馨的家'),
         icon: 'HomeFilled',
       })
-      logger.info('已创建默认设施: 我的据点')
+      logger.info(__t('logs.stronghold', '已创建默认设施: 我的据点'))
     }
 
     // 2. 确保默认房间 (客厅)
@@ -87,10 +88,10 @@ export class StrongholdService {
       livingRoom = await this.createRoom({
         facilityId: facility.id,
         name: '客厅',
-        description: '宽敞明亮的公共区域，适合大家聚在一起。',
+        description: __t('server.stronghold', '宽敞明亮的公共区域，适合大家聚在一起。'),
         environment: { 光照: 80, 温度: 24, 音乐: 'Relaxing Piano', 清洁度: 100 },
       })
-      logger.info('已创建默认房间: 客厅')
+      logger.info(__t('logs.stronghold', '已创建默认房间: 客厅'))
     }
 
     await this.removeUnknownAgentRecords()
@@ -98,7 +99,7 @@ export class StrongholdService {
       await this.ensureAgentLocation(agentId, livingRoom.id)
     }
 
-    logger.info('据点默认数据检查完成')
+    logger.info(__t('logs.stronghold', '据点默认数据检查完成'))
   }
 
   private async removeUnknownAgentRecords(): Promise<void> {
@@ -118,7 +119,7 @@ export class StrongholdService {
       }
     }
     if (invalidIds.length > 0) {
-      logger.warn(`已清理未知据点角色记录: ${invalidIds.join('、')}`)
+      logger.warn(__t('logs.stronghold', '已清理未知据点角色记录: {0}', [invalidIds.join('、')]))
     }
   }
 
@@ -277,7 +278,7 @@ export class StrongholdService {
     await this.db.delete(strongholdRooms).where(eq(strongholdRooms.id, roomId))
     // 群聊房间保留 (允许查看历史消息)
 
-    logger.info(`房间已删除: ${room.name}`)
+    logger.info(__t('logs.stronghold', '房间已删除: {0}', [room.name]))
   }
 
   // ─── 环境变量 ───
@@ -338,7 +339,9 @@ export class StrongholdService {
         (allowedAgents.length === 0 || allowedAgents.includes(agentId))
       )
     } catch {
-      logger.warn(`房间 ${room.id} 的角色白名单格式无效，已按禁止进入处理`)
+      logger.warn(
+        __t('logs.stronghold', '房间 {0} 的角色白名单格式无效，已按禁止进入处理', [room.id]),
+      )
       return false
     }
   }
@@ -393,7 +396,7 @@ export class StrongholdService {
 
     await this.ensureRoomMember(roomId, agentId)
 
-    logger.debug(`Agent ${agentId} 移动到房间 ${room.name}`)
+    logger.debug(__t('logs.stronghold', 'Agent {0} 移动到房间 {1}', [agentId, room.name]))
     return location!
   }
 

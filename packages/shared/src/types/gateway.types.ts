@@ -13,6 +13,7 @@
 // ─────────────────────────────────────────────
 
 import type { DeliveryAudience, KernelEventDurability } from './kernel.types'
+import type { DeviceNotificationRequest, NotificationAvailablePayload } from '../notifications'
 
 export const GATEWAY_ACTION_CATALOG = {
   plan_changed: {
@@ -146,6 +147,8 @@ export interface GatewayEnvelope<T = GatewayPayload> {
 
 /** 所有 Push 推送 Payload 的联合类型 */
 export type GatewayPayload =
+  | DeviceNotificationRequest
+  | NotificationAvailablePayload
   | StateUpdatePayload
   | TaskProgressPayload
   | NotificationPayload
@@ -210,6 +213,7 @@ export interface SystemErrorPayload {
 
 /** Hello 握手请求 */
 export interface HelloPayload {
+  profile?: 'full' | 'notifications'
   action?: undefined
   token?: string
   deviceName?: string
@@ -219,11 +223,16 @@ export interface HelloPayload {
 export interface HelloAckPayload {
   action?: undefined
   nodeId: string
+  profile?: 'full' | 'notifications'
+  deviceId?: string
+  features?: string[]
+  latestSequence?: number
 }
 
 /** 心跳空 payload */
 export interface HeartbeatPayload {
   action?: undefined
+  latestSequence?: number
 }
 
 /** 聊天请求 payload */
