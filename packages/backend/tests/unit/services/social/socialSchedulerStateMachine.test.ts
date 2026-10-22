@@ -105,10 +105,10 @@ describe('SocialScheduler 确定性门控', () => {
 
   it('20 条门槛可真实触发并一次处理完整观察批次，PASS 仅冷却本群', async () => {
     const flush = vi.fn().mockResolvedValue({ type: 'pass' })
-    const manager = new SocialSessionManager(flush, undefined, (current) =>
+    const manager: SocialSessionManager = new SocialSessionManager(flush, undefined, (current) =>
       scheduler.getGroupPolicy(current.agentId, current.accountId, current.channelId),
     )
-    const scheduler = new SocialScheduler(
+    const scheduler: SocialScheduler = new SocialScheduler(
       { sessionManager: manager },
       {
         nightSilenceEnabled: false,
