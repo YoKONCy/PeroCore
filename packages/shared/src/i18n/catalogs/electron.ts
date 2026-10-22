@@ -102,6 +102,12 @@ import messages98 from '../locales/en-US/errors/electron.json'
 import messages99 from '../locales/zh-CN/electron/ui/completionAlerts.json'
 import messages100 from '../locales/zh-TW/electron/ui/completionAlerts.json'
 import messages101 from '../locales/en-US/electron/ui/completionAlerts.json'
+import splashUiZh from '../locales/zh-CN/electron/ui/startupSplash.json'
+import splashUiTw from '../locales/zh-TW/electron/ui/startupSplash.json'
+import splashUiEn from '../locales/en-US/electron/ui/startupSplash.json'
+import splashLogsZh from '../locales/zh-CN/electron/logs/startupSplash.json'
+import splashLogsTw from '../locales/zh-TW/electron/logs/startupSplash.json'
+import splashLogsEn from '../locales/en-US/electron/logs/startupSplash.json'
 registerCatalog('common.tools', 'zh-CN', messages0)
 registerCatalog('common.tools', 'zh-TW', messages1)
 registerCatalog('common.tools', 'en-US', messages2)
@@ -204,3 +210,9 @@ registerCatalog('errors.electron', 'en-US', messages98)
 registerCatalog('electron.ui.completionAlerts', 'zh-CN', messages99)
 registerCatalog('electron.ui.completionAlerts', 'zh-TW', messages100)
 registerCatalog('electron.ui.completionAlerts', 'en-US', messages101)
+registerCatalog('electron.ui.startupSplash', 'zh-CN', splashUiZh)
+registerCatalog('electron.ui.startupSplash', 'zh-TW', splashUiTw)
+registerCatalog('electron.ui.startupSplash', 'en-US', splashUiEn)
+registerCatalog('electron.logs.startupSplash', 'zh-CN', splashLogsZh)
+registerCatalog('electron.logs.startupSplash', 'zh-TW', splashLogsTw)
+registerCatalog('electron.logs.startupSplash', 'en-US', splashLogsEn)

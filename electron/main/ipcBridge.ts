@@ -656,20 +656,15 @@ function registerNavigationHandlers(): void {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// 后端进程管理（第七阶段：已废弃，Daemon 独立运行）
+// 内置后端启动与诊断
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Electron 不再 spawn 后端进程，这些 IPC 通道保留仅为兼容旧前端调用。
-// 调用时返回提示信息，前端应迁移为通过 HTTP API 与 Daemon 交互。
+// 仅管理本应用的内置 Daemon；业务操作继续通过 HTTP API 完成。
 function registerBackendHandlers(): void {
   ipcMain.handle('start-backend', async () => {
-    logger.info(
-      'IPC',
-      __t(
-        'electron.logs.ipcBridge.ts',
-        'start-backend 已废弃：Daemon 独立运行，无需 Electron 启动',
-      ),
-    )
-    return null
+    const { ensurePortableDaemon, getPortableDaemonStatus } =
+      await import('./services/portableDaemon')
+    await ensurePortableDaemon()
+    return getPortableDaemonStatus()
   })
 
   ipcMain.handle('stop-backend', async () => {

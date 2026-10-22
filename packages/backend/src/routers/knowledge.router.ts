@@ -11,6 +11,8 @@ import {
   MAX_SOURCE_BYTES,
 } from '../services/knowledge/knowledgeText'
 import { knowledgeSearchSchema } from '../services/knowledge/knowledgeValidation'
+import { factEditSchema } from '../schemas/archiveEdit.schema'
+import { throwArchiveEditError } from './archiveEditError'
 
 const archiveQuerySchema = z.object({
   query: z.string().trim().max(200).default(''),
@@ -27,6 +29,15 @@ const documentBodyLimit = (maxSize: number) =>
 
 export function createKnowledgeRouter(ctx: AppContext) {
   const router = new Hono()
+
+  router.patch('/facts/:id', zValidator('json', factEditSchema), async (c) => {
+    try {
+      const data = await ctx.factsRepo.editFact(c.req.param('id'), c.req.valid('json'))
+      return c.json({ code: 'OK', data })
+    } catch (error) {
+      throwArchiveEditError(error)
+    }
+  })
 
   router.get('/facts', zValidator('query', archiveQuerySchema), async (c) => {
     const { query } = c.req.valid('query')

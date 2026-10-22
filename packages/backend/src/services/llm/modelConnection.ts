@@ -63,11 +63,12 @@ export async function resolveModelConnection(
       ? row.providerType!
       : defaultProtocol(provider))
   const authMode = row.connectionAuthMode ?? (provider === 'ollama' ? 'none' : 'api_key')
-  // 显式覆盖是完整配置，空密钥有确定含义，不回填到旧全局配置。
-  const apiBase = connection
+  // 独立卡片与显式覆盖使用完整配置；只有旧卡片保留全局回填兼容。
+  const explicit = !!connection || row.connectionOverride
+  const apiBase = explicit
     ? row.apiBase
     : row.apiBase || (await readConfig(`global.${provider}.apiBase`))
-  const apiKey = connection
+  const apiKey = explicit
     ? row.apiKey
     : row.apiKey || (await readConfig(`global.${provider}.apiKey`))
   return {

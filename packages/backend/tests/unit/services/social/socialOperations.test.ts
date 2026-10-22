@@ -16,7 +16,7 @@ const scope: SocialOperationScope = {
   owner: true,
   callId: 'turn:call',
 }
-function fixture() {
+function fixture(overrides: Partial<ConstructorParameters<typeof SocialOperations>[0]> = {}) {
   const values = new Map<string, string>()
   const callApi = vi.fn(async (action: string) => ({
     status: 'ok',
@@ -45,11 +45,107 @@ function fixture() {
     },
     storage,
     prepareImage: vi.fn(async () => 'base64://aW1hZ2U='),
+    ...overrides,
   })
   return { service, callApi, values, storage }
 }
 
 describe('三个社交工具的账号与副作用边界', () => {
+  it('群策略工具只修改当前群并返回运行时状态，不向 QQ 发送配置请求', async () => {
+    const state = { policy: { reviewIntervalSeconds: 60 }, nextReviewAt: 1234, gate: 'busy' }
+    const groupState = vi.fn(() => state)
+    const configureGroupState = vi.fn(async () => state)
+    const { service, callApi } = fixture({ groupState, configureGroupState })
+    const current = { ...scope, owner: false, channelType: 'group' as const }
+    const definitions = await service.definitions(current)
+    const groupTools = definitions.find((tool) => tool.function.name === 'social_group')!
+    expect(JSON.stringify(groupTools)).toContain('state_get')
+    expect(JSON.stringify(groupTools)).toContain('state_configure')
+    callApi.mockClear()
+    const configured = JSON.parse(
+      await service.execute(
+        'social_group',
+        {
+          action: 'state_configure',
+          input: { group_id: current.channelId, policy: { reviewIntervalSeconds: 60 } },
+        },
+        current,
+      ),
+    )
+    expect(configured).toMatchObject({ success: true, data: state })
+    expect(configureGroupState).toHaveBeenCalledWith(
+      current,
+      current.channelId,
+      { reviewIntervalSeconds: 60 },
+      false,
+    )
+    const queried = JSON.parse(
+      await service.execute(
+        'social_group',
+        {
+          action: 'state_get',
+          input: { group_id: current.channelId },
+        },
+        current,
+      ),
+    )
+    expect(queried.data).toEqual(state)
+    expect(callApi).not.toHaveBeenCalled()
+    const foreign = JSON.parse(
+      await service.execute(
+        'social_group',
+        {
+          action: 'state_configure',
+          input: { group_id: '111111111', reset: true },
+        },
+        current,
+      ),
+    )
+    expect(foreign.success).toBe(false)
+    expect(configureGroupState).toHaveBeenCalledTimes(1)
+  })
+
+  it('拒绝空策略、未知字段及越界值，恢复默认也必须返回实际状态', async () => {
+    const configureGroupState = vi.fn(async () => ({
+      override: {},
+      policy: { minMessagesForReview: 3 },
+    }))
+    const { service } = fixture({ groupState: vi.fn(), configureGroupState })
+    const current = { ...scope, channelType: 'group' as const }
+    for (const policy of [
+      {},
+      { unknown: true },
+      { minMessagesForReview: 21 },
+      { reviewIntervalSeconds: 1 },
+    ]) {
+      const result = JSON.parse(
+        await service.execute(
+          'social_group',
+          {
+            action: 'state_configure',
+            input: { group_id: current.channelId, policy },
+          },
+          current,
+        ),
+      )
+      expect(result.success).toBe(false)
+    }
+    expect(configureGroupState).not.toHaveBeenCalled()
+    const result = JSON.parse(
+      await service.execute(
+        'social_group',
+        {
+          action: 'state_configure',
+          input: { group_id: current.channelId, reset: true },
+        },
+        current,
+      ),
+    )
+    expect(result).toMatchObject({
+      success: true,
+      data: { override: {}, policy: { minMessagesForReview: 3 } },
+    })
+  })
   it('未开启视觉时不展示读图操作，伪造调用也不会进入图片执行器', async () => {
     const { service } = fixture()
     const textOnly = { ...scope, enableVision: false }

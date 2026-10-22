@@ -1,5 +1,7 @@
 import type {
   FactArchiveResult,
+  FactRecord,
+  FactManualEditInput,
   KnowledgeDocumentInfo,
   KnowledgeDocumentDetail,
   KnowledgeDocumentList,
@@ -9,6 +11,8 @@ import type {
 import { apiClient } from '../client'
 
 export const knowledgeApi = {
+  editFact: (id: string, input: FactManualEditInput) =>
+    apiClient.patch<FactRecord>(`/knowledge/facts/${encodeURIComponent(id)}`, input),
   facts: (query = '') => {
     const params = new URLSearchParams()
     if (query.trim()) params.set('query', query.trim())

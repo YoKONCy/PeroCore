@@ -1,0 +1,14 @@
+{
+  "正在启动 infOS": "Starting infOS",
+  "启动遇到问题": "Startup needs attention",
+  "后端尚未就绪。可以重试，或查看启动日志。": "The backend is not ready. Retry or view the startup log.",
+  "启动器页面未能就绪。请重试或查看日志。": "The launcher could not get ready. Retry or view the log.",
+  "桌面启动未能完成。请重试或查看日志。": "The desktop app could not finish starting. Retry or view the log.",
+  "重试": "Retry",
+  "查看日志": "View log",
+  "退出": "Quit",
+  "关闭": "Close",
+  "开屏资源加载失败": "Startup artwork could not load",
+  "无法显示开屏资源。请重试或退出应用。": "The startup screen could not be displayed. Retry or quit the app.",
+  "启动日志尚未生成，请稍后再试。": "No startup log is available yet. Try again shortly."
+}

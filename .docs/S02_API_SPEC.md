@@ -301,6 +301,17 @@ data: {"code":"LLM_ERROR","message":"AI 服务异常"}
 - gateway.select_principal 将当前客户端的消息投影身份切换为指定角色；Input Seat 仍独立申请与续租。
 - 语音识别二进制请求保留实际 Content-Type 编码参数；取消后客户端不再把迟到识别结果提交为对话。
 
+## 档案人工修订
+
+以下接口使用标准信封，成功返回新版本记录，其 `id` 与旧版本不同。用户只能修改列明字段，不接受来源对话标识、所属角色或事实对象的覆盖。
+
+| 方法 | 路径 | 请求 |
+| --- | --- | --- |
+| PATCH | `/api/memories/:id` | `narrative`、`importance`、`affect{tones,valence,arousal}`、`participants/places/objects/topics`、`expectedStatus`、`regenerateVector`（默认 false）、UUID `operationId` |
+| PATCH | `/api/knowledge/facts/:id` | `statement`、可选 `source/confidence`、UUID `operationId` |
+
+正文最多 20,000 字符；每组标签最多 100 项、每项最多 200 字符；重要度与情感数值为 0–10 整数，可信度为 0–1。相同草稿的网络重试沿用同一个 `operationId`。版本或状态冲突返回 `CONFLICT`（409）；索引尚未完成返回 `RESOURCE_BUSY`；向量生成不可用或失败返回 `EMBEDDING_ERROR`。接口不会追加聊天来源覆盖或触发人工版本的后台反思。归档记忆保持归档；历史和已撤回事实不可编辑。
+
 ## 11. 文档知识库
 
 所有端点位于 `/api/knowledge`，使用标准信封。共享事实端点保持原有合同。

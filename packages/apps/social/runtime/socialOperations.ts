@@ -12,7 +12,7 @@ import {
 } from '@infos/shared'
 import type { NapcatAdapter } from '../adapters/napcat'
 import { QzoneClient } from '../adapters/napcat/qzoneClient'
-import type { SocialStoragePort } from '@infos/shared'
+import type { SocialStoragePort, SocialGroupPolicy } from '@infos/shared'
 import type { OutboundMessage } from './types'
 import { currentSocialRecovery, socialFailure } from './socialRecovery'
 import { NativeEmojiService } from './nativeEmoji'
@@ -66,6 +66,13 @@ interface Dependencies {
   storage: SocialStoragePort
   prepareImage(source: string, scope: SocialOperationScope): Promise<string>
   send?(scope: SocialOperationScope, message: OutboundMessage): Promise<unknown>
+  groupState?(scope: SocialOperationScope & { accountId: string }, groupId: string): unknown
+  configureGroupState?(
+    scope: SocialOperationScope & { accountId: string },
+    groupId: string,
+    policy: Partial<SocialGroupPolicy>,
+    reset: boolean,
+  ): Promise<unknown>
   markBot?(
     scope: SocialOperationScope & { accountId: string },
     input: {
@@ -420,6 +427,11 @@ export class SocialOperations {
         (item) =>
           item.tool === tool &&
           (item.action !== 'contact_mark_bot' || (!scope.host && !!this.deps.markBot)) &&
+          (!['state_get', 'state_configure'].includes(item.action) || !!this.deps.groupState) &&
+          (!['state_get', 'state_configure'].includes(item.action) ||
+            scope.host ||
+            scope.channelType === 'group') &&
+          (item.action !== 'state_configure' || !!this.deps.configureGroupState) &&
           (scope.enableVision !== false || !['image_read', 'sticker_read'].includes(item.action)) &&
           (!item.ownerOnly || scope.owner) &&
           (!item.groupRole || permittedGroups(item.groupRole).length > 0) &&
@@ -503,6 +515,23 @@ export class SocialOperations {
     scope: SocialOperationScope,
     accountId: string,
   ) {
+    if (['state_get', 'state_configure'].includes(definition.action)) {
+      if (!this.deps.groupState) throw new Error('群聊状态机服务尚未就绪')
+      if (
+        !scope.host &&
+        (scope.channelType !== 'group' ||
+          input.group_id !== scope.channelId ||
+          accountId !== scope.accountId)
+      )
+        throw new Error('只能查询或配置当前账号的当前群聊状态机')
+      if (definition.action === 'state_configure') {
+        if (!this.deps.configureGroupState) throw new Error('群聊状态机配置服务尚未就绪')
+        if (input.reset === true && input.policy !== undefined)
+          throw new Error('恢复默认策略时不能同时提供 policy')
+        if (input.reset !== true && Object.keys(object(input.policy)).length === 0)
+          throw new Error('请提供非空 policy，或使用 reset 恢复默认策略')
+      }
+    }
     if (scope.enableVision === false && ['image_read', 'sticker_read'].includes(definition.action))
       throw new Error('当前角色模型未开启视觉能力，无法查看图片内容')
     if (definition.ownerOnly && !scope.owner) throw new Error('此操作仅对主人开放')
@@ -604,7 +633,7 @@ export class SocialOperations {
         }
       }
       const result =
-        definition.mutation && definition.action !== 'operation_resolve'
+        definition.mutation && !['operation_resolve', 'state_configure'].includes(definition.action)
           ? await this.mutate(definition, input, scope, accountId, run)
           : await run()
       // 图片必须留在顶层，编译器才能提取为多模态内容。
@@ -801,6 +830,16 @@ export class SocialOperations {
     const accountId = scope.accountId!
     const action = definition.action
     const input = { ...params }
+    // 本地策略写入幂等且由运行时串行持久化，读回实时状态，不复用平台写操作的旧结果。
+    if (action === 'state_get')
+      return this.deps.groupState!({ ...scope, accountId }, String(input.group_id))
+    if (action === 'state_configure')
+      return this.deps.configureGroupState!(
+        { ...scope, accountId },
+        String(input.group_id),
+        (input.policy ?? {}) as Partial<SocialGroupPolicy>,
+        input.reset === true,
+      )
     const invoke = (name: string, data: Record<string, unknown>, timeout?: number) =>
       this.invoke(scope, accountId, name, data, timeout)
     if (action === 'contact_mark_bot') {

@@ -15,11 +15,32 @@ import { t as __t } from './i18n'
  */
 
 import { createLogger } from './logger'
+import { DAEMON_SHUTDOWN_MESSAGE } from '@infos/shared'
 
 const logger = createLogger('进程守护')
 
 /** 优雅退出时的回调队列 */
 const shutdownCallbacks: Array<() => Promise<void> | void> = []
+let registered = false
+let shutdownPromise: Promise<void> | null = null
+
+/** 信号和父进程 IPC 共用一次清理，避免重复关闭数据库及工作线程。 */
+export function requestGracefulShutdown(reason: string): Promise<void> {
+  if (shutdownPromise) return shutdownPromise
+  shutdownPromise = (async () => {
+    logger.info(__t('logs.lib', '收到 {0} 信号，开始优雅退出...', [reason]))
+    for (const callback of shutdownCallbacks) {
+      try {
+        await callback()
+      } catch (error) {
+        logger.error(__t('logs.lib', '清理回调执行失败'), { error: String(error) })
+      }
+    }
+    logger.info(__t('logs.lib', '优雅退出完成，再见喵~ 🐾'))
+    setTimeout(() => process.exit(0), 500)
+  })()
+  return shutdownPromise
+}
 
 /**
  * 注册进程守护
@@ -27,6 +48,8 @@ const shutdownCallbacks: Array<() => Promise<void> | void> = []
  * 应在 main.ts 初始化日志文件后立即调用。
  */
 export function registerProcessGuards(): void {
+  if (registered) return
+  registered = true
   // ── 未捕获的同步异常 ──
   process.on('uncaughtException', (err) => {
     logger.error(__t('logs.lib', '未捕获异常 (uncaughtException)，进程即将退出'), {
@@ -53,22 +76,21 @@ export function registerProcessGuards(): void {
   // ── 优雅退出信号 ──
   const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM']
   for (const signal of signals) {
-    process.on(signal, async () => {
-      logger.info(__t('logs.lib', '收到 {0} 信号，开始优雅退出...', [signal]))
-
-      // 执行所有注册的清理回调
-      for (const callback of shutdownCallbacks) {
-        try {
-          await callback()
-        } catch (err) {
-          logger.error(__t('logs.lib', '清理回调执行失败'), { error: String(err) })
-        }
+    process.on(signal, () => {
+      void requestGracefulShutdown(signal)
+    })
+  }
+  // Windows 的 kill 不保证触发 SIGTERM，内置后端通过专用 IPC 接收正常退出请求。
+  if (process.send) {
+    process.on('message', (message: unknown) => {
+      if (
+        message &&
+        typeof message === 'object' &&
+        'type' in message &&
+        message.type === DAEMON_SHUTDOWN_MESSAGE
+      ) {
+        void requestGracefulShutdown('IPC')
       }
-
-      logger.info(__t('logs.lib', '优雅退出完成，再见喵~ 🐾'))
-
-      // 给日志 flush 时间
-      setTimeout(() => process.exit(0), 500)
     })
   }
 

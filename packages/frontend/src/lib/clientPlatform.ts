@@ -11,8 +11,11 @@ export function createClientUuid(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
-/** 手机 HTTP 使用用户手势触发的复制回退，失败时交给调用方提示。 */
-export async function copyClientText(value: string): Promise<void> {
+/** 手机 HTTP 使用用户手势触发的复制回退；原生模态框内的回退节点必须放在框内。 */
+export async function copyClientText(
+  value: string,
+  container: HTMLElement = document.body,
+): Promise<void> {
   if (navigator.clipboard?.writeText) {
     try {
       await navigator.clipboard.writeText(value)
@@ -32,7 +35,7 @@ export async function copyClientText(value: string): Promise<void> {
   input.value = value
   input.readOnly = true
   input.style.cssText = 'position:fixed;left:-9999px;top:0;font-size:16px'
-  document.body.append(input)
+  container.append(input)
   try {
     input.select()
     input.setSelectionRange(0, value.length)

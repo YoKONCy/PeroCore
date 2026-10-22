@@ -5,6 +5,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { PButton, PDialog, PInput, PSelect, PixelIcon } from '../pixel'
 import BrandSelect from '../brands/BrandSelect.vue'
 import BrandIcon from '../brands/BrandIcon.vue'
+import ProviderConnectionChecks from './ProviderConnectionChecks.vue'
 import { resolveProviderBrand } from '../../lib/modelBrands'
 import {
   providerApi,
@@ -28,11 +29,6 @@ const error = ref('')
 const removing = ref(false)
 const replacementId = ref('')
 const pendingSelection = ref<string | null>(null)
-const probeResult = ref('')
-const listResult = ref('')
-const remoteModels = ref<string[]>([])
-const probing = ref(false)
-const fetching = ref(false)
 let sequence = 0
 const emptyDraft = (): ProviderConnectionInput => ({
   name: '',
@@ -111,9 +107,6 @@ async function load(id: string): Promise<void> {
   error.value = ''
   removing.value = false
   replacementId.value = ''
-  probeResult.value = ''
-  listResult.value = ''
-  remoteModels.value = []
   draft.value = emptyDraft()
   baseline.value = JSON.stringify(draft.value)
   if (!id) return
@@ -142,8 +135,6 @@ function applyTemplate(value: string | number): void {
   draft.value.authMode = brand === 'ollama' ? 'none' : 'api_key'
   if (!draft.value.name)
     draft.value.name = props.templates.find((item) => item.value === brand)?.label ?? ''
-  probeResult.value = ''
-  listResult.value = ''
 }
 async function save(): Promise<void> {
   if (saving.value || loading.value || error.value) return
@@ -166,8 +157,6 @@ async function save(): Promise<void> {
     selectedId.value = id
     emit('changed')
     notify.toast(__t('ui.settings', '连接已保存'), 'success')
-    probeResult.value = ''
-    listResult.value = ''
   } catch (failure) {
     notify.toast(__t('ui.settings', '保存连接失败：') + (failure as Error).message, 'error')
   } finally {
@@ -188,35 +177,6 @@ async function remove(): Promise<void> {
     notify.toast(__t('ui.settings', '删除连接失败：') + (failure as Error).message, 'error')
   } finally {
     saving.value = false
-  }
-}
-async function probe(): Promise<void> {
-  const request = sequence
-  probing.value = true
-  try {
-    const result = (await providerApi.probe(selectedId.value)).data
-    if (request === sequence)
-      probeResult.value = result ? `${result.message}（${result.durationMs} ms）` : '未收到检查结果'
-  } catch (failure) {
-    if (request === sequence) probeResult.value = (failure as Error).message
-  } finally {
-    probing.value = false
-  }
-}
-async function fetchModels(): Promise<void> {
-  const request = sequence
-  fetching.value = true
-  try {
-    const items = (await providerApi.listModels(selectedId.value)).data ?? []
-    if (request !== sequence) return
-    remoteModels.value = items
-    listResult.value = items.length
-      ? `已获取 ${items.length} 个模型`
-      : '列表为空，可手动填写模型 ID'
-  } catch (failure) {
-    if (request === sequence) listResult.value = `获取失败：${(failure as Error).message}`
-  } finally {
-    fetching.value = false
   }
 }
 function close(): void {
@@ -405,39 +365,11 @@ onBeforeUnmount(() => {
               }}
             </p>
           </div>
-          <section class="provider-checks">
-            <strong>{{ __t('ui.settings', '连接检查') }}</strong>
-            <p class="provider-hint">{{ __t('ui.settings', '保存后可检查连接。') }}</p>
-            <div class="provider-actions">
-              <PButton
-                size="sm"
-                variant="secondary"
-                :disabled="!selectedId || dirty || saving"
-                :loading="probing"
-                @click="probe"
-              >
-                {{ __t('ui.settings', '检查地址') }}
-              </PButton>
-              <PButton
-                size="sm"
-                variant="secondary"
-                :disabled="!selectedId || dirty || saving"
-                :loading="fetching"
-                @click="fetchModels"
-              >
-                {{ __t('ui.settings', '获取模型列表') }}
-              </PButton>
-            </div>
-            <p v-if="probeResult" role="status">{{ probeResult }}</p>
-            <p v-if="listResult" role="status">{{ listResult }}</p>
-            <details v-if="remoteModels.length">
-              <summary>{{ __t('ui.settings', '查看模型 ID') }}</summary>
-              <ul>
-                <li v-for="model in remoteModels" :key="model">{{ model }}</li>
-              </ul>
-            </details>
-            <small>{{ __t('ui.settings', '模型调用请在模型卡片中测试。') }}</small>
-          </section>
+          <ProviderConnectionChecks
+            :connection-id="selectedId"
+            :disabled="dirty || saving"
+            :active="modelValue"
+          />
           <section v-if="removing" class="provider-delete">
             <strong>{{ __t('ui.settings', '确认删除「') }}{{ current?.name }}」？</strong>
             <p v-if="current?.models.length">
@@ -720,7 +652,6 @@ onBeforeUnmount(() => {
   gap: 14px;
 }
 .provider-usage,
-.provider-checks,
 .provider-delete {
   border: 1px solid var(--ui-border-default);
   padding: 14px;
@@ -749,12 +680,6 @@ onBeforeUnmount(() => {
 }
 .provider-error {
   color: var(--ui-accent-rose);
-}
-.provider-checks ul {
-  max-height: 160px;
-  overflow-y: auto;
-  font-family: monospace;
-  padding-left: 20px;
 }
 @media (max-width: 680px) {
   .provider-manager {

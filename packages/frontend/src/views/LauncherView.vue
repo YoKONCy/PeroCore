@@ -6,17 +6,18 @@ import { t as __t } from '../i18n/index'
 import { copyClientText } from '../lib/clientPlatform'
 
 /** Electron 客户端专属启动与维护中心。 */
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { PixelIcon } from '../components/pixel'
 import AsyncMarkdown from '../components/markdown/AsyncMarkdown.vue'
 import { OnboardingOverlay } from '../components/overlays'
 import CustomTitleBar from '../components/layout/CustomTitleBar.vue'
 import InfosLogo from '../components/brands/InfosLogo.vue'
-import { useLauncher } from '../composables/launcher/useLauncher'
+import { useLauncher, type CheckItem } from '../composables/launcher/useLauncher'
+import StartupDiagnosticDialog from '../components/launcher/StartupDiagnosticDialog.vue'
 import { getLauncherSteps } from '../composables/launcher/onboardingScripts'
 import { useAgentStore, useNotificationStore } from '../stores'
 import { getApiBaseUrl } from '../api/transport'
-import { invoke, listen } from '../utils/ipcAdapter'
+import { invoke, listen, send } from '../utils/ipcAdapter'
 import { useMainNav } from '../composables/main/useMainNav'
 
 interface ClientInfo {
@@ -187,6 +188,10 @@ let stopUpdateListener: (() => void) | null = null
 const {
   phase,
   checks,
+  errorMessage,
+  errorHint,
+  diagnostic,
+  retry,
   startLaunch,
   enterApp,
   enteringText,
@@ -201,6 +206,42 @@ const {
   desktopGuidePending,
   onboardingLaunching,
 } = useLauncher()
+const showDiagnostic = ref(false)
+watch(diagnostic, () => {
+  showDiagnostic.value = false
+})
+const backendSignal = computed(() => {
+  if (diagnostic.value?.stage === 'backend') {
+    return { status: 'error', label: __t('ui.launcher', '连接失败') }
+  }
+  return ['ready', 'entering', 'done'].includes(phase.value)
+    ? { status: 'ok', label: __t('ui.navigation', '服务在线') }
+    : { status: 'pending', label: __t('ui.navigation', '正在连接') }
+})
+const diagnosticReport = computed(() => {
+  const detail = diagnostic.value
+  if (!detail) return ''
+  return [
+    __t('ui.launcher', '客户端版本：{0}', [clientInfo.value?.version ?? appVersion]),
+    __t('ui.launcher', '发生时间：{0}', [formatDate(detail.createdAt)]),
+    detail.logPath ? __t('ui.launcher', '日志：{0}', [detail.logPath]) : '',
+    detail.error,
+    detail.logTail,
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+})
+
+/** 卡片文案只由状态枚举生成，错误对象和日志永远不参与卡片布局。 */
+function checkStatusLabel(status: CheckItem['status']): string {
+  return {
+    pending: __t('ui.launcher', '等待检测'),
+    running: __t('ui.launcher', '检测中'),
+    ok: __t('ui.launcher', '已通过'),
+    warn: __t('ui.launcher', '待确认'),
+    error: __t('ui.launcher', '未就绪'),
+  }[status]
+}
 const launchesDesktopGuide = computed(
   () => desktopGuidePending.value || (showOnboarding.value && tutorialLaunchStep.value),
 )
@@ -350,10 +391,21 @@ function handleOnboardingStep(step: { tab?: string; action?: string }): void {
   if (step.tab && tabs.some((tab) => tab.id === step.tab)) activeTab.value = step.tab as TabId
 }
 
+let launcherDisposed = false
+let firstFrameRequest: number | undefined
 onMounted(async () => {
   document.addEventListener('pointerdown', dismissLaunchMenu)
   window.addEventListener('resize', dismissLaunchMenu)
   window.addEventListener('scroll', dismissLaunchMenu, true)
+  await nextTick()
+  if (launcherDisposed) return
+  // 壳层等待 Vue 排版后的真实帧；不把全部网络检查当作首帧，也不使用 DOM 加载代替。
+  firstFrameRequest = requestAnimationFrame(() => {
+    firstFrameRequest = requestAnimationFrame(() => {
+      firstFrameRequest = undefined
+      if (!launcherDisposed) send('startup:launcher-ready')
+    })
+  })
   await Promise.all([agentStore.fetchAgents(), refreshClientInfo(), startLaunch()])
   void loadRelease()
   stopUpdateListener = await listen('client-update-state', (payload) => {
@@ -362,6 +414,8 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  launcherDisposed = true
+  if (firstFrameRequest !== undefined) cancelAnimationFrame(firstFrameRequest)
   stopUpdateListener?.()
   document.removeEventListener('pointerdown', dismissLaunchMenu)
   window.removeEventListener('resize', dismissLaunchMenu)
@@ -372,6 +426,11 @@ onUnmounted(() => {
 <template>
   <div class="launcher-shell" :class="{ 'launcher-dark': theme === 'dark' }">
     <CustomTitleBar :is-work-mode="theme === 'dark'" />
+    <StartupDiagnosticDialog
+      v-model="showDiagnostic"
+      :report="diagnosticReport"
+      :dark="theme === 'dark'"
+    />
 
     <OnboardingOverlay
       v-model:visible="showOnboarding"
@@ -401,12 +460,8 @@ onUnmounted(() => {
           <PixelIcon :name="theme === 'dark' ? 'sun' : 'moon'" size="xs" />
         </button>
         <span class="signal">
-          <i :class="['ready', 'entering', 'done'].includes(phase) ? 'ok' : 'pending'" />
-          {{
-            ['ready', 'entering', 'done'].includes(phase)
-              ? __t('ui.navigation', '服务在线')
-              : __t('ui.navigation', '正在连接')
-          }}
+          <i :class="backendSignal.status" />
+          {{ backendSignal.label }}
         </span>
         <span class="badge">{{ editionName }}</span>
         <span class="ver">v{{ clientInfo?.version ?? appVersion }}</span>
@@ -497,12 +552,41 @@ onUnmounted(() => {
           </div>
         </div>
 
+        <section v-if="errorMessage" class="launch-recovery" aria-live="polite" aria-atomic="true">
+          <span class="recovery-icon" aria-hidden="true"><PixelIcon name="alert" size="sm" /></span>
+          <div class="recovery-message">
+            <h2>{{ errorMessage }}</h2>
+            <p>{{ errorHint }}</p>
+          </div>
+          <div class="recovery-actions">
+            <button
+              type="button"
+              class="recovery-retry"
+              :disabled="phase === 'connecting' || phase === 'entering'"
+              @click="retry"
+            >
+              <PixelIcon name="refresh" size="xs" />
+              {{ __t('ui.launcher', '重试启动') }}
+            </button>
+            <button type="button" class="recovery-details" @click="showDiagnostic = true">
+              <PixelIcon name="terminal" size="xs" />
+              {{ __t('ui.launcher', '查看诊断') }}
+            </button>
+          </div>
+        </section>
         <div class="launch-bottom">
           <div id="launcher-readiness" class="check-list">
-            <div v-for="item in checks" :key="item.id">
-              <i :class="item.status" />
-              <span>{{ checkFriendlyLabel[item.id] ?? item.label }}</span>
-              <strong>{{ item.message ?? __t('ui.navigation', '等待检测') }}</strong>
+            <div
+              v-for="item in checks"
+              :key="item.id"
+              class="check-card"
+              :data-status="item.status"
+            >
+              <span class="check-card-label">
+                <i :class="item.status" aria-hidden="true" />
+                <span>{{ checkFriendlyLabel[item.id] ?? item.label }}</span>
+              </span>
+              <strong>{{ checkStatusLabel(item.status) }}</strong>
             </div>
           </div>
           <div class="launch-actions">
@@ -1080,6 +1164,9 @@ onUnmounted(() => {
   --launcher-start-highlight: #fff;
 }
 .launcher-shell {
+  --launcher-recovery-bg: #fff5f8;
+  --launcher-recovery-edge: #deb4c5;
+  --launcher-recovery-accent: #934562;
   --px: 2px;
   --cocoa: var(--color-moe-cocoa);
   --cocoa-soft: rgba(45, 27, 30, 0.18);
@@ -1454,31 +1541,52 @@ onUnmounted(() => {
 
 .launch-bottom {
   display: flex;
-  align-items: stretch;
+  align-items: center;
   justify-content: space-between;
   gap: 18px;
   margin-top: 18px;
 }
 .check-list {
   display: grid;
-  grid-template-columns: repeat(3, minmax(150px, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   flex: 1;
+  min-width: 0;
   gap: 8px;
 }
-.check-list div {
-  display: grid;
-  grid-template-columns: 9px 1fr auto;
-  align-items: center;
-  gap: 8px;
+.check-list .check-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  min-width: 0;
+  min-height: 66px;
+  gap: 6px;
   padding: 10px 12px;
+  overflow: hidden;
   border: 2px solid var(--cocoa);
   background: #fff;
   box-shadow: 2px 2px 0 0 var(--cocoa-soft);
   font-size: 12px;
 }
+.check-card-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  width: 100%;
+  color: var(--ui-text-secondary);
+  font-size: 11px;
+}
+.check-card-label > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .check-list i {
-  width: 9px;
-  height: 9px;
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
   background: var(--ui-text-disabled);
 }
 .check-list i.ok {
@@ -1492,13 +1600,105 @@ onUnmounted(() => {
   background: var(--color-red-face);
 }
 .check-list strong {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--ui-text-secondary);
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 700;
+}
+.check-list .check-card[data-status='error'] {
+  border-color: var(--launcher-recovery-edge);
+  background: var(--launcher-recovery-bg);
+}
+.check-card[data-status='error'] strong {
+  color: var(--launcher-recovery-accent);
+}
+.signal i.error {
+  background: var(--launcher-recovery-accent);
+}
+.launch-recovery {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  margin-top: 18px;
+  padding: 16px 18px;
+  border: 1px solid var(--launcher-recovery-edge);
+  border-left-width: 3px;
+  border-radius: 4px;
+  background: var(--launcher-recovery-bg);
+}
+.recovery-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--launcher-recovery-edge);
+  border-radius: 3px;
+  color: var(--launcher-recovery-accent);
+}
+.recovery-message {
+  min-width: 0;
+}
+.recovery-message h2 {
+  margin: 0;
+  color: var(--ui-text-primary);
+  font-size: 14px;
+  font-weight: 800;
+}
+.recovery-message p {
+  margin: 5px 0 0;
+  color: var(--ui-text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.recovery-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  font: 700 12px var(--ui-font-sans);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.recovery-actions .recovery-retry {
+  border-color: var(--launcher-recovery-edge);
+  background: var(--launcher-start-surface);
+  color: var(--launcher-recovery-accent);
+}
+.recovery-details {
+  color: var(--ui-text-secondary);
+}
+.recovery-actions button:hover:not(:disabled) {
+  background: var(--launcher-start-hover);
+}
+.recovery-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.recovery-actions button:focus-visible {
+  outline: 2px solid var(--launcher-recovery-accent);
+  outline-offset: 3px;
 }
 
 .launch-actions {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 9px;
 }
@@ -2299,10 +2499,35 @@ onUnmounted(() => {
     grid-template-columns: repeat(2, 1fr);
   }
   .check-list {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
   .global-signals .signal {
     display: none;
+  }
+}
+
+@media (max-width: 680px) {
+  .launch-recovery {
+    grid-template-columns: 30px minmax(0, 1fr);
+    padding: 14px;
+  }
+  .recovery-icon {
+    width: 30px;
+    height: 30px;
+  }
+  .recovery-actions {
+    grid-column: 2;
+    justify-content: flex-start;
+  }
+  .launch-bottom {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .check-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .launch-actions {
+    justify-content: flex-end;
   }
 }
 

@@ -45,6 +45,8 @@ export interface SocialSyncCursorRecord {
 /** 恢复记录归 Social Realm 所有；终态只保留标识与结果，不保留上下文正文。 */
 export interface SocialTurnRecord {
   id: string
+  /** 普通社交聊天保留恢复记录，只有明确委派的工作才进入任务中心。 */
+  kind?: import('../socialTurnClassification').SocialTurnKind
   agentId: string
   accountId: string
   channelType: 'private' | 'group'
@@ -79,7 +81,7 @@ export interface SocialTurnRecord {
   updatedAt: string
   checkpoint: Record<string, unknown>
   sourceMessageIds?: string[]
-  /** 保留触发消息标识，终态清空检查点后仍能准确定位任务来源。 */
+  /** 保留触发消息标识，终态清空检查点后仍能准确定位回合来源。 */
   triggerMessageId?: string
   outcome?: 'reply' | 'pass' | 'wait' | 'defer' | 'orchestration'
   /** 不包含正文的编排进度，供前端显示托管与部分失败状态。 */
@@ -111,7 +113,11 @@ export interface SocialStoragePort {
   readonly memoryBackground?: import('../memorySettings').MemoryBackgroundPolicy
   getTurn(id: string): Promise<SocialTurnRecord | null>
   saveTurn(record: SocialTurnRecord): Promise<void>
-  listRecoverableTurns(agentId: string, includeTerminal?: boolean): Promise<SocialTurnRecord[]>
+  listRecoverableTurns(
+    agentId: string,
+    includeTerminal?: boolean,
+    kind?: import('../socialTurnClassification').SocialTurnKind,
+  ): Promise<SocialTurnRecord[]>
   deleteTurns(agentId: string, channelType?: string, channelId?: string): Promise<void>
   getDataVersion(agentId: string, channelType?: string, channelId?: string): Promise<number>
   forgetLongMemory(agentId: string): Promise<void>

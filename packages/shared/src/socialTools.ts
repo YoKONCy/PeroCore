@@ -1,3 +1,5 @@
+import { SOCIAL_GROUP_POLICY_LIMITS } from './socialStateMachine'
+
 /** 社交业务工具的共享契约；平台接口与凭据始终留在子应用内。 */
 export type SocialBusinessTool = 'social' | 'social_group' | 'social_account'
 export type SocialParameters = Record<string, unknown>
@@ -74,6 +76,37 @@ const write = { mutation: true }
 const manage = { mutation: true, ownerOnly: true }
 const groupManage = { ...manage, groupRole: 'admin' as const }
 const groupOwner = { ...manage, groupRole: 'owner' as const }
+
+export const SOCIAL_GROUP_POLICY_SCHEMA = object({
+  proactiveGroupEnabled: boolean,
+  minMessagesForReview: integer(
+    '主动观察所需新消息数',
+    ...SOCIAL_GROUP_POLICY_LIMITS.minMessagesForReview,
+  ),
+  reviewIntervalSeconds: integer(
+    '本群两次主动观察的间隔秒数',
+    ...SOCIAL_GROUP_POLICY_LIMITS.reviewIntervalSeconds,
+  ),
+  nightSilenceEnabled: boolean,
+  nightSilenceStart: integer('静音开始小时', ...SOCIAL_GROUP_POLICY_LIMITS.nightSilenceStart),
+  nightSilenceEnd: integer('静音结束小时', ...SOCIAL_GROUP_POLICY_LIMITS.nightSilenceEnd),
+})
+
+add(
+  'social_group',
+  'state_get',
+  '查询群聊状态机的实际生效策略、待观察消息数、阻塞原因与下一次观察时间',
+  group,
+  ['group_id'],
+)
+add(
+  'social_group',
+  'state_configure',
+  '持久化调整本群主动观察策略并返回实际状态；不影响其他群，不代替 social_act 发言；reset 为 true 时恢复继承默认策略',
+  { ...group, policy: SOCIAL_GROUP_POLICY_SCHEMA, reset: boolean },
+  ['group_id'],
+  write,
+)
 
 add('social', 'contacts_list', '查询好友')
 add('social', 'contact_get', '查询用户资料', user, ['user_id'])

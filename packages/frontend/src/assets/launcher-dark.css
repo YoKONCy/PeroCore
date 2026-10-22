@@ -22,6 +22,9 @@
   --launcher-start-hover: #2b2331;
   --launcher-start-icon: #efacd0;
   --launcher-start-highlight: rgba(255, 255, 255, 0.07);
+  --launcher-recovery-bg: #2c222d;
+  --launcher-recovery-edge: #755568;
+  --launcher-recovery-accent: #edabc8;
 }
 .launcher-shell.launcher-dark {
   background:
@@ -76,6 +79,9 @@
 }
 .launcher-dark .agent-picker button {
   background: var(--ui-bg-surface);
+}
+.launcher-dark .check-list .check-card[data-status='error'] {
+  background: var(--launcher-recovery-bg);
 }
 .launcher-dark .agent-picker button.active,
 .launcher-dark .release-identity span,

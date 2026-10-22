@@ -48,6 +48,11 @@ export interface StoredEventNote extends EventNote {
   replacedBy?: string
 }
 
+export interface ManualEventRevision {
+  actor: 'user'
+  vector: number[]
+}
+
 export class EventNoteRepository {
   private privacy?: PrivacyPolicy
   setPrivacyPolicy(policy: PrivacyPolicy): void {
@@ -110,6 +115,7 @@ export class EventNoteRepository {
     replacement: EventNote,
     newTdbId: number,
     relations: EventNoteRelationView[],
+    manualEdit?: ManualEventRevision,
   ): Promise<boolean> {
     this.privacy?.assertPayload('memory', { target, replacement, relations })
     return this.db.transaction((tx) => {
@@ -119,7 +125,7 @@ export class EventNoteRepository {
           operationId,
           agentId: target.agentId,
           operation: 'revise',
-          payloadJson: JSON.stringify({ target, replacement, newTdbId, relations }),
+          payloadJson: JSON.stringify({ target, replacement, newTdbId, relations, manualEdit }),
           status: 'pending',
           createdAt: new Date().toISOString(),
         })
@@ -145,10 +151,18 @@ export class EventNoteRepository {
           status: replacement.status,
         })
         .run()
-      tx.update(eventNotes)
+      const changed = tx
+        .update(eventNotes)
         .set({ replacedBy: replacement.id })
-        .where(eq(eventNotes.id, target.id))
+        .where(
+          and(
+            eq(eventNotes.id, target.id),
+            isNull(eventNotes.replacedBy),
+            eq(eventNotes.status, target.status),
+          ),
+        )
         .run()
+      if (changed.changes !== 1) throw new Error('ARCHIVE_EDIT_CONFLICT')
       return true
     })
   }
@@ -851,6 +865,22 @@ export class EventNoteRepository {
 
   async resetTimer(key: string): Promise<void> {
     await this.checkpointTimer(key, 0)
+  }
+
+  async hasPendingWrite(noteId: string): Promise<boolean> {
+    const rows = await this.db
+      .select({ id: eventMemoryOperations.operationId })
+      .from(eventMemoryOperations)
+      .where(
+        and(
+          inArray(eventMemoryOperations.status, ['pending', 'failed']),
+          inArray(eventMemoryOperations.operation, ['create', 'revise']),
+          sql`(json_extract(${eventMemoryOperations.payloadJson}, '$.note.id') = ${noteId}
+          or json_extract(${eventMemoryOperations.payloadJson}, '$.replacement.id') = ${noteId})`,
+        ),
+      )
+      .limit(1)
+    return rows.length > 0
   }
 
   async findOperation(

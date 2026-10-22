@@ -1,5 +1,11 @@
 // 按模块、语言分别维护词库；此入口只装配当前运行端需要的资源。
 import { registerCatalog } from '../index'
+import archiveEditZhCn from '../locales/zh-CN/ui/archive-edit.json'
+import archiveEditZhTw from '../locales/zh-TW/ui/archive-edit.json'
+import archiveEditEnUs from '../locales/en-US/ui/archive-edit.json'
+import providerChecksZhCn from '../locales/zh-CN/ui/provider-connections.json'
+import providerChecksZhTw from '../locales/zh-TW/ui/provider-connections.json'
+import providerChecksEnUs from '../locales/en-US/ui/provider-connections.json'
 import ragZhCn from '../locales/zh-CN/ui/rag.json'
 import ragZhTw from '../locales/zh-TW/ui/rag.json'
 import ragEnUs from '../locales/en-US/ui/rag.json'
@@ -396,3 +402,9 @@ registerCatalog('errors.frontend', 'en-US', messages194)
 registerCatalog('ui.rag', 'zh-CN', ragZhCn)
 registerCatalog('ui.rag', 'zh-TW', ragZhTw)
 registerCatalog('ui.rag', 'en-US', ragEnUs)
+registerCatalog('ui.provider-connections', 'zh-CN', providerChecksZhCn)
+registerCatalog('ui.provider-connections', 'zh-TW', providerChecksZhTw)
+registerCatalog('ui.provider-connections', 'en-US', providerChecksEnUs)
+registerCatalog('ui.archive-edit', 'zh-CN', archiveEditZhCn)
+registerCatalog('ui.archive-edit', 'zh-TW', archiveEditZhTw)
+registerCatalog('ui.archive-edit', 'en-US', archiveEditEnUs)

@@ -314,7 +314,11 @@ async function validateDaemonBoot(appOutDir, resourcesDir, executableName) {
     throw new Error(`Daemon 启动验证超时\n${await readOutput()}`)
   } finally {
     await stopChild(child)
-    await Promise.all([removePath(dataDir), removePath(logPath)])
+    await Promise.all([
+      removePath(dataDir),
+      removePath(logPath),
+      removePath(path.join(appOutDir, '.infos-runtime-locks')),
+    ])
   }
 }
 
@@ -324,6 +328,11 @@ exports.validateSocialTransport = validateSocialTransport
 exports.default = async function afterPack(context) {
   const appOutDir = context.appOutDir
   const resourcesDir = path.join(appOutDir, 'resources')
+
+  // 壳层开屏独立于业务服务，发行包必须携带完整本地资源。
+  for (const name of ['index.html', 'splash.css', 'splash.js', 'artwork.png']) {
+    await assertFile(path.join(resourcesDir, 'splash', name), `splash/${name}`)
+  }
 
   // 所有桌面发行版都携带内置 Daemon；仅便携版在 exe 同级生成便携标记。
   if (process.env.INFOS_EDITION === 'portable') {

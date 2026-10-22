@@ -63,6 +63,40 @@ afterEach(() => {
 })
 
 describe('服务商连接迁移和调用一致性', () => {
+  it('独立卡片无需连接即可持久保存，重新读取不会补回旧全局密钥', async () => {
+    const service = new ModelService(repo, {} as never, registry, config)
+    const created = await service.create({
+      name: '独立模型',
+      provider: 'openai',
+      modelId: 'direct-model',
+      apiBase: 'https://direct.example/api/v3',
+      apiKey: 'direct-key',
+      providerConnectionId: null,
+      connectionOverride: true,
+      connectionProtocol: 'openai',
+      connectionAuthMode: 'api_key',
+      contextWindowTokens: null,
+      maxTokens: null,
+      maxReActTurns: null,
+    })
+    expect(await service.getById(created.id)).toMatchObject({
+      providerConnectionId: null,
+      connectionOverride: true,
+      apiKey: 'direct-key',
+      contextWindowTokens: null,
+    })
+    await service.update(created.id, { apiKey: '', connectionAuthMode: 'none' })
+    const reloaded = new ModelRegistry(drizzle(sqlite, { schema }))
+    expect(await reloaded.getById(created.id)).toMatchObject({
+      apiBase: 'https://direct.example/api/v3',
+      apiKey: '',
+      authMode: 'none',
+    })
+    await service.update(created.id, { connectionAuthMode: 'api_key' })
+    expect(await registry.getById(created.id)).toMatchObject({ apiKey: '' })
+    expect(await new ModelRoleResolver(config, repo).resolveById(created.id)).toBeNull()
+  })
+
   it('清理自动生成名称的迁移标签，保留连接身份、密钥与模型引用', async () => {
     sqlite.exec(sql('0020_provider_connection_names'))
     expect(await repo.connections.findById('legacy-global-openai')).toMatchObject({

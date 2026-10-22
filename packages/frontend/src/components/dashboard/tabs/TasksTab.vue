@@ -646,6 +646,7 @@ onUnmounted(() => {
     <section v-if="activeView === 'active'" class="tasks-tab__section">
       <SocialTurnPanel
         :agent-id="agentStore.activeAgentId"
+        tasks-only
         @attention-change="hasSocialAttention = $event"
       />
       <CompanionActivityPanel
@@ -723,6 +724,7 @@ onUnmounted(() => {
     <section v-if="activeView === 'history'" class="tasks-tab__section">
       <SocialTurnPanel
         :agent-id="agentStore.activeAgentId"
+        tasks-only
         history
         @history-change="hasSocialHistory = $event"
       />

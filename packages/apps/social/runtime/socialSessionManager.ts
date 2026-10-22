@@ -5,6 +5,11 @@ import { t as __t } from './i18n'
  * 程序只管理节奏、批次和可靠性；是否回复始终由当前角色自己的 Agent 决定。
  */
 import type { InboundMessage } from './types'
+import {
+  DEFAULT_SOCIAL_SCHEDULER_CONFIG,
+  SOCIAL_INITIAL_REVIEW_DELAY_MS,
+  type SocialGroupPolicy,
+} from '@infos/shared'
 import { createLogger, safeModelDiagnostic } from '@infos/backend/applicationHostAbi'
 import { socialFailure } from './socialRecovery'
 
@@ -50,6 +55,7 @@ export type SocialTurnOutcome =
     }
 
 export interface SocialSession {
+  accountId: string
   channelId: string
   channelType: 'private' | 'group'
   agentId: string
@@ -62,6 +68,9 @@ export interface SocialSession {
   isMentioned: boolean
   flushTimer: ReturnType<typeof setTimeout> | null
   nextScanTime: number
+  /** 主动观察与重试、延后意图分别计时，按角色、账号和群聊隔离。 */
+  nextReviewTime: number
+  lastReviewTime?: number
   collectionStartedAt: number
   waitCount: number
   deferredIntent?: DeferredSocialIntent
@@ -116,6 +125,7 @@ export class SocialSessionManager {
   constructor(
     private readonly flushCallback: FlushCallback,
     config?: Partial<SessionManagerConfig>,
+    private readonly groupPolicy?: (session: SocialSession) => SocialGroupPolicy,
   ) {
     this.config = { ...DEFAULT_CONFIG, ...config }
   }
@@ -126,6 +136,7 @@ export class SocialSessionManager {
     let session = this.sessions.get(key)
     if (!session) {
       session = {
+        accountId,
         channelId: msg.channelId,
         channelType: msg.channelType,
         agentId: msg.agentId,
@@ -137,7 +148,8 @@ export class SocialSessionManager {
         lastMessageTime: Date.now(),
         isMentioned: false,
         flushTimer: null,
-        nextScanTime: Date.now() + 5 * 60_000,
+        nextScanTime: 0,
+        nextReviewTime: Date.now() + SOCIAL_INITIAL_REVIEW_DELAY_MS,
         collectionStartedAt: 0,
         waitCount: 0,
       }
@@ -235,14 +247,15 @@ export class SocialSessionManager {
     const engagedContinuation = session.participation === 'engaged'
 
     // 普通大群消息只进入有界观察窗口，不按消息数或固定超时直接唤醒 Agent。
-    // 自主观察由 Scheduler 稀疏挑选候选会话，避免高流量群按批次线性调用 LLM。
+    // 自主观察按各群自己的时钟触发；观察容量必须覆盖实际配置的消息门槛。
     if (!directCollection && !engagedContinuation) {
       session.phase = 'ready'
-      if (session.pendingMessages.length > this.config.maxBufferSize) {
-        session.pendingMessages.splice(
-          0,
-          session.pendingMessages.length - this.config.maxBufferSize,
-        )
+      const capacity = Math.max(
+        this.config.maxBufferSize,
+        this.policy(session).minMessagesForReview,
+      )
+      if (session.pendingMessages.length > capacity) {
+        session.pendingMessages.splice(0, session.pendingMessages.length - capacity)
       }
       return
     }
@@ -284,7 +297,19 @@ export class SocialSessionManager {
     session.phase = 'cooldown'
     session.lastActiveTime = Date.now()
     session.isMentioned = false
-    session.nextScanTime = Date.now() + 2 * 60_000
+    session.nextScanTime = 0
+    this.cooldownReview(session)
+  }
+
+  private policy(session: SocialSession): SocialGroupPolicy {
+    return this.groupPolicy?.(session) ?? DEFAULT_SOCIAL_SCHEDULER_CONFIG
+  }
+
+  private cooldownReview(session: SocialSession): void {
+    if (session.channelType !== 'group') return
+    session.lastReviewTime = Date.now()
+    session.nextReviewTime =
+      session.lastReviewTime + this.policy(session).reviewIntervalSeconds * 1000
   }
 
   checkActiveExpiry(session: SocialSession): void {
@@ -336,9 +361,13 @@ export class SocialSessionManager {
     if (session.pendingMessages.length === 0 && !session.retryMessages?.length) return
 
     const recovering = Boolean(session.retryMessages?.length)
+    const batchSize =
+      reason === 'proactive_review'
+        ? Math.max(this.config.maxBufferSize, this.policy(session).minMessagesForReview)
+        : this.config.maxBufferSize
     const messages = recovering
       ? session.retryMessages!
-      : session.pendingMessages.splice(0, this.config.maxBufferSize)
+      : session.pendingMessages.splice(0, batchSize)
     if (!recovering) session.retryCount = 0
     session.retryMessages = undefined
     session.lastError = undefined
@@ -382,7 +411,8 @@ export class SocialSessionManager {
         session.phase = 'failed'
         session.isMentioned = false
         session.deferredIntent = undefined
-        session.nextScanTime = Date.now() + 5 * 60_000
+        session.nextScanTime = session.channelType === 'group' ? 0 : Date.now() + 5 * 60_000
+        this.cooldownReview(session)
       }
       logger.warn(
         __t('apps.social.logs', '[{0}] 社交批次{1}: {2}', [
@@ -484,7 +514,8 @@ export class SocialSessionManager {
       session.deferredIntent = undefined
       session.phase = 'ready'
       session.isMentioned = false
-      session.nextScanTime = Date.now() + 5 * 60_000
+      session.nextScanTime = 0
+      this.cooldownReview(session)
       if (session.participation !== 'engaged') session.participation = 'idle'
       return
     }

@@ -1,6 +1,6 @@
 # 多目标部署架构
 
-> **版本**：0.9.5 · **更新时间**：2026-10-17
+> **版本**：0.9.5-hotfix1 · **更新时间**：2026-10-17
 > **适用范围**：infOS 全项目部署策略
 > **依赖规范**：[A07_CROSS_PLATFORM](./A07_CROSS_PLATFORM.md)、[A08_DEVOPS](./A08_DEVOPS.md)
 >
@@ -20,6 +20,12 @@ infOS 的核心后端是纯 Node Daemon；Electron 是业务客户端和桌面�
 | 远程纯客户端                      | 连接指定 Control Authority Daemon                               | GUI、Input Seat、可选能力 Provider | 多节点接入           |
 
 **强制边界**：`packages/backend`、`packages/frontend`、`packages/shared` 均不得 import Electron；业务数据一律走 HTTP/SSE/WS，IPC 仅用于 Electron 专属能力与能力 Provider 通道。
+
+### Electron 壳层开屏
+
+Electron 首次启动先显示独立本地透明开屏，再准备资源与内置 Daemon。后端健康检查和 Launcher 主框架首帧握手全部通过后才解除显窗门控；失败时保留开屏上的重试、日志与退出入口。二次启动与激活不会绕过门控，退出会取消未完成的启动链。
+
+定稿母稿见 [开屏资源归档](./design/startup-splash/README.md)。安装包只携带 `electron/splash/` 中的透明 PNG、HTML、CSS 和 JS，以及独立编译的开屏预加载脚本；SVG 母稿不参与运行时。进度条以整个窗口居中，使用独立 CSS 与 SVG 动效。标准版、Steam 版与便携版共用基础资源清单，浏览器与 Docker 入口不使用此过渡。
 
 ---
 

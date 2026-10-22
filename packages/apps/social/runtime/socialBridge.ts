@@ -1,4 +1,5 @@
 import { t as __t } from './i18n'
+import { getSocialTurnKind, SOCIAL_DELEGATED_TURN_PREFIX, type SocialTurnKind } from '@infos/shared'
 /**
  * SocialBridge — 社交桥接 (Layer 0)
  *
@@ -188,14 +189,18 @@ export class SocialBridge {
     this.stickerService = deps.stickerService ?? null
 
     // 初始化 SessionManager (flush 回调 → generateReply)
-    this.sessionManager = new SocialSessionManager((session, messages, reason, signal) =>
-      this.onFlush(session, messages, reason, signal),
+    this.sessionManager = new SocialSessionManager(
+      (session, messages, reason, signal) => this.onFlush(session, messages, reason, signal),
+      undefined,
+      (session) =>
+        this.scheduler.getGroupPolicy(session.agentId, session.accountId, session.channelId),
     )
 
-    // 初始化 Scheduler：仅做确定性候选排序和到期唤醒，不调用第二个决策模型。
+    // 初始化 Scheduler：管理各群独立观察时钟与到期唤醒，不调用第二个决策模型。
     this.scheduler = new SocialScheduler({
       sessionManager: this.sessionManager,
       executions: deps.executions,
+      allowSession: (session) => this.deps.shouldAllowSession?.(session) ?? true,
       maintain: async () => {
         const agentId = this.deps.getAgentId?.()
         if (agentId) {
@@ -222,6 +227,48 @@ export class SocialBridge {
 
   updateSchedulerConfig(config: Partial<SocialSchedulerConfig>): SocialSchedulerConfig {
     return this.scheduler.updateConfig(config)
+  }
+
+  updateGroupPolicies(policies: unknown): void {
+    this.scheduler.updateGroupPolicies(policies)
+  }
+
+  getGroupState(agentId: string, accountId: string, groupId: string) {
+    const session = this.sessionManager
+      .listSessions()
+      .find(
+        (item) =>
+          item.agentId === agentId &&
+          item.accountId === accountId &&
+          item.channelType === 'group' &&
+          item.channelId === groupId,
+      )
+    const policyGate = this.scheduler.policyGate(agentId, accountId, groupId)
+    return {
+      agentId,
+      accountId,
+      groupId,
+      policy: this.scheduler.getGroupPolicy(agentId, accountId, groupId),
+      phase: session?.phase ?? 'ready',
+      participation: session?.participation ?? 'idle',
+      pendingMessages: session?.pendingMessages.length ?? 0,
+      lastReviewAt: session?.lastReviewTime ?? null,
+      nextReviewAt: session ? Math.max(session.nextReviewTime, session.nextScanTime) : null,
+      nextScanAt: session?.nextScanTime || null,
+      gate:
+        this.deps.shouldAllowSession &&
+        !this.deps.shouldAllowSession({
+          agentId,
+          channelType: 'group',
+          channelId: groupId,
+        })
+          ? 'activation_policy'
+          : session
+            ? this.scheduler.reviewGate(session)
+            : policyGate === 'ready'
+              ? 'no_messages'
+              : policyGate,
+    }
   }
 
   // ── 适配器管理 ──
@@ -786,7 +833,7 @@ export class SocialBridge {
     }
     const session = {
       ...this.sessionManager.getOrCreate(message),
-      turnId: `social:command:${createHash('sha256').update(id).digest('hex')}`,
+      turnId: `${SOCIAL_DELEGATED_TURN_PREFIX}${createHash('sha256').update(id).digest('hex')}`,
       waitingTurnId: undefined,
       pendingMessages: [],
       inFlightMessages: [message],
@@ -853,6 +900,10 @@ export class SocialBridge {
     const triggerMessage = socialTriggerMessage(messages)
     const record: SocialTurnRecord = stored ?? {
       id,
+      kind:
+        (messages[0]?.rawEvent as Record<string, unknown> | undefined)?._infosSingleTask === true
+          ? 'task'
+          : getSocialTurnKind({ id }),
       agentId: session.agentId,
       accountId,
       channelType: session.channelType,
@@ -872,6 +923,7 @@ export class SocialBridge {
         unknown
       >,
     }
+    record.kind = getSocialTurnKind(record)
     if (!stored && session.waitingTurnId) {
       const previous = await this.deps.socialMessageRepo.getTurn(session.waitingTurnId)
       if (previous) record.deadline = previous.deadline
@@ -1118,7 +1170,7 @@ export class SocialBridge {
         taskId: id,
         class: 'background',
         priority: session.channelType === 'private' ? 6 : 4,
-        resourceKey: `social-session:${session.agentId}:${session.channelType}:${session.channelId}`,
+        resourceKey: `social-session:${JSON.stringify([session.agentId, accountId, session.channelType, session.channelId])}`,
         maxDurationMs: remaining,
         signal: lifetime,
         run: ({ signal }) => run(signal),
@@ -1804,8 +1856,8 @@ export class SocialBridge {
   /**
    * 从 DB 恢复最近活跃的会话到 SessionManager
    *
-   * 查询每个 Agent 最近活跃的频道，为每个频道创建一个 session。
-   * 复活的会话 nextScanTime 延迟 5~15 分钟，防止启动爆发。
+   * 查询最近活跃频道涉及的角色，只恢复有可靠现场的回合和明确请求。
+   * 按原入站账号恢复未完成回合；普通新消息按本群时钟观察，不创建无账号的空会话。
    */
   private async reviveSessionsFromDb(): Promise<void> {
     try {
@@ -1814,42 +1866,6 @@ export class SocialBridge {
         20,
       )
 
-      // 为每个频道创建 session
-      let revivedCount = 0
-      for (const ch of recentChannels) {
-        if (revivedCount >= 10) break
-
-        // 创建虚拟入站消息来触发 session 创建
-        this.sessionManager.getOrCreate({
-          platform: 'qq',
-          channelId: ch.channelId,
-          channelType: ch.channelType as 'private' | 'group',
-          senderId: '',
-          senderName: '',
-          content: '',
-          agentId: ch.agentId,
-        })
-
-        // 让复活的会话延迟扫描 (5-15 分钟)
-        const sessions = this.sessionManager.getActiveSessions(undefined, 50)
-        const session = sessions.find(
-          (item) =>
-            item.agentId === ch.agentId &&
-            item.channelType === ch.channelType &&
-            item.channelId === ch.channelId,
-        )
-        if (session) {
-          const delay = 300 + Math.floor(Math.random() * 600) // 5~15 分钟
-          session.nextScanTime = Date.now() + delay * 1000
-          revivedCount++
-        }
-      }
-
-      if (revivedCount > 0) {
-        logger.info(__t('apps.social.logs', '冷启动: 从 DB 恢复了 {0} 个会话', [revivedCount]))
-      } else {
-        logger.info(__t('apps.social.logs', '冷启动: 无历史会话需要恢复'))
-      }
       const agentIds = new Set(
         [...recentChannels.map((channel) => channel.agentId), this.deps.getAgentId?.()].filter(
           (id): id is string => Boolean(id),
@@ -1940,6 +1956,12 @@ export class SocialBridge {
           session.nextScanTime = Date.now() + 30_000
         }
         await this.refillInbox(agentId)
+      }
+      const revivedCount = this.sessionManager.listSessions().length
+      if (revivedCount > 0) {
+        logger.info(__t('apps.social.logs', '冷启动: 从 DB 恢复了 {0} 个会话', [revivedCount]))
+      } else {
+        logger.info(__t('apps.social.logs', '冷启动: 无历史会话需要恢复'))
       }
     } catch (err) {
       logger.warn(__t('apps.social.logs', '冷启动会话恢复失败 (非致命): {0}', [err]))
@@ -2129,14 +2151,23 @@ export class SocialBridge {
   listSessions() {
     return this.sessionManager
       .listSessions()
-      .map(({ controller: _controller, flushTimer: _timer, ...session }) => session)
+      .map(({ controller: _controller, flushTimer: _timer, ...session }) => ({
+        ...session,
+        groupState:
+          session.channelType === 'group'
+            ? this.getGroupState(session.agentId, session.accountId, session.channelId)
+            : undefined,
+      }))
   }
 
-  async listTurns(agentId: string): Promise<SocialTurnListItem[]> {
+  async listTurns(agentId: string, kind?: SocialTurnKind): Promise<SocialTurnListItem[]> {
     await this.expireWaitingTurns(agentId)
-    const records = await this.deps.socialMessageRepo.listRecoverableTurns(agentId, true)
+    const records = kind
+      ? await this.deps.socialMessageRepo.listRecoverableTurns(agentId, true, kind)
+      : await this.deps.socialMessageRepo.listRecoverableTurns(agentId, true)
+    const visible = records.filter((record) => !kind || getSocialTurnKind(record) === kind)
     return Promise.all(
-      records.map(async ({ checkpoint, ...record }) => {
+      visible.map(async ({ checkpoint, ...record }) => {
         const inbound = checkpoint.inbound as InboundMessage[] | undefined
         let source = socialTriggerMessage(inbound ?? [])
         // 终态恢复现场已清空，从原消息读取有限摘要；旧记录也能展示，不另存聊天正文。
@@ -2171,6 +2202,7 @@ export class SocialBridge {
         const updatedAt = Date.parse(record.updatedAt)
         return {
           ...record,
+          kind: getSocialTurnKind(record),
           sourcePreview: source
             ? {
                 senderName: source.senderName.slice(0, 100),

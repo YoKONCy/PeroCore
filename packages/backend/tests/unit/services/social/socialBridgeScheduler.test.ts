@@ -368,6 +368,27 @@ describe('SocialBridge 单 Agent 社交链路', () => {
     expect(deps.socialMessageRepo.insert).toHaveBeenCalledWith(
       expect.objectContaining({ senderId: 'self', content: '好的' }),
     )
+    expect(deps.socialMessageRepo.saveTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'conversation', outcome: 'reply' }),
+    )
+  })
+
+  it('明确的主 Agent 委派进入任务分类，普通发送不改变分类规则', async () => {
+    const { bridge, deps } = createBridge()
+    const adapter = new FakeAdapter()
+    adapter.platform = 'qq'
+    adapter.getConnectedAccountIds.mockReturnValue(['123456789'] as never)
+    Object.assign(adapter, { resolveAgentId: () => 'pero' })
+    bridge.registerAdapter(adapter as never)
+    await bridge.start()
+    try {
+      await bridge.runCommand('delegated-task', 'pero', '987654321', '委派内容', '234567890')
+      expect(deps.socialMessageRepo.saveTurn).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'task', outcome: 'reply' }),
+      )
+    } finally {
+      await bridge.stop()
+    }
   })
 
   it('PASS、WAIT、DEFER 不产生平台发送', async () => {

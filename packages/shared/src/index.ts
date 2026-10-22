@@ -106,6 +106,8 @@ export type {
   EventNoteOrigin,
   EventNote,
   EventNoteDraftInput,
+  EventNoteManualEditInput,
+  FactManualEditInput,
   EventNoteRelationView,
   EventNoteDetail,
   ConversationCoverage,
@@ -407,6 +409,9 @@ export * from './memorySettings'
 export * from './reactLimits'
 export * from './modelReasoning'
 export * from './electronEnvironment'
+export * from './daemonLifecycle'
+export * from './socialStateMachine'
+export * from './socialTurnClassification'
 export * from './types/promptWorkspace.types'
 export * from './promptFormats'
 export type {

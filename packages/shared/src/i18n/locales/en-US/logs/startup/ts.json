@@ -22,5 +22,6 @@
   "社交应用已在运行 (instanceId={0})，跳过自动启动": "social application is already running (instanceId={0}), skipping automatic startup",
   "正在自动启动社交应用...": "is automatically launching social applications...",
   "社交应用已自动启动 (instanceId={0}, hostAgent={1})": "social application has been automatically started (instanceId={0}, hostAgent={1})",
-  "社交应用自动启动失败（不影响主服务）: {0}": "Social application failed to automatically start (does not affect the main service): {0}"
+  "社交应用自动启动失败（不影响主服务）: {0}": "Social application failed to automatically start (does not affect the main service): {0}",
+  "文件日志暂不可用，继续使用标准输出: {0}": "File logging is unavailable; continuing with standard output: {0}"
 }

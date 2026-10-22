@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { t as __t } from '../../../i18n/index'
+import { DEFAULT_SOCIAL_SCHEDULER_CONFIG, SOCIAL_GROUP_POLICY_LIMITS } from '@infos/shared'
 
 defineOptions({ name: 'SocialTab' })
 /**
@@ -47,15 +48,7 @@ const selectedContactId = ref('')
 const confirmDialogVisible = ref(false)
 const modeSaving = ref(false)
 const modeConfig = ref<SocialModeConfig>({
-  proactiveGroupEnabled: true,
-  minMessagesForReview: 3,
-  nightSilenceEnabled: true,
-  nightSilenceStart: 0,
-  nightSilenceEnd: 8,
-  taskTimeoutMinutes: 360,
-  modelIdleMinutes: 10,
-  modelRequestMinutes: 30,
-  maxRetries: 2,
+  ...DEFAULT_SOCIAL_SCHEDULER_CONFIG,
   strangerPolicy: 'allow',
   groupWhitelist: [],
   groupBlacklist: [],
@@ -977,15 +970,23 @@ onUnmounted(() => {
           <div class="sp-setting-line">
             <div>
               <strong>{{ __t('ui.settings', '允许主动参与') }}</strong>
-              <small>{{ __t('ui.settings', '未被 @ 时也可审视活跃群聊') }}</small>
+              <small>
+                {{ __t('ui.settings', '各群独立观察与冷却，群内单独配置优先于默认策略') }}
+              </small>
             </div>
             <PSwitch v-model="modeConfig.proactiveGroupEnabled" />
           </div>
           <PInputNumber
             v-model="modeConfig.minMessagesForReview"
             :label="__t('ui.settings', '最少审视消息数')"
-            :min="1"
-            :max="20"
+            :min="SOCIAL_GROUP_POLICY_LIMITS.minMessagesForReview[0]"
+            :max="SOCIAL_GROUP_POLICY_LIMITS.minMessagesForReview[1]"
+          />
+          <PInputNumber
+            v-model="modeConfig.reviewIntervalSeconds"
+            :label="__t('ui.settings', '每群主动观察间隔（秒）')"
+            :min="SOCIAL_GROUP_POLICY_LIMITS.reviewIntervalSeconds[0]"
+            :max="SOCIAL_GROUP_POLICY_LIMITS.reviewIntervalSeconds[1]"
           />
         </div>
       </section>
@@ -1138,7 +1139,7 @@ onUnmounted(() => {
               {{ __t('ui.settings', '暂无模型添加的标记') }}
             </small>
           </div>
-          <small>{{ __t('ui.settings', '可在社交任务中解除互聊限制。') }}</small>
+          <small>{{ __t('ui.settings', '可在社交回合中解除互聊限制。') }}</small>
         </div>
       </section>
       <div class="sp-mode-actions">

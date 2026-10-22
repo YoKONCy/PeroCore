@@ -1,6 +1,7 @@
 import type { EventNoteDraftInput, EventNoteRelation } from '@infos/shared'
 import type { BuiltinTool } from '../index'
 import type { EventMemoryService } from '../../services/memory/eventMemoryService'
+import { validateEventNoteNarrative } from '../../services/memory/eventNoteNarrative'
 
 let eventMemoryService: EventMemoryService | null = null
 
@@ -9,10 +10,9 @@ export function setEventMemoryToolDeps(service: EventMemoryService): void {
 }
 
 function validateDraft(args: Record<string, unknown>): EventNoteDraftInput {
-  const narrative = typeof args.narrative === 'string' ? args.narrative.trim() : ''
+  const narrative = validateEventNoteNarrative(args.narrative)
   const importance = args.importance
   const affect = args.affect as Record<string, unknown> | undefined
-  if (!narrative) throw new Error('事件记叙不能为空')
   if (!Number.isInteger(importance) || Number(importance) < 0 || Number(importance) > 10) {
     throw new Error('事件重要度必须是0到10的整数')
   }

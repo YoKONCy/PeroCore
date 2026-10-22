@@ -29,6 +29,7 @@ const emit = defineEmits<{
   archive: [note: EventNote]
   restore: [note: EventNote]
   delete: [note: EventNote]
+  edit: [note: EventNote]
 }>()
 
 const showSource = ref(false)
@@ -115,7 +116,17 @@ function openSource(): void {
     <div v-else-if="selected" class="inspector-body">
       <!-- 叙事 -->
       <section class="panel panel-narrative">
+        <div class="narrative-actions">
+          <PButton size="sm" variant="secondary" @click="emit('edit', selected)">
+            <PixelIcon name="edit" size="xs" />
+            {{ __t('ui.archive-edit', '编辑记忆') }}
+          </PButton>
+        </div>
         <p class="narrative-text">{{ selected.narrative }}</p>
+        <p v-if="selected.origin.manualEdit" class="manual-edit-note">
+          {{ __t('ui.archive-edit', '用户手动修订') }} ·
+          {{ formatTime(selected.origin.manualEdit.editedAt) }}
+        </p>
         <div v-if="selected.status === 'archived'" class="archive-badge">
           <PixelIcon name="alert" size="xs" />
           {{ __t('ui.settings', '该事件已归档，且不再进入对话记忆检索') }}
@@ -359,6 +370,16 @@ function openSource(): void {
 </template>
 
 <style scoped>
+.narrative-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+.manual-edit-note {
+  margin: 12px 0 0;
+  color: var(--ui-text-secondary);
+  font-size: 12px;
+}
 .inspector {
   display: flex;
   flex-direction: column;

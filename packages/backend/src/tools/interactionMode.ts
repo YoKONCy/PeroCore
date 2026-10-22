@@ -3,9 +3,10 @@ import type { ToolRegistry } from '../services/agent/toolRegistry'
 import { isAdvancedTool } from './advancedTools'
 import { WORK_CONTROL_TOOLS } from './systemProtocolTools'
 
-/** 极简模式沿用原陪伴工具集合；主动行为开关不参与工具权限判断。 */
+/** 极简模式保留陪伴工具与当前会话的私有心流；主动行为开关不参与工具权限判断。 */
 export const MINIMAL_TOOLS = new Set([
   'finish_task',
+  'update_flow_state',
   'take_screenshot',
   'set_reminder',
   'list_reminders',

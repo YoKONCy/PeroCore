@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
-import type { SocialTurnListItem } from '@infos/shared'
+import { getSocialTurnKind, type SocialTurnListItem } from '@infos/shared'
 import { translateDiagnostic } from '@infos/shared/i18n'
 import '@infos/shared/i18n/catalogs/socialTasks'
 import { getDisplayLocale, t } from '../../i18n/index'
 import { socialApi } from '../../api/modules/socialApi'
 import { PButton, PCard, PixelIcon } from '../pixel'
 
-const props = defineProps<{ agentId: string; history?: boolean }>()
+const props = defineProps<{ agentId: string; history?: boolean; tasksOnly?: boolean }>()
 const emit = defineEmits<{
   'attention-change': [value: boolean]
   'history-change': [value: boolean]
@@ -59,11 +59,15 @@ function isArchived(record: SocialTurnListItem): boolean {
     )
   )
 }
-const terminal = computed(() => records.value.filter((record) => !isActive(record)))
+// 任务中心只显示明确委派的任务；聊天中的工具调用、失败和等待都不能改变回合分类。
+const scopedRecords = computed(() =>
+  records.value.filter((record) => !props.tasksOnly || getSocialTurnKind(record) === 'task'),
+)
+const terminal = computed(() => scopedRecords.value.filter((record) => !isActive(record)))
 const unread = computed(() => terminal.value.filter((record) => !isArchived(record)))
 const archiveCount = computed(() => terminal.value.filter(isArchived).length)
 const items = computed(() =>
-  records.value
+  scopedRecords.value
     .filter((record) =>
       props.history
         ? !isActive(record) && isArchived(record) === archived.value
@@ -146,7 +150,7 @@ async function load(clearError = true): Promise<void> {
   if (!active || !props.agentId) return
   loading.value = true
   try {
-    const response = await socialApi.turns(props.agentId)
+    const response = await socialApi.turns(props.agentId, props.tasksOnly ? 'task' : undefined)
     if (!active || sequence !== request) return
     records.value = response.data ?? []
     now.value = Date.now()
@@ -160,7 +164,7 @@ async function load(clearError = true): Promise<void> {
         records.value = []
       }
     } else if (active && sequence === request)
-      error.value = cause instanceof Error ? cause.message : tr('社交任务暂不可用')
+      error.value = cause instanceof Error ? cause.message : tr('社交记录暂不可用')
   } finally {
     if (active && sequence === request) {
       loading.value = false
@@ -175,7 +179,7 @@ function stop(): void {
   if (timer) clearTimeout(timer)
 }
 watch(
-  () => props.agentId,
+  () => [props.agentId, props.tasksOnly],
   () => {
     records.value = []
     error.value = ''
@@ -203,7 +207,7 @@ onBeforeUnmount(stop)
     <header class="social-turns__header">
       <div class="social-turns__heading">
         <PixelIcon name="chat" size="sm" />
-        <strong>{{ tr('社交任务') }}</strong>
+        <strong>{{ tasksOnly ? tr('社交任务') : tr('社交回合') }}</strong>
         <span>{{ items.length }}</span>
       </div>
       <div class="social-turns__actions">
@@ -252,7 +256,13 @@ onBeforeUnmount(stop)
     </p>
     <p v-if="!items.length" class="social-turns__empty">
       <PixelIcon name="check" size="sm" />
-      {{ archived ? tr('暂无归档记录') : tr('暂无待阅的社交任务') }}
+      {{
+        archived
+          ? tr('暂无归档记录')
+          : tasksOnly
+            ? tr('暂无待阅的社交任务')
+            : tr('暂无待阅的社交回合')
+      }}
     </p>
     <article
       v-for="record in visibleItems"

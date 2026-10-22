@@ -42,6 +42,14 @@ asarUnpack:
 
 # 后端构建产物 + 运行时资源
 extraResources:
+  # 本地壳层开屏不依赖前端与后端；所有发行形态共用此资源清单。
+  - from: electron/splash
+    to: splash
+    filter:
+      - index.html
+      - splash.css
+      - splash.js
+      - artwork.png
   # 主应用 Web 入口独立供 Daemon 发布，不依赖 Electron 的 file 协议。
   - from: dist/renderer
     to: frontend

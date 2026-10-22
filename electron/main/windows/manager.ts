@@ -120,6 +120,15 @@ export class WindowManager {
   private launcherReleaseTimer: ReturnType<typeof setTimeout> | undefined
   private destroyingAll = false
 
+  /** 启动过渡期间所有显窗入口共用门控，包括聚焦、加载兜底和失败兜底。 */
+  private startupVisibilityGate: (() => void) | null = null
+
+  public setStartupVisibilityGate(gate: (() => void) | null): void {
+    this.startupVisibilityGate = gate
+    if (!gate && this.launcherWin && !this.launcherWin.isDestroyed())
+      this.launcherWin.webContents.setBackgroundThrottling(true)
+  }
+
   /** Pet 窗口鼠标追踪定时器 */
   private mouseTrackInterval: ReturnType<typeof setInterval> | null = null
 
@@ -201,7 +210,9 @@ export class WindowManager {
     if (devUrl) {
       const url = `${devUrl}#${route}`
       logger.info('WindowManager', __t('electron.logs.windows', '加载 Dev URL: {0}', [url]))
-      win.loadURL(url)
+      void win.loadURL(url).catch(() => {
+        /* 具体错误由 did-fail-load 统一报告。 */
+      })
     } else {
       const { app } = require('electron')
       const indexPath = path.join(app.getAppPath(), 'renderer', 'index.html')
@@ -209,7 +220,9 @@ export class WindowManager {
         'WindowManager',
         __t('electron.logs.windows', '加载文件: {0}, hash: {1}', [indexPath, route]),
       )
-      win.loadFile(indexPath, { hash: route })
+      void win.loadFile(indexPath, { hash: route }).catch(() => {
+        /* 具体错误由 did-fail-load 统一报告。 */
+      })
     }
   }
 
@@ -266,6 +279,10 @@ export class WindowManager {
     // 如果已存在且未销毁，聚焦并返回
     if (existing && !existing.isDestroyed()) {
       this.visibilityIntent.set(existing, true)
+      if (this.startupVisibilityGate) {
+        this.startupVisibilityGate()
+        return existing
+      }
       // 始终显示并聚焦（调用者明确想要这个窗口）
       if (!existing.isVisible()) existing.show()
       if (existing.isMinimized()) existing.restore()
@@ -297,7 +314,7 @@ export class WindowManager {
         preload: this.getPreloadPath(),
         nodeIntegration: false,
         contextIsolation: true,
-        backgroundThrottling: true,
+        backgroundThrottling: !this.startupVisibilityGate,
         ...extraWebPrefs,
       },
       ...restExtraOpts,
@@ -317,6 +334,7 @@ export class WindowManager {
 
     let shownAfterLoad = false
     const showWhenReady = (source: string) => {
+      if (this.startupVisibilityGate) return
       if (shownAfterLoad || win.isDestroyed() || this.visibilityIntent.get(win) === false) return
       shownAfterLoad = true
       applyWindowIdentity(win)
@@ -334,7 +352,12 @@ export class WindowManager {
 
     // 只为真正未完成页面加载的窗口保留兜底，避免正常透明窗口产生误告警。
     setTimeout(() => {
-      if (!win.isDestroyed() && !win.isVisible() && this.visibilityIntent.get(win) !== false) {
+      if (
+        !this.startupVisibilityGate &&
+        !win.isDestroyed() &&
+        !win.isVisible() &&
+        this.visibilityIntent.get(win) !== false
+      ) {
         if (win.webContents.isLoadingMainFrame()) {
           logger.warn(
             'WindowManager',
@@ -374,7 +397,12 @@ export class WindowManager {
           url,
         ]),
       )
-      if (!win.isDestroyed() && !win.isVisible() && this.visibilityIntent.get(win) !== false) {
+      if (
+        !this.startupVisibilityGate &&
+        !win.isDestroyed() &&
+        !win.isVisible() &&
+        this.visibilityIntent.get(win) !== false
+      ) {
         win.show()
       }
     })
@@ -406,6 +434,10 @@ export class WindowManager {
   }
 
   public showLauncherWindow(): void {
+    if (this.startupVisibilityGate) {
+      this.startupVisibilityGate()
+      return
+    }
     clearTimeout(this.launcherReleaseTimer)
     if (!this.launcherWin || this.launcherWin.isDestroyed()) {
       this.createLauncherWindow()

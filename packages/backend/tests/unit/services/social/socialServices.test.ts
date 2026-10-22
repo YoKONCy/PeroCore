@@ -184,7 +184,8 @@ describe('SocialSessionManager', () => {
     const session = manager.getActiveSessions('group')[0]!
     expect(callback).not.toHaveBeenCalled()
     expect(session.phase).toBe('ready')
-    expect(session.pendingMessages.map((item) => item.content)).toEqual(['二', '三'])
+    // 观察窗口至少保留默认评估门槛的三条消息，避免容量小于触发门槛。
+    expect(session.pendingMessages.map((item) => item.content)).toEqual(['一', '二', '三'])
   })
 
   it('回复后进入 engaged/cooldown，并在过期后回到 idle/ready', () => {

@@ -3,6 +3,7 @@ import type { ToolCallRecord } from '../pipeline/types'
 import type { ThreadRepository } from '../../repositories/thread.repo'
 import type { EventNoteRepository } from '../../repositories/eventNote.repo'
 import type { EventMemoryService } from './eventMemoryService'
+import { validateEventNoteNarrative } from './eventNoteNarrative'
 
 interface DraftEnvelope {
   action: 'write' | 'revise'
@@ -91,10 +92,9 @@ export class EventNoteDraftCommitter {
   }
 
   private validateDraft(value: Record<string, unknown>): EventNoteDraftInput {
-    const narrative = typeof value.narrative === 'string' ? value.narrative.trim() : ''
+    const narrative = validateEventNoteNarrative(value.narrative)
     const importance = value.importance
     const affect = value.affect
-    if (!narrative) throw new Error('事件记叙不能为空')
     if (!Number.isInteger(importance) || Number(importance) < 0 || Number(importance) > 10) {
       throw new Error('事件重要度必须是0到10的整数')
     }

@@ -4,5 +4,7 @@
   "开始数据迁移: {0}": "Start data migration: {0}",
   "数据迁移完成: {0}": "data migration completed: {0}",
   "数据迁移失败，将在下次启动重试: {0}": "data migration failed, will try again at next startup: {0}",
-  "已清理异常退出留下的数据迁移锁: {0}": "has cleaned up the data migration lock left by the abnormal exit: {0}"
+  "已清理异常退出留下的数据迁移锁: {0}": "has cleaned up the data migration lock left by the abnormal exit: {0}",
+  "获取数据迁移锁失败: {0}；原因: {1}": "Failed to acquire data migration lock: {0}; reason: {1}",
+  "迁移已完成，暂无法清理恢复记录: {0}；原因: {1}": "Migration completed, but recovery records could not be removed: {0}; reason: {1}"
 }

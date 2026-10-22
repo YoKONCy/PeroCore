@@ -27,6 +27,9 @@ import { closeArcaDesktopGuard } from './services/arcaLifetime'
 import { APPLICATION_NAME, WINDOWS_APP_ID } from './utils/appIdentity'
 import { configureClientCredential, getClientCredential } from './utils/clientCredential'
 import { paths } from './utils/env'
+import { StartupSplash } from './windows/startupSplash'
+import { waitForLauncherFirstFrame } from './windows/launcherFirstFrame'
+import { StartupFlow } from './services/startupFlow'
 
 configureClientCredential(process.env.PERO_DATA_DIR || paths.data)
 
@@ -117,26 +120,79 @@ try {
 // ─── IPC 注册 (在 app.ready 之前即可) ─────────────────
 registerIpcHandlers()
 
-// ─── App Ready ────────────────────────────────────────
-app.whenReady().then(async () => {
-  try {
-    // 注册 asset:// 协议并预扫描资产。外部模型 URL 会持久化到 localStorage，
-    // 因此必须在创建渲染窗口前恢复虚拟 URL → 物理目录映射。
+// ─── Electron 壳层启动过渡 ───────────────────────────
+let isQuitting = false
+let isPreparingQuit = false
+let assetProtocolRegistered = false
+let desktopServicesStarted = false
+let preparedLauncher: BrowserWindow | null = null
+const startupSplash = new StartupSplash({
+  retry: () => {
+    // 等上一轮失败的 Promise 完成清理后再重试，原生提示同步返回时也不重入。
+    setImmediate(() => {
+      if (!isPreparingQuit) void startDesktop()
+    })
+  },
+  quit: () => {
+    app.quit()
+  },
+})
+windowManager.setStartupVisibilityGate(() => startupSplash.focus())
+const startupFlow = new StartupFlow({
+  phase: (phase) => startupSplash.setPhase(phase),
+  open: () => startupSplash.open(),
+  prepare: async () => {
+    // 开屏已绘制后再扫描资源；外部模型映射仍先于 Launcher 初始化。
     const { registerAssetProtocol, scan3DModels } = await import('./services/assets')
-    registerAssetProtocol()
+    if (!assetProtocolRegistered) {
+      registerAssetProtocol()
+      assetProtocolRegistered = true
+    }
     await scan3DModels()
-
-    // 创建 Launcher 窗口
-    windowManager.createLauncherWindow()
-
-    // 便携模式：用 exe 自带 Node 运行时拉起内置 Daemon（注入 PERO_DATA_DIR），
-    // 确保数据目录 = exe 同级 data/；非便携模式不拉起进程，直接等待外部 Daemon。
+  },
+  backend: async () => {
     const { ensurePortableDaemon } = await import('./services/portableDaemon')
-    await ensurePortableDaemon()
+    return ensurePortableDaemon()
+  },
+  launcher: async (signal) => {
+    // 前一次失败的隐藏页面不能携带旧的首帧握手进入下一次重试。
+    const previous = windowManager.launcherWin
+    if (previous && !previous.isDestroyed()) previous.destroy()
+    preparedLauncher = null
+    preparedLauncher = await waitForLauncherFirstFrame(
+      () => windowManager.createLauncherWindow(),
+      signal,
+    )
+  },
+  verifyBackend: async () => {
+    const { probeBusinessHealth } = await import('./services/portableDaemon')
+    return probeBusinessHealth()
+  },
+  finish: (signal) => startupSplash.finish(signal),
+  reveal: () => {
+    if (
+      isPreparingQuit ||
+      !preparedLauncher ||
+      preparedLauncher.isDestroyed() ||
+      preparedLauncher.webContents.isDestroyed() ||
+      preparedLauncher.webContents.isCrashed()
+    )
+      throw new Error('startup-launcher-lost')
+    windowManager.setStartupVisibilityGate(null)
+    windowManager.showLauncherWindow()
+  },
+  close: () => startupSplash.dispose(),
+  failed: (kind, error) => startupSplash.fail(kind, error),
+})
 
-    // 第七阶段：Electron 不再 spawn 后端，改为连接 Daemon 并注册平台能力
-    // Daemon 必须独立运行（pnpm dev:daemon 或系统服务），Electron 只作为能力节点
+async function startDesktop(): Promise<void> {
+  await startupFlow.start()
+  if (!startupFlow.completed || isPreparingQuit || desktopServicesStarted) return
+  desktopServicesStarted = true
+  try {
+    // 后端就绪后连接 Daemon 并注册桌面能力；开发模式由外部 Daemon 提供业务服务。
     const { capabilityProvider } = await import('./services/capabilityProvider')
+    if (isPreparingQuit) return
     capabilityProvider.start().catch((e) => {
       const message = `CapabilityProvider 启动失败（Daemon 是否已运行？）: ${String(e)}`
       logger.error('Main', message)
@@ -145,24 +201,30 @@ app.whenReady().then(async () => {
 
     // 启动系统服务
     const { createTray } = await import('./services/tray')
+    if (isPreparingQuit) return
     createTray()
 
     const { registerShortcuts } = await import('./services/shortcuts')
+    if (isPreparingQuit) return
     await registerShortcuts()
 
     const { setupUpdater } = await import('./services/updater')
+    if (isPreparingQuit) return
     setupUpdater()
 
     logger.info('Main', __t('electron.logs.index.ts', '应用启动完成（Daemon 连接模式）'))
   } catch (e: unknown) {
     logger.error('Main', __t('electron.logs.index.ts', 'App whenReady 失败: {0}', [e]))
   }
-})
+}
+
+// 窗口、后端与重试共享同一启动链；浏览器和 Docker 入口不使用此过渡。
+app
+  .whenReady()
+  .then(() => startDesktop())
+  .catch((error) => startupSplash.fail('shell', error))
 
 // ─── 应用生命周期 ─────────────────────────────────────
-let isQuitting = false
-let isPreparingQuit = false
-
 app.on('window-all-closed', () => {
   // 保持托盘运行，不退出
   if (process.platform === 'darwin') return
@@ -188,6 +250,8 @@ app.on('before-quit', async (event) => {
     return
   }
   isQuitting = true
+  startupFlow.cancel()
+  startupSplash.dispose()
 
   logger.info('Main', __t('electron.logs.index.ts', '正在执行退出清理...'))
   try {
@@ -228,20 +292,25 @@ app.on('before-quit', async (event) => {
     const { capabilityProvider } = await import('./services/capabilityProvider')
     await capabilityProvider.stop()
 
-    // 4.回收便携模式拉起的内置Daemon（标准版/Steam无此进程，幂等）
-    const { stopPortableDaemon } = await import('./services/portableDaemon')
-    stopPortableDaemon()
-
-    // 5. 注销快捷键
+    // 4. 注销快捷键
     const { unregisterShortcuts } = await import('./services/shortcuts')
     unregisterShortcuts()
 
-    // 6. 销毁托盘
+    // 5. 销毁托盘
     const { destroyTray } = await import('./services/tray')
     destroyTray()
   } catch (e: unknown) {
     logger.error('Main', __t('electron.logs.index.ts', '退出清理失败: {0}', [e]))
   } finally {
+    // 前面的清理失败时也必须等待本应用拉起的 Daemon 退出，避免重启时遗留进程。
+    await import('./services/portableDaemon')
+      .then(({ stopPortableDaemon }) => stopPortableDaemon())
+      .catch((error) =>
+        logger.warn(
+          'Main',
+          __t('electron.logs.index.ts', '停止内置 Daemon 失败：{0}', [String(error)]),
+        ),
+      )
     // 其他退出步骤失败也必须等待 NapCat 进程树回收完成。
     await import('./services/napcat')
       .then(({ stopNapCat }) => stopNapCat())
@@ -271,6 +340,11 @@ app.on('before-quit', async (event) => {
 })
 
 app.on('second-instance', () => {
+  if (isPreparingQuit) return
+  if (!startupFlow.completed) {
+    startupSplash.focus()
+    return
+  }
   logger.info('Main', __t('electron.logs.index.ts', '第二个实例启动请求，激活现有窗口'))
   const win = windowManager.launcherWin ?? windowManager.dashboardWin ?? windowManager.petWin
   if (win) {
@@ -283,6 +357,11 @@ app.on('second-instance', () => {
 })
 
 app.on('activate', () => {
+  if (isPreparingQuit) return
+  if (!startupFlow.completed) {
+    startupSplash.focus()
+    return
+  }
   const allWindows = BrowserWindow.getAllWindows()
   // 提示音播放器不参与主界面唤起，避免聚焦不可见的辅助窗口。
   const firstWin =

@@ -29,6 +29,80 @@ beforeEach(() => {
 afterEach(() => db.close())
 
 describe('SqliteSocialStoragePort', () => {
+  it('大量普通聊天不会挤掉真正任务，旧记录按委派标识兼容分类', async () => {
+    const base: SocialTurnRecord = {
+      id: 'social:command:older',
+      agentId: 'pero',
+      accountId: '123456789',
+      channelType: 'group',
+      channelId: '987654321',
+      status: 'completed',
+      attempts: 1,
+      startedAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      deadline: '2026-01-01T01:00:00.000Z',
+      checkpoint: {},
+      outcome: 'reply',
+    }
+    await port.saveTurn(base)
+    // 模拟升级前没有分类字段的持久记录，不依赖清库或重建迁移。
+    db.prepare('UPDATE social_turns SET record_json=? WHERE id=?').run(
+      JSON.stringify(base),
+      base.id,
+    )
+    for (let index = 1; index <= 130; index++) {
+      const conversation = {
+        ...base,
+        id: `social:chat:${index}`,
+        updatedAt: new Date(Date.parse(base.updatedAt) + index * 1000).toISOString(),
+      }
+      await port.saveTurn(conversation)
+      if (index === 130)
+        db.prepare('UPDATE social_turns SET record_json=? WHERE id=?').run(
+          JSON.stringify(conversation),
+          conversation.id,
+        )
+    }
+    expect(await port.listRecoverableTurns('pero', true, 'task')).toMatchObject([
+      { id: 'social:command:older', kind: 'task' },
+    ])
+    const conversations = await port.listRecoverableTurns('pero', true, 'conversation')
+    expect(conversations).toHaveLength(100)
+    expect(conversations.every((record) => record.kind === 'conversation')).toBe(true)
+    expect(await port.getTurn('social:chat:130')).toMatchObject({ kind: 'conversation' })
+  })
+
+  it('聊天里有工具失败、等待或复杂步骤，也不会自动被归类为任务', async () => {
+    const record: SocialTurnRecord = {
+      id: 'social:conversation',
+      kind: 'conversation',
+      agentId: 'pero',
+      accountId: '123456789',
+      channelType: 'private',
+      channelId: '987654321',
+      status: 'waiting',
+      attempts: 1,
+      startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      deadline: new Date(Date.now() + 60_000).toISOString(),
+      checkpoint: {},
+      orchestrationSummary: {
+        plans: 3,
+        stepsCompleted: 6,
+        stepsFailed: 3,
+        stepsUncertain: 1,
+        stepsSkipped: 0,
+        businessCalls: 9,
+        sends: 1,
+      },
+    }
+    await port.saveTurn(record)
+    expect(await port.listRecoverableTurns('pero', true, 'task')).toEqual([])
+    expect(await port.listRecoverableTurns('pero', false, 'conversation')).toMatchObject([
+      { id: record.id, kind: 'conversation', status: 'waiting' },
+    ])
+  })
+
   it('终态只允许补存检查点中已确认的原发送消息，历史清理后不能复活', async () => {
     const message: Parameters<SocialStoragePort['insert']>[0] = {
       turnId: 'confirmed',

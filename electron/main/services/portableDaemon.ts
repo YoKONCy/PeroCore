@@ -3,7 +3,7 @@ import { t as __t } from '../utils/i18n'
  * 内置 Daemon — 打包发行版统一运行时拉起
  *
  * 所有打包发行形态（标准安装版、Steam 版、便携版）都随包携带同一份 Daemon：
- *   1. 探测业务端口 :9120，已运行则复用；
+ *   1. 探测业务健康接口 :9120，已就绪则复用；
  *   2. 未运行则用 Electron 自带 Node 运行时执行 resources/daemon/daemon.mjs；
  *   3. 显式注入 PERO_DATA_DIR / PERO_APP_ROOT，确保 Electron 与后端共享路径；
  *   4. Steam 版额外注入 Steam API 返回的全部 Workshop 安装目录；
@@ -15,9 +15,13 @@ import { t as __t } from '../utils/i18n'
 import { spawn, type ChildProcess } from 'node:child_process'
 import path from 'node:path'
 import fs from 'node:fs'
-import net from 'node:net'
+import { stripVTControlCharacters } from 'node:util'
 import { app } from 'electron'
-import { electronProcessEnvironment } from '@infos/shared'
+import {
+  DAEMON_ALREADY_RUNNING_EXIT_CODE,
+  DAEMON_SHUTDOWN_MESSAGE,
+  electronProcessEnvironment,
+} from '@infos/shared'
 import { isDev, paths } from '../utils/env'
 import { getWorkshopInstallations } from './steam'
 import { logger } from '../utils/logger'
@@ -36,6 +40,10 @@ const DAEMON_BUNDLE_RELPATH = path.join('daemon', 'daemon.mjs')
 
 /** 由本模块拉起的 Daemon 子进程（用于退出时回收） */
 let daemonChild: ChildProcess | null = null
+let startupPromise: Promise<boolean> | null = null
+let shuttingDown = false
+let logStartOffset = 0
+let logFallback = ''
 
 export interface DaemonStartupStatus {
   ready: boolean
@@ -56,10 +64,21 @@ let startupStatus: DaemonStartupStatus = {
 /** 返回启动状态与日志尾部，供 Launcher 直接展示真实错误。 */
 export function getPortableDaemonStatus(): DaemonStartupStatus {
   const status = { ...startupStatus }
+  if (logFallback) status.logTail = stripVTControlCharacters(logFallback).slice(-4000)
   if (status.logPath && fs.existsSync(status.logPath)) {
     try {
-      const content = fs.readFileSync(status.logPath, 'utf8')
-      status.logTail = content.slice(-4000)
+      const fd = fs.openSync(status.logPath, 'r')
+      try {
+        const size = fs.fstatSync(fd).size
+        const start = Math.min(size, Math.max(logStartOffset, size - 16_384))
+        const buffer = Buffer.alloc(size - start)
+        const bytes = fs.readSync(fd, buffer, 0, buffer.length, start)
+        status.logTail = stripVTControlCharacters(buffer.subarray(0, bytes).toString('utf8')).slice(
+          -4000,
+        )
+      } finally {
+        fs.closeSync(fd)
+      }
     } catch {
       // 日志可能正被子进程占用，保留已有状态。
     }
@@ -67,28 +86,41 @@ export function getPortableDaemonStatus(): DaemonStartupStatus {
   return status
 }
 
-/** 是否已尝试拉起（避免重复） */
-let ensureStarted = false
-
-/** 探测 TCP 端口是否可连接 */
-function probePort(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = net.connect({ host: '127.0.0.1', port })
-    const done = (ok: boolean) => {
-      socket.destroy()
-      resolve(ok)
+/** 确认实际业务服务健康，不能将任意占用端口的程序视为后端。 */
+export async function probeBusinessHealth(): Promise<boolean> {
+  try {
+    const response = await fetch(`http://127.0.0.1:${BUSINESS_PORT}/api/health`, {
+      signal: AbortSignal.timeout(1000),
+      redirect: 'error',
+    })
+    if (!response.ok) {
+      await response.body?.cancel()
+      return false
     }
-    socket.once('connect', () => done(true))
-    socket.once('error', () => done(false))
-  })
+    const body = (await response.json()) as { data?: { status?: string } }
+    return body.data?.status === 'ok'
+  } catch {
+    return false
+  }
 }
 
 /** 轮询等待业务端口就绪 */
-async function waitForBusinessReady(timeoutMs: number): Promise<boolean> {
+async function waitForBusinessReady(timeoutMs: number, child?: ChildProcess): Promise<boolean> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
-    if (await probePort(BUSINESS_PORT)) {
-      startupStatus = { ...startupStatus, ready: true, running: true }
+    if (
+      shuttingDown ||
+      (child && (daemonChild !== child || child.exitCode !== null || child.signalCode !== null))
+    ) {
+      // 其他入口已抢先取得同一数据目录的实例锁，等待它就绪，不重复创建进程。
+      if (!shuttingDown && child?.exitCode === DAEMON_ALREADY_RUNNING_EXIT_CODE) {
+        return waitForBusinessReady(Math.max(0, deadline - Date.now()))
+      }
+      return false
+    }
+    if (await probeBusinessHealth()) {
+      if (shuttingDown || (child && daemonChild !== child)) return false
+      startupStatus = { ...startupStatus, ready: true, running: true, error: undefined }
       return true
     }
     await new Promise((resolve) => setTimeout(resolve, READY_POLL_INTERVAL_MS))
@@ -97,29 +129,86 @@ async function waitForBusinessReady(timeoutMs: number): Promise<boolean> {
 }
 
 /** 回收本模块拉起的 Daemon 子进程 */
-export function stopPortableDaemon(): void {
-  if (!daemonChild) return
+export async function stopPortableDaemon(): Promise<void> {
+  shuttingDown = true
+  startupStatus = { ...startupStatus, ready: false }
+  const child = daemonChild
+  if (!child || child.exitCode !== null || child.signalCode !== null) return
   logger.info(
     'PortableDaemon',
     __t('electron.logs.portableDaemon', '正在停止本模块拉起的 Daemon...'),
   )
-  daemonChild.kill()
-  daemonChild = null
+  await new Promise<void>((resolve, reject) => {
+    let settled = false
+    let forceTimer: ReturnType<typeof setTimeout> | undefined
+    const finish = (error?: Error) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (forceTimer) clearTimeout(forceTimer)
+      child.off('exit', onExit)
+      if (error) reject(error)
+      else resolve()
+    }
+    const onExit = () => finish()
+    const terminate = () => {
+      try {
+        child.kill()
+      } catch (error) {
+        finish(error instanceof Error ? error : new Error(String(error)))
+      }
+    }
+    child.once('exit', onExit)
+    const timer = setTimeout(() => {
+      try {
+        forceTimer = setTimeout(
+          () => finish(new Error(__t('electron.logs.portableDaemon', '等待 Daemon 退出超时'))),
+          2000,
+        )
+        child.kill('SIGKILL')
+      } catch (error) {
+        finish(error instanceof Error ? error : new Error(String(error)))
+      }
+    }, 5000)
+    try {
+      if (child.connected) {
+        child.send({ type: DAEMON_SHUTDOWN_MESSAGE }, (error) => {
+          if (error && !settled) terminate()
+        })
+      } else {
+        terminate()
+      }
+    } catch (error) {
+      finish(error instanceof Error ? error : new Error(String(error)))
+    }
+  })
+  startupStatus = { ...startupStatus, ready: false, running: false }
 }
 
 /**
  * 确保 Daemon 可用
  *
- * 便携模式：探测 :9120，未就绪则拉起内置 Daemon（仅一次）。
- * 非便携模式：仅做有限等待，Daemon 由外部管理，未就绪不阻塞启动
- * （capabilityProvider 自带重连兜底）。
+ * 所有打包版共用内置 Daemon；并发请求共用一次启动，失败后可由用户重试。
+ * 开发模式仍由外部管理 Daemon，退出过程中禁止重新拉起。
  *
  * @returns 是否成功等待到 Daemon 就绪
  */
 export async function ensurePortableDaemon(): Promise<boolean> {
+  if (shuttingDown) return false
+  if (startupPromise) return startupPromise
+  startupPromise = startPortableDaemon()
+  try {
+    return await startupPromise
+  } finally {
+    startupPromise = null
+  }
+}
+
+async function startPortableDaemon(): Promise<boolean> {
   // 已在运行（或外部 Daemon）：直接确认就绪
-  if (await probePort(BUSINESS_PORT)) {
-    startupStatus = { ...startupStatus, ready: true, running: true }
+  if (await probeBusinessHealth()) {
+    if (shuttingDown) return false
+    startupStatus = { ...startupStatus, ready: true, running: true, error: undefined }
     return true
   }
 
@@ -136,20 +225,24 @@ export async function ensurePortableDaemon(): Promise<boolean> {
     return false
   }
 
-  // 打包发行版：拉起内置 Daemon（幂等，只尝试一次）
-  if (ensureStarted) {
-    logger.info(
-      'PortableDaemon',
-      __t('electron.logs.portableDaemon', '已尝试过拉起内置 Daemon，等待其就绪...'),
-    )
-    return waitForBusinessReady(READY_TIMEOUT_MS)
+  if (shuttingDown) return false
+  // 超时但仍存活的子进程继续等待，不能重复启动并争用同一数据目录。
+  if (daemonChild) {
+    return waitForBusinessReady(READY_TIMEOUT_MS, daemonChild)
   }
-  ensureStarted = true
-  startupStatus = { ...startupStatus, attempted: true }
+  startupStatus = {
+    ...startupStatus,
+    ready: false,
+    running: false,
+    attempted: true,
+    error: undefined,
+    logPath: '',
+  }
+  logFallback = ''
 
   const bundlePath = path.join(process.resourcesPath, DAEMON_BUNDLE_RELPATH)
   if (!fs.existsSync(bundlePath)) {
-    const error = `未找到内置 Daemon bundle: ${bundlePath}`
+    const error = __t('electron.logs.portableDaemon', '未找到内置 Daemon bundle: {0}', [bundlePath])
     startupStatus = { ...startupStatus, error }
     logger.warn(
       'PortableDaemon',
@@ -180,13 +273,29 @@ export async function ensurePortableDaemon(): Promise<boolean> {
   )
 
   // Daemon 在窗口隐藏模式下运行，必须持久化 stdout/stderr，否则启动早期异常会完全丢失。
-  fs.mkdirSync(paths.logs, { recursive: true })
   const daemonLogPath = path.join(paths.logs, 'daemon-bootstrap.log')
-  startupStatus = { ...startupStatus, logPath: daemonLogPath, running: true, error: undefined }
+  startupStatus = { ...startupStatus, running: true, error: undefined }
   let daemonLogFd: number | null = null
   try {
-    daemonLogFd = fs.openSync(daemonLogPath, 'a')
-    fs.writeSync(daemonLogFd, `\n[${new Date().toISOString()}] 启动内置 Daemon\n`)
+    try {
+      fs.mkdirSync(paths.logs, { recursive: true })
+      daemonLogFd = fs.openSync(daemonLogPath, 'a')
+      logStartOffset = fs.fstatSync(daemonLogFd).size
+      fs.writeSync(
+        daemonLogFd,
+        `\n[${new Date().toISOString()}] ${__t('electron.logs.portableDaemon', '启动内置 Daemon')}\n`,
+      )
+      startupStatus = { ...startupStatus, logPath: daemonLogPath }
+    } catch (error) {
+      if (daemonLogFd !== null) fs.closeSync(daemonLogFd)
+      daemonLogFd = null
+      // 日志只是诊断设施；单个日志文件被占用时改用限长内存缓冲，继续启动业务后端。
+      logFallback =
+        __t('electron.logs.portableDaemon', '启动日志暂不可写，改用内存诊断: {0}', [
+          String(error),
+        ]) + '\n'
+      logger.warn('PortableDaemon', logFallback.trim())
+    }
     daemonChild = spawn(process.execPath, [bundlePath], {
       env: electronProcessEnvironment(
         {
@@ -204,12 +313,17 @@ export async function ensurePortableDaemon(): Promise<boolean> {
         'node',
       ),
       cwd: path.dirname(app.getPath('exe')),
-      stdio: ['ignore', daemonLogFd, daemonLogFd],
+      stdio: ['ignore', daemonLogFd ?? 'pipe', daemonLogFd ?? 'pipe', 'ipc'],
       windowsHide: true,
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    startupStatus = { ...startupStatus, running: false, error: `进程启动失败: ${message}` }
+    startupStatus = {
+      ...startupStatus,
+      ready: false,
+      running: false,
+      error: __t('electron.logs.portableDaemon', '进程启动失败: {0}', [message]),
+    }
     logger.error(
       'PortableDaemon',
       __t('electron.logs.portableDaemon', '内置 Daemon 启动失败: {0}', [message]),
@@ -220,18 +334,40 @@ export async function ensurePortableDaemon(): Promise<boolean> {
     if (daemonLogFd !== null) fs.closeSync(daemonLogFd)
   }
 
-  daemonChild.on('error', (err) => {
-    startupStatus = { ...startupStatus, running: false, error: `进程启动失败: ${err.message}` }
+  const child = daemonChild
+  if (!child) return false
+  const capture = (chunk: Buffer) => {
+    logFallback = (logFallback + chunk.toString('utf8')).slice(-8000)
+  }
+  child.stdout?.on('data', capture)
+  child.stderr?.on('data', capture)
+  child.on('error', (err) => {
+    if (daemonChild !== child) return
+    // 未取得 PID 代表进程根本没有创建成功，允许下次重试。
+    if (!child.pid) daemonChild = null
+    startupStatus = {
+      ...startupStatus,
+      ready: false,
+      running: false,
+      error: __t('electron.logs.portableDaemon', '进程启动失败: {0}', [err.message]),
+    }
     logger.error(
       'PortableDaemon',
       __t('electron.logs.portableDaemon', '内置 Daemon 启动失败: {0}', [err.message]),
     )
   })
-  daemonChild.on('exit', (code, signal) => {
+  child.on('exit', (code, signal) => {
+    if (daemonChild !== child) return
     startupStatus = {
       ...startupStatus,
+      ready: false,
       running: false,
-      error: startupStatus.ready ? undefined : `Daemon 提前退出：code=${code}, signal=${signal}`,
+      error: shuttingDown
+        ? undefined
+        : __t('electron.logs.portableDaemon', 'Daemon 已退出：code={0}, signal={1}', [
+            code,
+            signal,
+          ]),
     }
     logger.warn(
       'PortableDaemon',
@@ -245,7 +381,8 @@ export async function ensurePortableDaemon(): Promise<boolean> {
   })
 
   // 等待业务端口就绪（最多 30s），失败不阻塞主流程（capabilityProvider 重连兜底）
-  const ready = await waitForBusinessReady(READY_TIMEOUT_MS)
+  const ready = await waitForBusinessReady(READY_TIMEOUT_MS, child)
+  if (shuttingDown) return false
   if (ready) {
     startupStatus = { ...startupStatus, ready: true, running: true, error: undefined }
     logger.info(
@@ -256,7 +393,9 @@ export async function ensurePortableDaemon(): Promise<boolean> {
     startupStatus = {
       ...startupStatus,
       ready: false,
-      error: startupStatus.error ?? `Daemon 启动超时（:${BUSINESS_PORT}）`,
+      error:
+        startupStatus.error ??
+        __t('electron.logs.portableDaemon', 'Daemon 启动超时（:{0}）', [BUSINESS_PORT]),
     }
     logger.warn(
       'PortableDaemon',

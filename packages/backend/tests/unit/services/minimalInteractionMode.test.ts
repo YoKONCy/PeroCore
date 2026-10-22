@@ -3,9 +3,10 @@ import { isToolAllowedInInteractionMode } from '../../../src/tools/interactionMo
 
 const registry = { isChatEnabled: vi.fn(() => true) } as never
 describe('Thread 极简模式', () => {
-  it('保留原陪伴工具，但系统协议、扩展元数据和 NIT 不能绕过极简集合', () => {
+  it('保留陪伴工具与私有心流，但系统协议、扩展元数据和 NIT 不能绕过极简集合', () => {
     for (const name of [
       'finish_task',
+      'update_flow_state',
       'take_screenshot',
       'query_facts',
       'set_reminder',

@@ -27,6 +27,20 @@ export interface EventNoteOrigin {
   pairIds: string[]
   messageIds: string[]
   channel: string
+  manualEdit?: { actor: 'user'; previousId: string; editedAt: string }
+}
+
+export interface EventNoteManualEditInput extends Omit<EventNoteDraftInput, 'scope'> {
+  expectedStatus: EventNoteStatus
+  regenerateVector: boolean
+  operationId: string
+}
+
+export interface FactManualEditInput {
+  statement: string
+  source?: string
+  confidence?: number
+  operationId: string
 }
 
 export interface EventNote {

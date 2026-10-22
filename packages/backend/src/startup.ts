@@ -32,6 +32,7 @@ import { setupGatewayWebSocket } from './services/gateway/wsUpgrade'
 import { initTelemetry, shutdownTelemetry } from './lib/telemetry'
 import { setLocale } from './lib/i18n'
 import { LANGUAGE_CONFIG_KEY } from '@infos/shared/i18n'
+import { acquireDaemonLease, retryStartupIo, verifyDataDirectory } from './lib/startupStorage'
 
 // ─────────────────────────────────────────────
 // 类型定义
@@ -81,11 +82,22 @@ export async function startServer(options: StartServerOptions): Promise<void> {
 
   // 0. 启动 Banner（最早输出，在任何初始化之前）
   printBanner()
+  // 在日志清理、同步快照和数据库初始化前互斥，拦住其他入口拉起的重复后端。
+  const lease = await acquireDaemonLease(getDataDir())
+  process.env.PERO_DATA_DIR = lease.dataDirectory
+  // 实例锁持有到进程真正退出，不能在业务清理尚未完成时放行下一实例。
+  process.once('exit', lease.release)
+  await verifyDataDirectory(lease.dataDirectory)
   // Telemetry 必须在创建 HTTP 应用与业务服务之前注册全局 Provider。
   initTelemetry()
 
   // 1. 初始化日志文件持久化（越早越好）
-  initLogFile()
+  try {
+    await retryStartupIo(() => initLogFile())
+  } catch (error) {
+    // 日志目录异常不应使业务服务退出；发行版仍由父进程收集标准输出。
+    logger.warn(__t('logs.startup.ts', '文件日志暂不可用，继续使用标准输出: {0}', [String(error)]))
+  }
 
   // 2. 注册进程守护（日志就绪后立即注册）
   registerProcessGuards()

@@ -1,8 +1,9 @@
 import { t as __t } from '../lib/i18n'
 import path from 'node:path'
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
-import type Database from 'better-sqlite3'
+import Database from 'better-sqlite3'
 import { createLogger } from '../lib/logger'
+import { retryStartupIo } from '../lib/startupStorage'
 import type {
   DataMigration,
   DataMigrationContext,
@@ -27,13 +28,19 @@ export class MigrationManager {
     this.rootDir = path.join(dataDir, 'migrations')
     this.statePath = path.join(this.rootDir, 'migration-state.json')
     this.journalDir = path.join(this.rootDir, 'journals')
-    this.lockPath = path.join(this.rootDir, 'migration.lock')
+    this.lockPath = path.join(this.rootDir, 'migration-lock.sqlite')
     this.validateRegistry()
   }
 
   async runPending(): Promise<MigrationRunResult> {
-    mkdirSync(this.journalDir, { recursive: true })
-    this.acquireLock()
+    // 无需迁移时不创建目录或锁，避免无关的文件状态阻断正常启动。
+    if (this.migrations.length === 0) return { completed: [], skipped: [] }
+    const completed = new Set(this.readState().completed.map((entry) => entry.id))
+    if (this.migrations.every((migration) => completed.has(migration.id))) {
+      return { completed: [], skipped: this.migrations.map((migration) => migration.id).sort() }
+    }
+    await retryStartupIo(() => mkdirSync(this.journalDir, { recursive: true }))
+    const releaseLock = await this.acquireLock()
     try {
       const state = this.readState()
       const completedIds = new Set(state.completed.map((entry) => entry.id))
@@ -78,7 +85,7 @@ export class MigrationManager {
 
       return result
     } finally {
-      rmSync(this.lockPath, { force: true })
+      releaseLock()
     }
   }
 
@@ -124,29 +131,56 @@ export class MigrationManager {
   }
 
   private removeJournal(journalPath: string): void {
-    rmSync(journalPath, { force: true })
+    try {
+      rmSync(journalPath, { force: true })
+    } catch (error) {
+      // 完成状态已经落盘，清理临时记录失败不应再次阻断后端。
+      logger.warn(
+        __t('logs.migrations', '迁移已完成，暂无法清理恢复记录: {0}；原因: {1}', [
+          journalPath,
+          String(error),
+        ]),
+      )
+    }
   }
 
-  private acquireLock(): void {
-    if (existsSync(this.lockPath)) {
-      const lock = this.readJson<{ pid?: number }>(this.lockPath)
-      if (lock?.pid && this.isProcessAlive(lock.pid)) {
-        throw new Error(`另一个数据迁移进程正在运行: ${this.lockPath}`)
-      }
-      rmSync(this.lockPath, { force: true })
-      logger.warn(__t('logs.migrations', '已清理异常退出留下的数据迁移锁: {0}', [this.lockPath]))
-    }
+  private async acquireLock(): Promise<() => void> {
+    let connection: Database.Database | undefined
     try {
-      writeFileSync(
-        this.lockPath,
-        JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }),
-        {
-          encoding: 'utf8',
-          flag: 'wx',
-        },
+      // 独立数据库只负责进程互斥，不占用业务数据库的迁移事务。
+      // 不删除锁数据库；连接关闭或进程异常退出时由 SQLite 释放系统锁。
+      connection = await retryStartupIo(() => new Database(this.lockPath, { timeout: 0 }))
+      const deadline = Date.now() + 5000
+      for (;;) {
+        try {
+          connection.exec('BEGIN IMMEDIATE')
+          break
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code
+          if (!['SQLITE_BUSY', 'SQLITE_LOCKED'].includes(code ?? '') || Date.now() >= deadline) {
+            throw error
+          }
+          // 不同步阻塞事件循环，让同进程中持锁的异步迁移有机会完成。
+          await new Promise((resolve) => setTimeout(resolve, 50))
+        }
+      }
+      // 兼容旧版留下的标记，只尊重仍存活的旧版进程，不再删除或重建旧锁文件。
+      const legacyPath = path.join(this.rootDir, 'migration.lock')
+      const legacyLock = this.readJson<{ pid?: number }>(legacyPath)
+      if (legacyLock?.pid && this.isProcessAlive(legacyLock.pid)) {
+        throw new Error(`另一个数据迁移进程正在运行: ${legacyPath}`)
+      }
+      const acquired = connection
+      return () => acquired.close()
+    } catch (cause) {
+      connection?.close()
+      const error = cause as NodeJS.ErrnoException
+      const detail = `${error.code ?? error.name ?? 'Error'}: ${error.message ?? String(cause)}`
+      logger.error(
+        __t('logs.migrations', '获取数据迁移锁失败: {0}；原因: {1}', [this.lockPath, detail]),
+        cause,
       )
-    } catch {
-      throw new Error(`无法获取数据迁移锁: ${this.lockPath}`)
+      throw new Error(`数据迁移锁获取失败: ${this.lockPath}；原因: ${detail}`, { cause })
     }
   }
 
@@ -154,8 +188,9 @@ export class MigrationManager {
     try {
       process.kill(pid, 0)
       return true
-    } catch {
-      return false
+    } catch (error) {
+      // 无权探测不等于进程已经退出，不能据此允许并发迁移。
+      return (error as NodeJS.ErrnoException).code !== 'ESRCH'
     }
   }
 

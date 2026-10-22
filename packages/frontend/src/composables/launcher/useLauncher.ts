@@ -21,6 +21,7 @@ import { agentApi } from '../../api/modules/agentApi'
 import { invoke, isElectron } from '../../utils/ipcAdapter'
 import { logger } from '../../lib/logger'
 import { completeOnboarding, loadOnboardingFlow, queueDesktopOnboarding } from './onboardingFlow'
+import { createLaunchDiagnostic, type LaunchDiagnostic } from '../../lib/launcherDiagnostics'
 
 export type LaunchPhase = 'connecting' | 'checking' | 'ready' | 'entering' | 'done'
 
@@ -34,7 +35,19 @@ export interface CheckItem {
 export function useLauncher() {
   const phase = ref<LaunchPhase>('connecting')
   const progress = ref(0)
-  const errorMessage = ref('')
+  const diagnostic = ref<LaunchDiagnostic | null>(null)
+  // 用户提示只来自固定词条，原始异常与日志只存放在独立诊断数据中。
+  const errorMessage = computed(() => {
+    if (!diagnostic.value) return ''
+    return diagnostic.value.stage === 'agreement'
+      ? __t('ui.launcher', '暂时无法保存协议状态')
+      : __t('ui.launcher', '暂时无法启动')
+  })
+  const errorHint = computed(() =>
+    diagnostic.value?.stage === 'agreement'
+      ? __t('ui.launcher', '请稍后重试，或查看诊断信息。')
+      : __t('ui.launcher', '本次启动未完成。你可以重试，或查看诊断信息。'),
+  )
 
   /** 启动进度文字 (entering 阶段专用) */
   const enteringText = ref('正在启动...')
@@ -122,14 +135,14 @@ export function useLauncher() {
       await configApi.set('eula_accepted', 'true')
       showEula.value = false
       eulaChecked.value = true
-      errorMessage.value = ''
+      diagnostic.value = null
 
       // 检查引导状态 — EULA 通过后才可能触发引导
       await checkOnboardingStatus()
       await runChecks()
     } catch (e) {
       logger.error('Launcher', __t('logs.frontend.launcher', '保存 EULA 状态失败'), e)
-      errorMessage.value = '保存用户协议状态失败，请确认后端服务已启动后重试'
+      diagnostic.value = createLaunchDiagnostic('agreement', e)
     }
   }
 
@@ -293,6 +306,12 @@ export function useLauncher() {
     }
 
     phase.value = hasError.value ? 'checking' : 'ready'
+    if (hasError.value) {
+      diagnostic.value = createLaunchDiagnostic(
+        'backend',
+        checks.value.find((item) => item.status === 'error')?.message,
+      )
+    }
 
     // 就绪后，如果引导未完成，自动触发引导
     if (phase.value === 'ready' && !onboardingCompleted.value && eulaChecked.value) {
@@ -301,10 +320,29 @@ export function useLauncher() {
   }
 
   /** 开始启动流程 */
+  let launchInProgress = false
   async function startLaunch(): Promise<void> {
+    if (launchInProgress) return
+    launchInProgress = true
+    try {
+      await performLaunch()
+    } catch (error) {
+      diagnostic.value = createLaunchDiagnostic('backend', error)
+      const backendCheck = checks.value.find((item) => item.id === 'backend')
+      if (backendCheck) {
+        backendCheck.status = 'error'
+        backendCheck.message = __t('ui.launcher', '启动失败，请查看诊断详情')
+      }
+      phase.value = 'checking'
+    } finally {
+      launchInProgress = false
+    }
+  }
+
+  async function performLaunch(): Promise<void> {
     phase.value = 'connecting'
     progress.value = 0
-    errorMessage.value = ''
+    diagnostic.value = null
     showEula.value = false
     checks.value.forEach((c) => {
       c.status = 'pending'
@@ -313,31 +351,42 @@ export function useLauncher() {
 
     // Electron 主进程会随应用自动拉起后端；启动器先等待后端，再读取 EULA/角色等热更新配置
     if (isElectron()) {
-      const backendReady = await waitForBackend(30000)
+      const backendCheck = checks.value.find((item) => item.id === 'backend')
+      if (backendCheck) backendCheck.status = 'running'
+      // 与主进程初始化共用同一次启动；用户重试时真正重新拉起已退出的后端。
+      const started = (await invoke('start-backend')) as {
+        ready?: boolean
+        attempted?: boolean
+      } | null
+      const backendReady = started?.attempted ? started.ready === true : await waitForBackend(30000)
       if (!backendReady) {
-        let detail = '后端服务启动超时'
+        const fallback = __t('ui.launcher', '后端服务启动超时')
+        let detail = createLaunchDiagnostic('backend', fallback)
         try {
           const status = (await invoke('get-backend-logs')) as {
             error?: string
             logTail?: string
             logPath?: string
           }
-          const logTail = status.logTail?.trim()
-          detail = [status.error, logTail, status.logPath ? `日志：${status.logPath}` : undefined]
-            .filter(Boolean)
-            .join('\n')
+          detail = createLaunchDiagnostic(
+            'backend',
+            status.error || fallback,
+            status.logTail,
+            status.logPath,
+          )
         } catch {
           // 主进程诊断不可用时保留超时提示。
         }
-        errorMessage.value = detail
+        diagnostic.value = detail
         const backendCheck = checks.value.find((c) => c.id === 'backend')
         if (backendCheck) {
           backendCheck.status = 'error'
-          backendCheck.message = detail
+          backendCheck.message = __t('ui.launcher', '启动失败，请查看诊断详情')
         }
         phase.value = 'checking'
         return
       }
+      if (backendCheck) backendCheck.status = 'ok'
     }
 
     await checkEulaStatus()
@@ -397,7 +446,7 @@ export function useLauncher() {
     } catch (e) {
       logger.error('Launcher', __t('logs.frontend.launcher', '启动流程出错'), e)
       enteringText.value = '启动出错，请重试'
-      errorMessage.value = `启动失败: ${e}`
+      diagnostic.value = createLaunchDiagnostic('launch', e)
       // 恢复就绪状态，允许用户重试。
       phase.value = 'ready'
       await invoke('window-show')
@@ -451,6 +500,8 @@ export function useLauncher() {
     phase,
     progress,
     errorMessage,
+    errorHint,
+    diagnostic,
     checks,
     allChecksOk,
     hasError,

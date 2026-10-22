@@ -58,9 +58,12 @@ export function createSocialRouter(
   },
 ) {
   const router = new Hono()
-  router.get('/turns/:agentId', async (c) =>
-    c.json({ code: 'OK', data: await socialBridge.listTurns(c.req.param('agentId')) }),
-  )
+  router.get('/turns/:agentId', async (c) => {
+    const kind = c.req.query('kind')
+    if (kind !== undefined && kind !== 'task' && kind !== 'conversation')
+      throw new AppError('BAD_REQUEST')
+    return c.json({ code: 'OK', data: await socialBridge.listTurns(c.req.param('agentId'), kind) })
+  })
   router.post('/turns/:id/cancel', async (c) => {
     await socialBridge.cancelTurn(c.req.param('id'))
     return c.json({ code: 'OK', message: __t('apps.social.ui', '社交任务已取消') })
@@ -293,7 +296,9 @@ export function createSocialRouter(
         { code: 'INVALID_PARAMETER', message: __t('apps.social.ui', '社交模式配置必须是对象') },
         400,
       )
-    const data = await deps.updateModeConfig(body)
+    // 设置页编辑默认策略；单群覆盖由群状态机入口维护，避免旧页面快照覆盖 Agent 的新设置。
+    const { groupPolicies: _groupPolicies, ...defaults } = body
+    const data = await deps.updateModeConfig(defaults)
     return c.json({ code: 'OK', message: __t('apps.social.ui', '社交模式配置已保存'), data })
   })
 

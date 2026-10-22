@@ -46,7 +46,10 @@ export default defineConfig({
     build: {
       outDir: 'dist-electron/preload',
       rollupOptions: {
-        input: resolve(__dirname, 'electron/preload/index.ts'),
+        input: {
+          index: resolve(__dirname, 'electron/preload/index.ts'),
+          startupSplash: resolve(__dirname, 'electron/preload/startupSplash.ts'),
+        },
       },
     },
   },

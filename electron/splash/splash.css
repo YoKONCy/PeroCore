@@ -1,0 +1,170 @@
+:root {
+  color-scheme: dark;
+  font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  color: #e0eafa;
+  background: transparent;
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  user-select: none;
+}
+.scene {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  -webkit-app-region: drag;
+}
+#artwork {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+/* 以整个开屏画面为准水平居中，不再跟随右下角品牌组合。 */
+.progress {
+  position: absolute;
+  left: 50%;
+  bottom: 2.7%;
+  width: 32.95%;
+  height: auto;
+  overflow: visible;
+  transform: translateX(-50%);
+  -webkit-app-region: no-drag;
+}
+.waiting {
+  animation: loading-drift 2.6s ease-in-out infinite;
+  transform-origin: 259px 6px;
+}
+.complete {
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+@keyframes loading-drift {
+  0%,
+  100% {
+    transform: translateX(-174px);
+    opacity: 0.7;
+  }
+  50% {
+    transform: translateX(174px);
+    opacity: 1;
+  }
+}
+body[data-phase='ready'] .waiting {
+  animation: none;
+  opacity: 0;
+}
+body[data-phase='ready'] .complete {
+  opacity: 1;
+}
+body[data-phase='failed'] .waiting {
+  animation-play-state: paused;
+}
+body[data-phase='failed'] .progress {
+  opacity: 0.25;
+}
+.close {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 4px;
+  background: #27395522;
+  color: #c7d9f1;
+  font-size: 23px;
+  line-height: 1;
+  opacity: 0.65;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.close:hover,
+.close:focus-visible {
+  opacity: 1;
+  background: #35517466;
+}
+button:focus-visible {
+  outline: 2px solid #c7d9f1;
+  outline-offset: 3px;
+}
+.failure {
+  position: absolute;
+  left: 50%;
+  bottom: 4.2%;
+  transform: translateX(-50%);
+  width: min(520px, 90%);
+  padding: 16px 18px;
+  border: 1px solid #adcaee66;
+  border-radius: 7px;
+  background: #233650f5;
+  box-shadow: 0 8px 30px #0e192a55;
+  backdrop-filter: blur(10px);
+  -webkit-app-region: no-drag;
+}
+.failure[hidden] {
+  display: none;
+}
+.failure h1 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 7px;
+}
+.failure p {
+  font-size: 12px;
+  line-height: 1.7;
+  color: #bfd0e7;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 13px;
+}
+.actions button {
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 13px;
+  border: 1px solid #a5bfdf44;
+  border-radius: 4px;
+  background: #6f94c233;
+  color: #dceafa;
+  cursor: pointer;
+}
+.actions button:first-child {
+  background: #769ac255;
+  border-color: #b6d1f477;
+}
+.actions button:hover {
+  background: #7395c266;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) {
+  .waiting {
+    animation: none;
+  }
+  .complete {
+    transition: none;
+  }
+}

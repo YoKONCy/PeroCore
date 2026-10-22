@@ -46,7 +46,14 @@ function getLogStream(): fs.WriteStream | null {
     ensureLogDir()
     try {
       const logFile = path.join(paths.logs, `infos-${today}.log`)
-      logStream = fs.createWriteStream(logFile, { flags: 'a' })
+      const stream = fs.createWriteStream(logFile, { flags: 'a' })
+      // 打开文件失败通常异步触发，不能只依赖外层 try/catch。
+      // 诊断文件不可写时保留控制台输出，且旧流的错误不能清除新流。
+      stream.on('error', () => {
+        if (logStream === stream) logStream = null
+        stream.destroy()
+      })
+      logStream = stream
     } catch {
       logStream = null
     }

@@ -1,0 +1,73 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; img-src 'self'; style-src 'self'; script-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <title>infOS</title>
+    <link rel="stylesheet" href="splash.css" />
+    <script src="splash.js" defer></script>
+  </head>
+  <body data-phase="opening">
+    <main class="scene">
+      <img
+        id="artwork"
+        src="artwork.png"
+        width="1569"
+        height="1080"
+        alt="infOS"
+        draggable="false"
+      />
+      <svg id="progress" class="progress" viewBox="0 0 518 12" role="progressbar">
+        <defs>
+          <linearGradient id="track">
+            <stop stop-color="#7a9bc9" />
+            <stop offset="1" stop-color="#9486bb" />
+          </linearGradient>
+          <linearGradient id="light" gradientUnits="userSpaceOnUse" x1="205" y1="6" x2="313" y2="6">
+            <stop stop-color="#8caedc" stop-opacity=".35" />
+            <stop offset=".5" stop-color="#e2efff" />
+            <stop offset="1" stop-color="#b8a9e4" stop-opacity=".35" />
+          </linearGradient>
+          <clipPath id="track-clip"><rect x="1" y="3" width="516" height="6" rx="3" /></clipPath>
+        </defs>
+        <rect
+          x=".5"
+          y="2.5"
+          width="517"
+          height="7"
+          rx="3.5"
+          fill="#52678c"
+          fill-opacity=".25"
+          stroke="#7c94ba"
+          stroke-opacity=".3"
+        />
+        <rect x="1" y="3" width="516" height="6" rx="3" fill="url(#track)" fill-opacity=".3" />
+        <g clip-path="url(#track-clip)">
+          <path
+            class="waiting"
+            d="M205 6H313"
+            stroke="url(#light)"
+            stroke-width="5"
+            stroke-linecap="round"
+          />
+          <rect class="complete" x="1" y="3" width="516" height="6" rx="3" fill="#c7dcf7" />
+        </g>
+      </svg>
+    </main>
+    <button id="close" class="close" type="button">×</button>
+    <p id="status" class="sr-only" role="status" aria-live="polite"></p>
+    <section id="failure" class="failure" hidden role="alert">
+      <h1 id="failure-title"></h1>
+      <p id="failure-message"></p>
+      <div class="actions">
+        <button id="retry" type="button"></button>
+        <button id="logs" type="button"></button>
+        <button id="quit" type="button"></button>
+      </div>
+    </section>
+  </body>
+</html>

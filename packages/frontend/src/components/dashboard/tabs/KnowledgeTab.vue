@@ -17,6 +17,8 @@ import { logger } from '../../../lib/logger'
 
 import DocumentKnowledgePane from '../../knowledge/DocumentKnowledgePane.vue'
 import PrivacyCleanupPanel from '../PrivacyCleanupPanel.vue'
+import ArchiveEntryEditor from '../memories/ArchiveEntryEditor.vue'
+import type { ArchiveEditTarget } from '../../../lib/archiveEntryEdit'
 
 const documentStats = ref<KnowledgeDocumentList['stats']>({
   documentCount: 0,
@@ -30,6 +32,13 @@ const notif = useNotificationStore()
 const retractTarget = ref<FactArchiveRecord | null>(null)
 const retracting = ref(false)
 const factAction = ref<'retract' | 'delete'>('retract')
+const editTarget = ref<ArchiveEditTarget | null>(null)
+async function onFactEdited(): Promise<void> {
+  editTarget.value = null
+  historyOpen.value = true
+  notif.toast(__t('ui.archive-edit', '修改已保存，旧版本已保留。'), 'success')
+  await loadFacts()
+}
 function selectFactAction(fact: FactArchiveRecord, action: 'retract' | 'delete'): void {
   factAction.value = action
   retractTarget.value = fact
@@ -302,6 +311,14 @@ onMounted(loadFacts)
                     type="button"
                     size="sm"
                     variant="secondary"
+                    @click="editTarget = { kind: 'fact', fact }"
+                  >
+                    {{ __t('ui.archive-edit', '编辑事实') }}
+                  </PButton>
+                  <PButton
+                    type="button"
+                    size="sm"
+                    variant="secondary"
                     :aria-expanded="expandedFacts.has(fact.id)"
                     @click="toggleFact(fact.id)"
                   >
@@ -397,6 +414,12 @@ onMounted(loadFacts)
 
     <DocumentKnowledgePane v-else @stats="documentStats = $event" />
 
+    <ArchiveEntryEditor
+      v-if="editTarget"
+      :target="editTarget"
+      @close="editTarget = null"
+      @saved="onFactEdited"
+    />
     <PDialog
       :model-value="Boolean(retractTarget)"
       :title="

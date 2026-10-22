@@ -45,5 +45,8 @@
   "上一页": "Previous page",
   "下一页": "Next page",
   "第 {0} / {1} 页": "Page {0} of {1}",
-  "显示最近 100 条完成记录；归档不删除聊天记录。": "Latest 100 finished tasks. Archiving keeps chat history."
+  "显示最近 100 条完成记录；归档不删除聊天记录。": "Latest 100 completed records. Archiving keeps chat history.",
+  "社交回合": "Social turns",
+  "社交记录暂不可用": "Social records are temporarily unavailable",
+  "暂无待阅的社交回合": "No social turns to review"
 }

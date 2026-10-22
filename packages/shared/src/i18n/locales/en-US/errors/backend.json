@@ -1160,5 +1160,8 @@
   "创建终端缺少本次用户审批凭证": "The creation terminal lacks the user approval certificate for this time",
   "终端输入缺少本次用户审批凭证": "terminal input lacks the user approval voucher for this time",
   "仅支持简体中文、繁體中文和 English": "Choose Simplified Chinese, Traditional Chinese or English",
-  "开关配置必须为 true 或 false": "switch configuration must be true or false"
+  "开关配置必须为 true 或 false": "switch configuration must be true or false",
+  "数据迁移锁获取失败: {0}；原因: {1}": "Data migration lock acquisition failed: {0}; reason: {1}",
+  "数据目录已有后端进程正在使用: {0}": "The data directory is already in use by another backend process: {0}",
+  "启动存储不可用: {0}；步骤: {1}；原因: {2}": "Startup storage is unavailable: {0}; step: {1}; reason: {2}"
 }

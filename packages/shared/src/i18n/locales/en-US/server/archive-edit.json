@@ -1,0 +1,8 @@
+{
+  "条目的索引尚未完成，请稍后刷新后重试。": "This entry's index is not ready. Refresh it and try again later.",
+  "条目已被修改、撤回或删除，请重新加载后再编辑。": "This entry has changed, been retracted, or been deleted. Reload it before editing.",
+  "原向量暂不可用，请重新加载或选择重新生成向量。": "The existing embedding is unavailable. Reload the entry or choose to regenerate it.",
+  "向量模型未配置或不可用，可取消重新生成向量后保存。": "The embedding model is not configured or is unavailable. Uncheck regeneration to save without it.",
+  "生成向量失败，本次修改尚未保存。可取消重新生成向量后重试。": "Embedding generation failed. Your changes have not been saved. Uncheck regeneration and try again.",
+  "保存未完成，请保留编辑内容并重试。": "Saving did not complete. Keep your draft and try again."
+}

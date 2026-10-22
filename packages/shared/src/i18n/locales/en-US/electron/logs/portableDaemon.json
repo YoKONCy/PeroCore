@@ -10,5 +10,12 @@
   "内置 Daemon 启动失败: {0}": "Built-in Daemon failed to start: {0}",
   "内置 Daemon 退出: code={0}, signal={1}；启动日志: {2}": "built-in Daemon exit: code={0}, signal={1}; startup log: {2}",
   "内置 Daemon 已就绪 → :{0}": "built-in Daemon is ready → :{0}",
-  "内置 Daemon 启动超时（:{0}），桌面能力可能暂不可用": "built-in Daemon startup timeout (:{0}), desktop capabilities may be temporarily unavailable"
+  "内置 Daemon 启动超时（:{0}），桌面能力可能暂不可用": "built-in Daemon startup timeout (:{0}), desktop capabilities may be temporarily unavailable",
+  "等待 Daemon 退出超时": "Timed out waiting for Daemon to exit",
+  "未找到内置 Daemon bundle: {0}": "Bundled Daemon was not found: {0}",
+  "启动内置 Daemon": "Starting bundled Daemon",
+  "进程启动失败: {0}": "Failed to start process: {0}",
+  "Daemon 已退出：code={0}, signal={1}": "Daemon exited: code={0}, signal={1}",
+  "Daemon 启动超时（:{0}）": "Daemon startup timed out (:{0})",
+  "启动日志暂不可写，改用内存诊断: {0}": "Startup log is not writable; using in-memory diagnostics: {0}"
 }

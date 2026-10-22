@@ -4,6 +4,8 @@ import { z } from 'zod'
 import { validate as zValidator } from '../lib/validation'
 import type { AppContext } from '../container'
 import type { EventNoteArchiveFilter, EventNoteStatus, EventNoteOriginMode } from '@infos/shared'
+import { memoryEditSchema } from '../schemas/archiveEdit.schema'
+import { throwArchiveEditError } from './archiveEditError'
 
 /** 逗号分隔字符串 → 去重数组 */
 function csv(value: string | undefined): string[] | undefined {
@@ -43,6 +45,15 @@ const archiveQuerySchema = z.object({
 
 export function createMemoryRouter(ctx: AppContext) {
   const router = new Hono()
+
+  router.patch('/:id', zValidator('json', memoryEditSchema), async (c) => {
+    try {
+      const data = await ctx.eventMemoryService.edit(c.req.param('id'), c.req.valid('json'))
+      return c.json({ code: 'OK', data })
+    } catch (error) {
+      throwArchiveEditError(error)
+    }
+  })
 
   // GET /api/memories — 档案组合过滤 + 分页 + facets + stats
   router.get('/', zValidator('query', archiveQuerySchema), async (c) => {

@@ -26,6 +26,111 @@ function fixture() {
   return { db, stores, repo: new FactsRepository(db, stores) }
 }
 
+describe('事实的人工修订', () => {
+  it('保留原记录者、观察时间与历史关系，人工修改单独留痕并支持重试', async () => {
+    const { db, stores, repo } = fixture()
+    try {
+      const old = await repo.write({
+        standardName: '小林',
+        statement: '偏好红茶',
+        observedAt: '2026-10-21T04:00:00.000Z',
+        source: '对话',
+        createdByAgentId: 'pero',
+      })
+      const input = {
+        statement: '偏好乌龙茶',
+        source: '用户核实',
+        confidence: 0.9,
+        operationId: 'manual-fact',
+      }
+      const edited = await repo.editFact(old.id, input)
+      expect(edited).toMatchObject({
+        objectId: old.objectId,
+        createdByAgentId: 'pero',
+        observedAt: old.observedAt,
+        statement: input.statement,
+        source: input.source,
+        confidence: 0.9,
+      })
+      expect((await repo.query('小林')).exactMatch?.activeFacts.map((fact) => fact.id)).toEqual([
+        edited.id,
+      ])
+      expect((await repo.archive()).items[0]?.historicalFacts).toContainEqual(
+        expect.objectContaining({ id: old.id, statement: old.statement, supersededBy: edited.id }),
+      )
+      const audit = (await db.select().from(factMemoryOperations)).find(
+        (item) => item.operationId === input.operationId,
+      )!
+      expect(JSON.parse(audit.payloadJson).manualEdit).toMatchObject({
+        actor: 'user',
+        previousId: old.id,
+      })
+      expect((await repo.editFact(old.id, input)).id).toBe(edited.id)
+      await repo.retractFact(edited.id)
+      await expect(repo.editFact(old.id, input)).rejects.toThrow('ARCHIVE_EDIT_CONFLICT')
+      expect((await repo.query('小林')).exactMatch?.activeFacts).toEqual([])
+    } finally {
+      stores.closeAll()
+      closeDrizzleConnection(db)
+    }
+  })
+
+  it('并发修改旧事实只能生成一条有效替代记录', async () => {
+    const { db, stores, repo } = fixture()
+    try {
+      const old = await repo.write({
+        standardName: '计划',
+        statement: '周一复盘',
+        observedAt: '2026-10-21T04:00:00.000Z',
+        createdByAgentId: 'pero',
+      })
+      const results = await Promise.allSettled([
+        repo.editFact(old.id, { statement: '周二复盘', operationId: 'manual-fact-a' }),
+        repo.editFact(old.id, { statement: '周三复盘', operationId: 'manual-fact-b' }),
+      ])
+      expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+      expect((await repo.query('计划')).exactMatch?.activeFacts).toHaveLength(1)
+      expect(await db.select().from(factRecords)).toHaveLength(2)
+    } finally {
+      stores.closeAll()
+      closeDrizzleConnection(db)
+    }
+  })
+
+  it('人工修订中断后再撤回，重放不会重新激活新旧事实', async () => {
+    const { db, stores, repo } = fixture()
+    try {
+      const old = await repo.write({
+        standardName: '计划',
+        statement: '周一复盘',
+        observedAt: '2026-10-21T04:00:00.000Z',
+        createdByAgentId: 'pero',
+      })
+      const store = stores.getSharedStore('facts')
+      const commit = vi.spyOn(store, 'commitTransaction').mockImplementationOnce(() => {
+        throw new Error('模拟提交中断')
+      })
+      await expect(
+        repo.editFact(old.id, { statement: '周二复盘', operationId: 'manual-interrupted' }),
+      ).rejects.toThrow('模拟提交中断')
+      commit.mockRestore()
+      const replacement = (await repo.archive()).items[0]!.activeFacts[0]!
+      await expect(repo.retractFact(replacement.id, 'manual-retract')).rejects.toThrow(
+        'TDB节点不存在',
+      )
+      await repo.replayPending()
+      await repo.replayPending()
+      expect((await repo.query('计划')).exactMatch?.activeFacts).toEqual([])
+      expect((await repo.archive()).items[0]?.retractedFacts).toContainEqual(
+        expect.objectContaining({ id: replacement.id, status: 'retracted' }),
+      )
+    } finally {
+      stores.closeAll()
+      closeDrizzleConnection(db)
+    }
+  })
+})
+
 describe('FactsRepository共享事实库', () => {
   it('应创建对象与事实，并通过标准名和别名精确查询', async () => {
     const { db, stores, repo } = fixture()

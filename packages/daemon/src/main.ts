@@ -20,6 +20,8 @@ import { t as __t } from '../../backend/src/lib/i18n'
 import { startServer } from '@infos/backend/startup'
 import { getDataDir } from '@infos/backend/lib/env'
 import { logger } from '@infos/backend/lib/logger'
+import { DaemonAlreadyRunningError } from '@infos/backend/lib/startupStorage'
+import { DAEMON_ALREADY_RUNNING_EXIT_CODE } from '@infos/shared'
 
 // 启动（公共启动逻辑统一委托给 startServer）
 startServer({
@@ -37,7 +39,7 @@ startServer({
   if (err instanceof Error) {
     console.error(err.stack)
   }
-  process.exit(1)
+  process.exit(err instanceof DaemonAlreadyRunningError ? DAEMON_ALREADY_RUNNING_EXIT_CODE : 1)
 })
 
 // ─────────────────────────────────────────────

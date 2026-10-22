@@ -75,6 +75,121 @@ const draft = {
   },
 }
 
+describe('记忆的人工修订', () => {
+  it('保留归档与来源、复用向量、重建实体边，且不触发覆盖与后台反思', async () => {
+    const { repo, service, stores, embeddings } = createFixture()
+    const old = await service.create({ ...draft, participants: ['旧人物'] })
+    await service.archive(old.id)
+    const stored = (await repo.findById(old.id))!
+    const store = stores.getAgentStore('pero', 'main')
+    const vector = Array.from(store.get(stored.tdbId)!.vector)
+    const embed = vi.spyOn(embeddings, 'embedOne').mockRejectedValue(new Error('不应调用向量模型'))
+    embeddings.isAvailable = false
+    const coverage = vi.spyOn(repo, 'saveCoverage')
+    const listener = vi.fn()
+    service.setCommitListener(listener)
+    const input = {
+      ...draft,
+      narrative: '我得知小林下周要搬家。',
+      participants: ['小林'],
+      expectedStatus: 'archived' as const,
+      regenerateVector: false,
+      operationId: 'manual-edit',
+    }
+    const edited = await service.edit(old.id, input)
+    expect(edited).toMatchObject({
+      status: 'archived',
+      eventAt: old.eventAt,
+      origin: { ...old.origin, manualEdit: { actor: 'user', previousId: old.id } },
+    })
+    expect((await repo.findById(old.id))?.replacedBy).toBe(edited.id)
+    expect((await repo.findById(old.id))?.narrative).toBe(old.narrative)
+    const current = (await repo.findById(edited.id))!
+    expect(Array.from(store.get(current.tdbId)!.vector)).toEqual(vector)
+    const people = store
+      .getEdges(current.tdbId)
+      .filter((edge) => edge.label === 'involves_person')
+      .map((edge) => store.get<{ name: string }>(edge.targetId)?.payload.name)
+    expect(people).toEqual(['小林'])
+    expect(embed).not.toHaveBeenCalled()
+    expect(coverage).not.toHaveBeenCalled()
+    expect(listener).not.toHaveBeenCalled()
+    expect((await service.edit(old.id, input)).id).toBe(edited.id)
+    await service.replayPending()
+    expect((await service.detail(edited.id))?.status).toBe('archived')
+  })
+
+  it('选择重新生成时只请求一次新正文向量，模型失败不创建修订', async () => {
+    const { repo, service, stores, embeddings } = createFixture()
+    const old = await service.create(draft)
+    const input = {
+      ...draft,
+      narrative: '我和主人决定每周五复盘。',
+      expectedStatus: 'active' as const,
+      regenerateVector: true,
+      operationId: 'manual-vector',
+    }
+    const embed = vi.spyOn(embeddings, 'embedOne').mockRejectedValueOnce(new Error('模型离线'))
+    await expect(service.edit(old.id, input)).rejects.toThrow('模型离线')
+    expect((await repo.findById(old.id))?.replacedBy).toBeUndefined()
+    expect(await repo.findOperation(input.operationId)).toBeUndefined()
+    embed.mockResolvedValue([0, 0, 1, 0])
+    const edited = await service.edit(old.id, input)
+    expect(embed).toHaveBeenLastCalledWith(input.narrative, undefined)
+    expect(embed).toHaveBeenCalledTimes(2)
+    const current = (await repo.findById(edited.id))!
+    expect(Array.from(stores.getAgentStore('pero', 'main').get(current.tdbId)!.vector)).toEqual([
+      0, 0, 1, 0,
+    ])
+  })
+
+  it('并发编辑只允许一个版本接管，迟到的旧请求不能复活历史版本', async () => {
+    const { repo, service } = createFixture()
+    const old = await service.create(draft)
+    const base = { ...draft, expectedStatus: 'active' as const, regenerateVector: false }
+    const results = await Promise.allSettled([
+      service.edit(old.id, { ...base, narrative: '我记住了方案甲。', operationId: 'edit-a' }),
+      service.edit(old.id, { ...base, narrative: '我记住了方案乙。', operationId: 'edit-b' }),
+    ])
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1)
+    const current = (await repo.list('pero', { includeArchived: true }))[0]!
+    const next = await service.edit(current.id, { ...base, operationId: 'edit-next' })
+    const winner = results[0]?.status === 'fulfilled' ? 'edit-a' : 'edit-b'
+    await expect(service.edit(old.id, { ...base, operationId: winner })).rejects.toThrow(
+      'ARCHIVE_EDIT_CONFLICT',
+    )
+    expect((await repo.list('pero', { includeArchived: true })).map((note) => note.id)).toEqual([
+      next.id,
+    ])
+  })
+
+  it('中断后的人工修订重放沿用已保存向量，不再调用模型', async () => {
+    const { repo, service, stores, embeddings } = createFixture()
+    const old = await service.create(draft)
+    const store = stores.getAgentStore('pero', 'main')
+    const commit = vi.spyOn(store, 'commitTransaction').mockImplementationOnce(() => {
+      throw new Error('模拟索引提交中断')
+    })
+    const embed = vi.spyOn(embeddings, 'embedOne').mockRejectedValue(new Error('不应再次生成向量'))
+    const input = {
+      ...draft,
+      narrative: '我保存了人工更正。',
+      expectedStatus: 'active' as const,
+      regenerateVector: false,
+      operationId: 'manual-replay',
+    }
+    await expect(service.edit(old.id, input)).rejects.toThrow('模拟索引提交中断')
+    commit.mockRestore()
+    await service.replayPending()
+    const replacement = (await repo.list('pero', { includeArchived: true }))[0]!
+    expect((await service.detail(replacement.id))?.narrative).toBe(input.narrative)
+    expect(store.contains(replacement.tdbId)).toBe(true)
+    expect(embed).not.toHaveBeenCalled()
+    expect((await repo.findOperation(input.operationId))?.status).toBe('committed')
+  })
+})
+
 describe('EventMemoryService真实双库存储', () => {
   it('编辑一轮只重开该轮，整批其他已审阅来源在重启后仍保持覆盖', async () => {
     const { db, repo } = createFixture()

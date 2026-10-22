@@ -1415,5 +1415,16 @@
   "第 {0} 级": "Level {0}",
   "暂无备用模型": "No backup models yet",
   "选择备用模型": "Choose a backup model",
-  "读取回退配置失败：{0}": "Could not load fallback settings: {0}"
+  "读取回退配置失败：{0}": "Could not load fallback settings: {0}",
+  "独立配置": "Independent configuration",
+  "留空使用模型 ID": "Leave blank to use the model ID",
+  "请填写模型 ID": "Enter a model ID",
+  "模型名称不能超过 100 个字符": "Model names must be 100 characters or fewer",
+  "请检查{0}的数值": "Check the value for {0}",
+  "请检查以下配置": "Check these settings",
+  "未设置地址": "No URL configured",
+  "{0}：{1}": "{0}: {1}",
+  "各群独立观察与冷却，群内单独配置优先于默认策略": "Each group has its own review and cooldown. Group overrides take precedence over defaults.",
+  "每群主动观察间隔（秒）": "Review interval per group (seconds)",
+  "可在社交回合中解除互聊限制。": "You can lift conversation limits in Social turns."
 }

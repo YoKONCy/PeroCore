@@ -5,18 +5,16 @@
  * 调用方依赖这里的稳定契约，不直接耦合底层传输或运行时实现。
  */
 import { ref, watch } from 'vue'
+import { resolveSavedMotionLevel, type MotionLevel } from '../../lib/sensorySettings'
 
-export type MotionLevel = 'full' | 'reduced' | 'off'
+export type { MotionLevel } from '../../lib/sensorySettings'
 
 const MOTION_KEY = 'infos.ui.motionLevel'
 const SOUND_KEY = 'infos.ui.soundEffects'
 const SOUND_VOLUME_KEY = 'infos.ui.soundVolume'
 
 function initialMotionLevel(): MotionLevel {
-  const saved = localStorage.getItem(MOTION_KEY)
-  if (saved === 'full' || saved === 'reduced' || saved === 'off') return saved
-  // 首次默认完整动效，用户可在设置中手动调整
-  return 'full'
+  return resolveSavedMotionLevel(localStorage.getItem(MOTION_KEY), undefined)
 }
 
 function initialBoolean(key: string, fallback: boolean): boolean {

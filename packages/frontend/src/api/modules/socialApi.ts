@@ -13,6 +13,8 @@ import type {
   StatusCardImage,
   SocialTurnListItem,
   SocialBotMark,
+  SocialSchedulerConfig,
+  SocialTurnKind,
 } from '@infos/shared'
 import { apiClient } from '../client'
 import { configApi } from './configApi'
@@ -30,16 +32,7 @@ export interface SocialStatusData {
   adapters: AdapterStatus[]
 }
 
-export interface SocialModeConfig {
-  proactiveGroupEnabled: boolean
-  minMessagesForReview: number
-  nightSilenceEnabled: boolean
-  nightSilenceStart: number
-  nightSilenceEnd: number
-  taskTimeoutMinutes: number
-  modelIdleMinutes: number
-  modelRequestMinutes: number
-  maxRetries: number
+export interface SocialModeConfig extends SocialSchedulerConfig {
   strangerPolicy: 'allow' | 'ignore'
   groupWhitelist: string[]
   groupBlacklist: string[]
@@ -139,8 +132,10 @@ export const socialApi = {
   send: (content: string) => apiClient.post('/social/send', { content }),
 
   getModeConfig: () => apiClient.get<SocialModeConfig>('/social/mode-config'),
-  turns: (agentId: string) =>
-    apiClient.get<SocialTurnListItem[]>(`/social/turns/${encodeURIComponent(agentId)}`),
+  turns: (agentId: string, kind?: SocialTurnKind) =>
+    apiClient.get<SocialTurnListItem[]>(
+      `/social/turns/${encodeURIComponent(agentId)}${kind ? `?kind=${kind}` : ''}`,
+    ),
   cancelTurn: (id: string) =>
     apiClient.post<void>(`/social/turns/${encodeURIComponent(id)}/cancel`),
   allowLimitedConversation: (

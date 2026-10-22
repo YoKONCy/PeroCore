@@ -2,6 +2,7 @@ import { currentKernelExecution } from '../kernel/executionContext'
 import type { KernelOutboxRepository } from '../kernel/kernelOutboxRepository'
 import type Database from 'better-sqlite3'
 import type { SocialTurnRecord } from '@infos/shared'
+import { getSocialTurnKind, SOCIAL_DELEGATED_TURN_PREFIX, type SocialTurnKind } from '@infos/shared'
 import type {
   SocialContactImpressionRecord,
   SocialMessageRecord,
@@ -22,7 +23,9 @@ export class SqliteSocialStoragePort implements SocialStoragePort {
     const row = this.db.prepare('SELECT record_json FROM social_turns WHERE id=?').get(id) as
       | { record_json: string }
       | undefined
-    return row ? (JSON.parse(row.record_json) as SocialTurnRecord) : null
+    if (!row) return null
+    const record = JSON.parse(row.record_json) as SocialTurnRecord
+    return { ...record, kind: getSocialTurnKind(record) }
   }
 
   async saveTurn(record: SocialTurnRecord): Promise<void> {
@@ -45,7 +48,7 @@ export class SqliteSocialStoragePort implements SocialStoragePort {
         record.channelType,
         record.channelId,
         record.status,
-        JSON.stringify(record),
+        JSON.stringify({ ...record, kind: getSocialTurnKind(record) }),
         record.updatedAt,
       )
   }
@@ -53,21 +56,33 @@ export class SqliteSocialStoragePort implements SocialStoragePort {
   async listRecoverableTurns(
     agentId: string,
     includeTerminal = false,
+    kind?: SocialTurnKind,
   ): Promise<SocialTurnRecord[]> {
+    // 在终态数量限制前筛选分类，避免大量聊天回合挤掉真正的任务。
+    const kindFilter = kind
+      ? ` AND CASE
+      WHEN json_extract(record_json,'$.kind') IN ('conversation','task')
+        THEN json_extract(record_json,'$.kind')
+      WHEN id GLOB ? THEN 'task' ELSE 'conversation' END = ?`
+      : ''
+    const args = kind ? [agentId, `${SOCIAL_DELEGATED_TURN_PREFIX}*`, kind] : [agentId]
     const rows = this.db
       .prepare(
-        "SELECT record_json FROM social_turns WHERE agent_id=? AND status IN ('running','retrying','waiting') ORDER BY updated_at DESC",
+        `SELECT record_json FROM social_turns WHERE agent_id=? AND status IN ('running','retrying','waiting')${kindFilter} ORDER BY updated_at DESC`,
       )
-      .all(agentId) as Array<{ record_json: string }>
+      .all(...args) as Array<{ record_json: string }>
     if (includeTerminal)
       rows.push(
         ...(this.db
           .prepare(
-            "SELECT record_json FROM social_turns WHERE agent_id=? AND status NOT IN ('running','retrying','waiting') ORDER BY updated_at DESC LIMIT 100",
+            `SELECT record_json FROM social_turns WHERE agent_id=? AND status NOT IN ('running','retrying','waiting')${kindFilter} ORDER BY updated_at DESC LIMIT 100`,
           )
-          .all(agentId) as Array<{ record_json: string }>),
+          .all(...args) as Array<{ record_json: string }>),
       )
-    return rows.map((row) => JSON.parse(row.record_json) as SocialTurnRecord)
+    return rows.map((row) => {
+      const record = JSON.parse(row.record_json) as SocialTurnRecord
+      return { ...record, kind: getSocialTurnKind(record) }
+    })
   }
 
   async deleteTurns(agentId: string, channelType?: string, channelId?: string): Promise<void> {

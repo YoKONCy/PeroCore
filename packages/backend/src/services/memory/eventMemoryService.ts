@@ -7,6 +7,7 @@ import type {
   EventNoteArchiveResult,
   EventNoteDetail,
   EventNoteDraftInput,
+  EventNoteManualEditInput,
   EventNoteQuery,
   EventNoteQueryPath,
   EventNoteQueryResult,
@@ -19,7 +20,11 @@ import type { EmbeddingService } from '../embedding/embeddingService'
 import type { ContextRnnRuntime } from '../retrieval/contextRnnRuntime'
 import { isContextRnnFeedbackEnabled, type MemoryRuntimeConfig } from './memoryRuntimeConfig'
 import type { MemoryStoreRegistry } from '../../repositories/storeRegistry'
-import { EventNoteRepository, type StoredEventNote } from '../../repositories/eventNote.repo'
+import {
+  EventNoteRepository,
+  type StoredEventNote,
+  type ManualEventRevision,
+} from '../../repositories/eventNote.repo'
 import { createLogger } from '../../lib/logger'
 import { tokenCounter } from '../tokenizer/tokenCounter'
 import type { PrivacyPolicy } from '../maintenance/privacyPolicy'
@@ -84,6 +89,7 @@ export interface AutomaticRagTrace {
 }
 
 export class EventMemoryService {
+  private manualEdits = new Map<string, Promise<EventNote>>()
   private background?: import('@infos/shared').MemoryBackgroundPolicy
   setBackgroundPolicy(policy: import('@infos/shared').MemoryBackgroundPolicy): void {
     this.background = policy
@@ -242,6 +248,111 @@ export class EventMemoryService {
     return note
   }
 
+  /** 人工修订独立于聊天记事：不新增覆盖记录，也不触发反思改写。 */
+  edit(id: string, input: EventNoteManualEditInput): Promise<EventNote> {
+    const key = `${id}:${input.operationId}`
+    const running = this.manualEdits.get(key)
+    if (running) return running
+    const pending = this.editOnce(id, input).finally(() => this.manualEdits.delete(key))
+    this.manualEdits.set(key, pending)
+    return pending
+  }
+
+  private async editOnce(id: string, input: EventNoteManualEditInput): Promise<EventNote> {
+    const existing = await this.repo.findOperation(input.operationId)
+    if (existing) {
+      const payload = existing.payload as {
+        target: StoredEventNote
+        replacement: EventNote
+        newTdbId: number
+        relations: EventNoteRelationView[]
+        manualEdit?: ManualEventRevision
+      }
+      if (existing.operation !== 'revise' || !payload.manualEdit || payload.target.id !== id)
+        throw new Error('ARCHIVE_EDIT_CONFLICT')
+      const latest = await this.repo.findById(payload.replacement.id)
+      if (!latest || latest.replacedBy) throw new Error('ARCHIVE_EDIT_CONFLICT')
+      if (existing.status !== 'committed') {
+        await this.applyRevise(
+          input.operationId,
+          payload.target,
+          payload.replacement,
+          payload.newTdbId,
+          payload.relations,
+          undefined,
+          payload.manualEdit,
+        )
+      }
+      this.invalidateForDeletion()
+      return { ...payload.replacement, status: latest.status }
+    }
+    this.validateDraft(input)
+    const target = await this.repo.findById(id)
+    if (!target || target.replacedBy || target.status !== input.expectedStatus)
+      throw new Error('ARCHIVE_EDIT_CONFLICT')
+    if (await this.repo.hasPendingWrite(id)) throw new Error('ARCHIVE_EDIT_PENDING')
+    const generation = this.privacy?.generation
+    const revision = this.retrievalRevision
+    const store = this.stores.getAgentStore(target.agentId, 'main')
+    if (!store.contains(target.tdbId)) throw new Error('ARCHIVE_EDIT_PENDING')
+    if (input.regenerateVector && !this.embeddings.isAvailable)
+      throw new Error('ARCHIVE_EDIT_EMBEDDING_UNAVAILABLE')
+    // 向量先准备完再创建修订事务，模型失败不会产生半份人工修订。
+    const vector = input.regenerateVector
+      ? await this.safeVector(input.narrative.trim())
+      : Array.from(store.get(target.tdbId)?.vector ?? [])
+    if (input.regenerateVector && !this.embeddings.isAvailable)
+      throw new Error('ARCHIVE_EDIT_EMBEDDING_UNAVAILABLE')
+    if (vector.length !== this.stores.getDimension()) throw new Error('ARCHIVE_EDIT_NOT_READY')
+    if (generation !== this.privacy?.generation || revision !== this.retrievalRevision)
+      throw new Error('ARCHIVE_EDIT_CONFLICT')
+    const replacement: EventNote = {
+      id: randomUUID(),
+      agentId: target.agentId,
+      eventAt: target.eventAt,
+      status: target.status,
+      narrative: input.narrative.trim(),
+      createdAt: new Date().toISOString(),
+      importance: input.importance,
+      affect: input.affect,
+      participants: input.participants ?? target.participants,
+      places: input.places ?? target.places,
+      objects: input.objects ?? target.objects,
+      topics: input.topics ?? target.topics,
+      origin: {
+        ...target.origin,
+        manualEdit: {
+          actor: 'user',
+          previousId: target.id,
+          editedAt: new Date().toISOString(),
+        },
+      },
+    }
+    const newTdbId = await this.allocateTdbId()
+    const relations = await this.repo.listRelations(id)
+    const manualEdit: ManualEventRevision = { actor: 'user', vector }
+    const prepared = await this.repo.prepareRevise(
+      input.operationId,
+      target,
+      replacement,
+      newTdbId,
+      relations,
+      manualEdit,
+    )
+    if (!prepared) return this.editOnce(id, input)
+    await this.applyRevise(
+      input.operationId,
+      target,
+      replacement,
+      newTdbId,
+      relations,
+      undefined,
+      manualEdit,
+    )
+    this.invalidateForDeletion()
+    return replacement
+  }
+
   async revise(
     targetId: string,
     input: CreateEventInput,
@@ -291,6 +402,7 @@ export class EventMemoryService {
       topics: input.topics ?? target.topics,
       origin: {
         ...target.origin,
+        manualEdit: undefined,
         pairIds: [...new Set([...target.origin.pairIds, ...input.origin.pairIds])],
         messageIds: [...new Set([...target.origin.messageIds, ...input.origin.messageIds])],
       },
@@ -1068,6 +1180,7 @@ export class EventMemoryService {
             replacement: EventNote
             newTdbId: number
             relations: EventNoteRelationView[]
+            manualEdit?: ManualEventRevision
           }
           await this.applyRevise(
             operation.operationId,
@@ -1075,6 +1188,8 @@ export class EventMemoryService {
             payload.replacement,
             payload.newTdbId,
             payload.relations,
+            undefined,
+            payload.manualEdit,
           )
         }
       } catch (error) {
@@ -1297,15 +1412,23 @@ export class EventMemoryService {
     newTdbId: number,
     relations: EventNoteRelationView[],
     signal?: AbortSignal,
+    manualEdit?: ManualEventRevision,
   ): Promise<void> {
     signal?.throwIfAborted()
     const generation = this.privacy?.generation
     const indexRevision = this.retrievalRevision
     try {
       this.privacy?.assertPayload('memory', { target, replacement })
+      // 更晚的修订已接管该条目时，旧事务只结算，不得复活过期节点。
+      const latest = await this.repo.findById(replacement.id)
+      if (latest?.replacedBy) {
+        await this.repo.markOperationCommitted(operationId)
+        return
+      }
+      this.privacy?.assertPayload('memory', { target, replacement })
       const store = this.stores.getAgentStore(target.agentId, 'main')
       if (!store.contains(newTdbId)) {
-        const vector = await this.safeVector(replacement.narrative, signal)
+        const vector = manualEdit?.vector ?? (await this.safeVector(replacement.narrative, signal))
         signal?.throwIfAborted()
         if (generation !== this.privacy?.generation || indexRevision !== this.retrievalRevision)
           throw new Error('记忆数据或索引已变化，已停止旧修订')
@@ -1318,7 +1441,9 @@ export class EventMemoryService {
             payload: { ...replacement, kind: 'event_note', operationId },
           },
         ]
-        for (const edge of store.getIncomingEdges(target.tdbId))
+        for (const edge of store
+          .getIncomingEdges(target.tdbId)
+          .filter((edge) => !manualEdit || !edge.label.startsWith('involves_')))
           operations.push({
             type: 'upsertEdge',
             src: edge.sourceId,
@@ -1326,7 +1451,9 @@ export class EventMemoryService {
             label: edge.label,
             weight: edge.weight,
           })
-        for (const edge of store.getEdges(target.tdbId))
+        for (const edge of store
+          .getEdges(target.tdbId)
+          .filter((edge) => !manualEdit || !edge.label.startsWith('involves_')))
           operations.push({
             type: 'upsertEdge',
             src: newTdbId,
@@ -1336,8 +1463,11 @@ export class EventMemoryService {
           })
         operations.push({ type: 'delete', id: target.tdbId })
         store.commitTransaction(operations)
-        store.indexText(newTdbId, replacement.narrative)
       }
+      // 索引失败后重放也必须补齐文本，不能只以节点已存在判断完成。
+      store.indexText(newTdbId, replacement.narrative)
+      // 新实体不额外调用向量模型，避免绕过用户的向量选项。
+      if (manualEdit) await this.ensureEntityRelations(replacement, newTdbId, new Map(), signal)
       for (const relation of relations) {
         signal?.throwIfAborted()
         const sourceId = relation.sourceId === target.id ? replacement.id : relation.sourceId

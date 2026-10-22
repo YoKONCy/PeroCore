@@ -1,5 +1,8 @@
 // 按模块、语言分别维护词库；此入口只装配当前运行端需要的资源。
 import { registerCatalog } from '../index'
+import archiveEditZhCn from '../locales/zh-CN/server/archive-edit.json'
+import archiveEditZhTw from '../locales/zh-TW/server/archive-edit.json'
+import archiveEditEnUs from '../locales/en-US/server/archive-edit.json'
 import messages0 from '../locales/zh-CN/common/tools.json'
 import messages1 from '../locales/zh-TW/common/tools.json'
 import messages2 from '../locales/en-US/common/tools.json'
@@ -432,3 +435,6 @@ registerCatalog('logs.prompt', 'en-US', messages212)
 registerCatalog('logs.daemon', 'zh-CN', messages213)
 registerCatalog('logs.daemon', 'zh-TW', messages214)
 registerCatalog('logs.daemon', 'en-US', messages215)
+registerCatalog('server.archive-edit', 'zh-CN', archiveEditZhCn)
+registerCatalog('server.archive-edit', 'zh-TW', archiveEditZhTw)
+registerCatalog('server.archive-edit', 'en-US', archiveEditEnUs)

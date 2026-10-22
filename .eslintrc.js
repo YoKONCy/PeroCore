@@ -148,6 +148,8 @@ module.exports = {
     },
   ],
   ignorePatterns: [
+    // 临时调查、设计和验收资料不属于发布源码。
+    '/TEMP/',
     'dist',
     'dist-electron',
     'dist-daemon',

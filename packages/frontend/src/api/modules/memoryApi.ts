@@ -3,6 +3,8 @@ import type {
   EventNoteArchiveFilter,
   EventNoteArchiveResult,
   EventNoteDetail,
+  EventNote,
+  EventNoteManualEditInput,
 } from '@infos/shared'
 import { apiClient } from '../client'
 
@@ -37,6 +39,8 @@ function toSearchParams(filter: Partial<EventNoteArchiveFilter>): string {
 }
 
 export const memoryApi = {
+  edit: (id: string, input: EventNoteManualEditInput) =>
+    apiClient.patch<EventNote>(`/memories/${encodeURIComponent(id)}`, input),
   /** 核心记忆档案：组合过滤 + 分页 + facets + stats */
   archive: (filter: Partial<EventNoteArchiveFilter>) =>
     apiClient.get<EventNoteArchiveResult>(`/memories?${toSearchParams(filter)}`),

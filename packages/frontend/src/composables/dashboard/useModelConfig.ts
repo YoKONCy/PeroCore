@@ -15,6 +15,8 @@ import type { ModelConfigItem, ReasoningEffort } from '../../api/modules/modelAp
 import { configApi } from '../../api/modules/configApi'
 import { useNotificationStore } from '../../stores/useNotificationStore'
 import { logger } from '../../lib/logger'
+import { ApiError } from '../../api/errors'
+import { prepareModelPayload, type ModelEditorErrors } from '../../lib/modelEditor'
 import { EMBEDDING_ENABLED_KEY } from '@infos/shared'
 import { useConfigSwitch } from './useConfigSwitch'
 import {
@@ -236,6 +238,9 @@ export function useModelConfig() {
 
   // ── 编辑弹窗 ──
   const isEditorOpen = ref(false)
+  const isSavingModel = ref(false)
+  const isReadingConnection = ref(false)
+  const editorErrors = ref<ModelEditorErrors>({})
   const editingModel = ref<LlmModel | null>(null)
   const editorForm = ref<LlmModel>({
     id: '',
@@ -283,7 +288,25 @@ export function useModelConfig() {
     }
   }
 
-  function handleConnectionChange(id: string): void {
+  async function handleConnectionChange(id: string): Promise<void> {
+    if (isReadingConnection.value || isSavingModel.value) return
+    if (!id) {
+      const previousId = editorForm.value.providerConnectionId
+      if (previousId && !editorForm.value.connectionOverride) {
+        await setConnectionOverride(true)
+        if (
+          !isEditorOpen.value ||
+          editorForm.value.providerConnectionId !== previousId ||
+          !editorForm.value.connectionOverride
+        )
+          return
+      }
+      editorForm.value.providerConnectionId = null
+      editorForm.value.connectionOverride = true
+      remoteModels.value = []
+      editorErrors.value = {}
+      return
+    }
     const connection = providerConnections.value.find((item) => item.id === id)
     if (!connection) return
     Object.assign(editorForm.value, {
@@ -296,15 +319,18 @@ export function useModelConfig() {
       apiKey: '',
     })
     remoteModels.value = []
+    editorErrors.value = {}
   }
 
   async function setConnectionOverride(enabled: boolean): Promise<void> {
+    if (isReadingConnection.value || isSavingModel.value) return
     if (!enabled) {
       editorForm.value.connectionOverride = false
       return
     }
     const id = editorForm.value.providerConnectionId
     if (!id) return
+    isReadingConnection.value = true
     try {
       const connection = (await providerApi.get(id)).data
       if (!connection) throw new Error('服务商连接不存在')
@@ -319,7 +345,23 @@ export function useModelConfig() {
       })
     } catch (e) {
       notify.toast(__t('ui.settings', '读取连接配置失败：') + (e as Error).message, 'error')
+    } finally {
+      isReadingConnection.value = false
     }
+  }
+
+  /** 独立卡片可直接选择模板，地址与协议仍允许自行修改。 */
+  function handleProviderChange(provider: string): void {
+    Object.assign(editorForm.value, {
+      provider,
+      connectionProtocol:
+        provider === 'gemini' ? 'gemini' : provider === 'anthropic' ? 'anthropic' : 'openai',
+      connectionAuthMode: provider === 'ollama' ? 'none' : 'api_key',
+      apiBase: providerDefaults[provider] || '',
+      apiKey: '',
+    })
+    remoteModels.value = []
+    editorErrors.value = {}
   }
 
   // ── 向量配置 ──
@@ -581,6 +623,8 @@ export function useModelConfig() {
   }
 
   async function openEditor(model: LlmModel | null): Promise<void> {
+    if (isSavingModel.value || isReadingConnection.value) return
+    editorErrors.value = {}
     await loadConnections()
     if (model) {
       editingModel.value = model
@@ -614,16 +658,14 @@ export function useModelConfig() {
         enableAudioInput: false,
         temperature: null,
         topP: null,
-        apiBase: '',
+        apiBase: providerDefaults.openai,
         apiKey: '',
         providerType: 'openai',
         providerConnectionId: null,
-        connectionOverride: false,
+        connectionOverride: true,
         connectionProtocol: 'openai',
         connectionAuthMode: 'api_key',
       }
-      const first = providerConnections.value[0]
-      if (first) handleConnectionChange(first.id)
     }
     remoteModels.value = []
     isEditorOpen.value = true
@@ -631,72 +673,41 @@ export function useModelConfig() {
 
   /** 保存模型（创建或更新） */
   async function saveModel(): Promise<void> {
-    isLoading.value = true
+    if (isSavingModel.value || isReadingConnection.value) return
+    const { payload, errors } = prepareModelPayload(editorForm.value)
+    editorErrors.value = errors
+    if (Object.keys(errors).length > 0) return
+    const editingId = editingModel.value?.id
+    isSavingModel.value = true
     try {
-      const form = editorForm.value
-      if (!form.providerConnectionId && !editingModel.value)
-        throw new Error('请先创建并选择服务商连接')
-      if (editingModel.value) {
-        // 更新
-        await modelApi.update(editingModel.value.id, {
-          name: form.name,
-          provider: form.provider,
-          providerConnectionId: form.providerConnectionId,
-          connectionOverride: form.connectionOverride,
-          connectionProtocol: form.connectionProtocol,
-          connectionAuthMode: form.connectionAuthMode,
-          modelId: form.modelId,
-          apiKey: form.connectionAuthMode === 'none' ? '' : form.apiKey || '',
-          apiBase: form.apiBase || '',
-          temperature: form.temperature,
-          topP: form.topP,
-          maxTokens: form.maxTokens,
-          contextWindowTokens: form.contextWindowTokens,
-          maxReActTurns: form.maxReActTurns,
-          reasoningEffort: form.reasoningEffort,
-          returnNativeReasoning: form.returnNativeReasoning,
-          wireApi: form.wireApi,
-          reasoningDialect: form.reasoningDialect,
-          stream: form.stream,
-          enableVision: form.enableVision,
-          enableAudioInput: form.enableAudioInput,
-        })
-        notify.toast(__t('ui.settings', '模型 "{0}" 已更新', [form.name]), 'success')
+      if (editingId) {
+        await modelApi.update(editingId, payload)
+        notify.toast(__t('ui.settings', '模型 "{0}" 已更新', [payload.name]), 'success')
       } else {
-        // 创建
-        await modelApi.create({
-          name: form.name,
-          provider: form.provider,
-          providerConnectionId: form.providerConnectionId,
-          connectionOverride: form.connectionOverride,
-          connectionProtocol: form.connectionProtocol,
-          connectionAuthMode: form.connectionAuthMode,
-          modelId: form.modelId,
-          apiKey: form.connectionAuthMode === 'none' ? '' : form.apiKey || '',
-          apiBase: form.apiBase || '',
-          temperature: form.temperature,
-          topP: form.topP,
-          maxTokens: form.maxTokens,
-          contextWindowTokens: form.contextWindowTokens,
-          maxReActTurns: form.maxReActTurns,
-          reasoningEffort: form.reasoningEffort,
-          returnNativeReasoning: form.returnNativeReasoning,
-          wireApi: form.wireApi,
-          reasoningDialect: form.reasoningDialect,
-          stream: form.stream,
-          enableVision: form.enableVision,
-          enableAudioInput: form.enableAudioInput,
-        })
-        notify.toast(__t('ui.settings', '模型 "{0}" 已添加', [form.name]), 'success')
+        await modelApi.create(payload)
+        notify.toast(__t('ui.settings', '模型 "{0}" 已添加', [payload.name]), 'success')
       }
       isEditorOpen.value = false
       await fetchModels()
       window.dispatchEvent(new CustomEvent('infos:model-capabilities-changed'))
     } catch (e) {
       error.value = (e as Error).message
-      notify.toast(__t('ui.settings', '保存模型失败: ') + (e as Error).message, 'error')
+      const fields =
+        e instanceof ApiError && e.code === 'VALIDATION_ERROR'
+          ? (e.data as { fields?: unknown } | undefined)?.fields
+          : undefined
+      if (fields && typeof fields === 'object' && !Array.isArray(fields)) {
+        editorErrors.value = Object.fromEntries(
+          Object.entries(fields).filter(
+            (entry): entry is [string, string] => typeof entry[1] === 'string',
+          ),
+        )
+      }
+      if (Object.keys(editorErrors.value).length === 0) {
+        editorErrors.value = { _root: (e as Error).message }
+      }
     } finally {
-      isLoading.value = false
+      isSavingModel.value = false
     }
   }
 
@@ -1036,6 +1047,9 @@ export function useModelConfig() {
     isEditorOpen,
     editingModel,
     editorForm,
+    editorErrors,
+    isSavingModel,
+    isReadingConnection,
     openEditor,
     saveModel,
     deleteModel,
@@ -1059,6 +1073,7 @@ export function useModelConfig() {
     selectedConnection,
     loadConnections,
     handleConnectionChange,
+    handleProviderChange,
     setConnectionOverride,
     // 多模态转述
     relayEnabled,

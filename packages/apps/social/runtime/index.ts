@@ -96,6 +96,13 @@ import { createSocialRouter } from './social.router'
 import { SocialStatusCardService } from './statusCardService'
 import { DEFAULT_STATUS_CARD_DESIGN } from '@infos/shared'
 import { SOCIAL_BUSINESS_TOOLS, type SocialBusinessTool } from '@infos/shared'
+import {
+  DEFAULT_SOCIAL_SCHEDULER_CONFIG,
+  normalizeSocialSchedulerConfig,
+  normalizeSocialGroupPolicies,
+  socialGroupPolicyKey,
+  type SocialGroupPolicies,
+} from '@infos/shared'
 import { SocialOperations, socialImageData, type SocialOperationScope } from './socialOperations'
 import { socialOwnerId } from './socialMessageContext'
 import { fileURLToPath } from 'node:url'
@@ -172,15 +179,8 @@ export class SocialAppRuntime implements AgentAppRuntime {
   private ownerQq: string | undefined
   private releaseTaskDelivery?: () => void
   private modeConfig = {
-    proactiveGroupEnabled: true,
-    minMessagesForReview: 3,
-    nightSilenceEnabled: true,
-    nightSilenceStart: 0,
-    nightSilenceEnd: 8,
-    taskTimeoutMinutes: 360,
-    modelIdleMinutes: 10,
-    modelRequestMinutes: 30,
-    maxRetries: 2,
+    ...DEFAULT_SOCIAL_SCHEDULER_CONFIG,
+    groupPolicies: {} as SocialGroupPolicies,
     strangerPolicy: 'allow' as 'allow' | 'ignore',
     groupWhitelist: [] as string[],
     groupBlacklist: [] as string[],
@@ -342,7 +342,11 @@ export class SocialAppRuntime implements AgentAppRuntime {
         shouldAllowSession: (session) =>
           session.agentId === this.socialAgentId &&
           (!this.modeConfig.ownerPrivateOnlyAgentIds.includes(session.agentId) ||
-            (session.channelType === 'private' && session.channelId === this.ownerQq)),
+            (session.channelType === 'private' && session.channelId === this.ownerQq)) &&
+          (session.channelType !== 'group' ||
+            (!this.modeConfig.groupBlacklist.includes(session.channelId) &&
+              (!this.modeConfig.groupWhitelist.length ||
+                this.modeConfig.groupWhitelist.includes(session.channelId)))),
         onMessagePersisted: async (agentId) => {
           if (!this.socialScorer || this.socialScorerRunning.has(agentId)) return
           this.socialScorerRunning.add(agentId)
@@ -445,6 +449,18 @@ export class SocialAppRuntime implements AgentAppRuntime {
         active: (agentId) => this.running && agentId === this.socialAgentId,
         config: ctx.configRepo,
         storage: this.socialMessageRepo,
+        groupState: (scope, groupId) => this.getGroupState(scope.agentId, scope.accountId, groupId),
+        configureGroupState: async (scope, groupId, policy, reset) => {
+          const key = socialGroupPolicyKey(scope.agentId, scope.accountId, groupId)
+          await this.updateModeConfig((current) => {
+            scope.signal?.throwIfAborted()
+            const groupPolicies = { ...current.groupPolicies }
+            if (reset) delete groupPolicies[key]
+            else groupPolicies[key] = { ...groupPolicies[key], ...policy }
+            return { groupPolicies }
+          })
+          return this.getGroupState(scope.agentId, scope.accountId, groupId)
+        },
         markBot: async (scope, input) => {
           if (!this.loopGuard) throw new Error('社交互聊保护尚未就绪')
           return this.loopGuard.markBot(scope, input)
@@ -877,6 +893,9 @@ export class SocialAppRuntime implements AgentAppRuntime {
     if (!keys.includes('social') || !this.ctx || this.lifetime.signal.aborted) return
     const config = await this.readSocialConfig(this.ctx)
     if (this.lifetime.signal.aborted) return
+    if (config.mode && typeof config.mode === 'object' && !Array.isArray(config.mode)) {
+      this.applyModeConfig(this.normalizeModeConfig(config.mode as Record<string, unknown>))
+    }
     const ownerQq = socialOwnerId(config.ownerQq)
     if (ownerQq === this.ownerQq) return
     this.ownerQq = ownerQq
@@ -908,37 +927,59 @@ export class SocialAppRuntime implements AgentAppRuntime {
   ) {
     return this.serializeConfigWrite(async () => {
       if (!this.ctx?.configRepo) throw new Error('社交配置服务尚未就绪')
-      const patch = typeof config === 'function' ? config(this.modeConfig) : config
-      const next = { ...this.modeConfig, ...patch }
-      next.loopGuard = normalizeLoopPolicy({
-        ...this.modeConfig.loopGuard,
-        ...(patch.loopGuard &&
-        typeof patch.loopGuard === 'object' &&
-        !Array.isArray(patch.loopGuard)
-          ? patch.loopGuard
-          : {}),
-      })
-      next.minMessagesForReview = Math.min(Math.max(Number(next.minMessagesForReview), 1), 20)
-      next.nightSilenceStart = Math.min(Math.max(Number(next.nightSilenceStart), 0), 23)
-      next.nightSilenceEnd = Math.min(Math.max(Number(next.nightSilenceEnd), 0), 23)
-      next.groupWhitelist = Array.isArray(next.groupWhitelist)
-        ? next.groupWhitelist.map(String)
-        : []
-      next.groupBlacklist = Array.isArray(next.groupBlacklist)
-        ? next.groupBlacklist.map(String)
-        : []
-      next.userBlacklist = Array.isArray(next.userBlacklist) ? next.userBlacklist.map(String) : []
-      next.ownerPrivateOnlyAgentIds = Array.isArray(next.ownerPrivateOnlyAgentIds)
-        ? [...new Set(next.ownerPrivateOnlyAgentIds.map(String))]
-        : []
-      Object.assign(next, this.socialBridge?.updateSchedulerConfig(next) ?? {})
-      const raw = await this.ctx.configRepo.get('social')
-      const current = raw ? (JSON.parse(raw) as Record<string, unknown>) : {}
+      const current = await this.readSocialConfig(this.ctx)
+      const base =
+        current.mode && typeof current.mode === 'object' && !Array.isArray(current.mode)
+          ? this.normalizeModeConfig(current.mode as Record<string, unknown>)
+          : this.modeConfig
+      const patch = typeof config === 'function' ? config(base) : config
+      const next = this.normalizeModeConfig(patch, base)
       current.mode = next
       await this.ctx.configRepo.set('social', JSON.stringify(current))
-      this.modeConfig = next
+      // 保存失败时不改动运行时；成功后设置页、工具读回和调度器使用同一份归一化结果。
+      this.applyModeConfig(next)
       return { ...next }
     })
+  }
+
+  private normalizeModeConfig(config: Record<string, unknown>, base = this.modeConfig) {
+    const next = {
+      ...base,
+      ...config,
+      ...normalizeSocialSchedulerConfig({ ...base, ...config }),
+    }
+    next.groupPolicies = normalizeSocialGroupPolicies(next.groupPolicies)
+    next.loopGuard = normalizeLoopPolicy({
+      ...base.loopGuard,
+      ...(config.loopGuard &&
+      typeof config.loopGuard === 'object' &&
+      !Array.isArray(config.loopGuard)
+        ? config.loopGuard
+        : {}),
+    })
+    next.groupWhitelist = Array.isArray(next.groupWhitelist) ? next.groupWhitelist.map(String) : []
+    next.groupBlacklist = Array.isArray(next.groupBlacklist) ? next.groupBlacklist.map(String) : []
+    next.userBlacklist = Array.isArray(next.userBlacklist) ? next.userBlacklist.map(String) : []
+    next.ownerPrivateOnlyAgentIds = Array.isArray(next.ownerPrivateOnlyAgentIds)
+      ? [...new Set(next.ownerPrivateOnlyAgentIds.map(String))]
+      : []
+    return next
+  }
+
+  private applyModeConfig(config: typeof this.modeConfig): void {
+    this.modeConfig = config
+    this.socialBridge?.updateSchedulerConfig(config)
+    this.socialBridge?.updateGroupPolicies(config.groupPolicies)
+  }
+
+  private getGroupState(agentId: string, accountId: string, groupId: string) {
+    if (!this.socialBridge) throw new Error('群聊状态机尚未初始化')
+    return {
+      ...this.socialBridge.getGroupState(agentId, accountId, groupId),
+      override: {
+        ...this.modeConfig.groupPolicies[socialGroupPolicyKey(agentId, accountId, groupId)],
+      },
+    }
   }
 
   private serializeConfigWrite<T>(write: () => Promise<T>): Promise<T> {
@@ -1041,28 +1082,7 @@ export class SocialAppRuntime implements AgentAppRuntime {
       this.ownerQq = socialOwnerId(socialConfig.ownerQq)
       const mode = socialConfig.mode
       if (mode && typeof mode === 'object' && !Array.isArray(mode)) {
-        const configured = mode as Partial<typeof this.modeConfig>
-        this.modeConfig = {
-          ...this.modeConfig,
-          ...configured,
-          loopGuard: normalizeLoopPolicy(configured.loopGuard ?? DEFAULT_LOOP_POLICY),
-          groupWhitelist: Array.isArray(configured.groupWhitelist)
-            ? configured.groupWhitelist.map(String)
-            : [],
-          groupBlacklist: Array.isArray(configured.groupBlacklist)
-            ? configured.groupBlacklist.map(String)
-            : [],
-          userBlacklist: Array.isArray(configured.userBlacklist)
-            ? configured.userBlacklist.map(String)
-            : [],
-          ownerPrivateOnlyAgentIds: Array.isArray(configured.ownerPrivateOnlyAgentIds)
-            ? [...new Set(configured.ownerPrivateOnlyAgentIds.map(String))]
-            : [],
-        }
-        Object.assign(
-          this.modeConfig,
-          this.socialBridge?.updateSchedulerConfig(this.modeConfig) ?? {},
-        )
+        this.applyModeConfig(this.normalizeModeConfig(mode as Record<string, unknown>))
       }
     }
 
@@ -1339,6 +1359,9 @@ export class SocialAppRuntime implements AgentAppRuntime {
       `触发方式: ${params.trigger}`,
       `当前参与关系: ${params.participation}`,
       params.trigger === 'proactive_review' ? '没有人要求你回复；是否参与完全由你自己决定。' : '',
+      channelType === 'group' && stickerAccountId
+        ? `当前群状态机（真实运行状态，时间为 Unix 毫秒）：${JSON.stringify(this.getGroupState(agentId, stickerAccountId, channelId))}`
+        : '',
       params.deferredIntent
         ? `你之前想稍后重新考虑：${params.deferredIntent.intention}${params.deferredIntent.condition ? `；当时的条件：${params.deferredIntent.condition}` : ''}`
         : '',

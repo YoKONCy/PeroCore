@@ -13,5 +13,6 @@
   "停止 NapCat 失败：{0}": "Stop NapCat failed: {0}",
   "关闭 Pictoria 存活连接失败：{0}": "Shut down Pictoria Survival connection failed: {0}",
   "关闭 Arca 存活连接失败：{0}": "Close Arca survival connection failed: {0}",
-  "第二个实例启动请求，激活现有窗口": "Second instance start request, activate existing window"
+  "第二个实例启动请求，激活现有窗口": "Second instance start request, activate existing window",
+  "停止内置 Daemon 失败：{0}": "Failed to stop bundled Daemon: {0}"
 }

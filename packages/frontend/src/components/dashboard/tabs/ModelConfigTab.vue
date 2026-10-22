@@ -22,7 +22,8 @@ import {
   PCheckbox,
   PCard,
 } from '../../pixel'
-import { watch, computed, ref } from 'vue'
+import { watch, computed, ref, nextTick } from 'vue'
+import { modelEditorFieldLabel } from '../../../lib/modelEditor'
 import {
   useModelConfig,
   TASK_SLOTS,
@@ -63,6 +64,9 @@ const {
   isEditorOpen,
   editingModel,
   editorForm,
+  editorErrors,
+  isSavingModel,
+  isReadingConnection,
   openEditor,
   saveModel,
   deleteModel,
@@ -76,6 +80,7 @@ const {
   selectedConnection,
   loadConnections,
   handleConnectionChange,
+  handleProviderChange,
   setConnectionOverride,
   embeddingProvider,
   embeddingEnabled,
@@ -114,6 +119,14 @@ const {
   visionModels,
   saveRelayConfig,
 } = useModelConfig()
+
+const editorErrorPanel = ref<HTMLElement | null>(null)
+watch(editorErrors, async (errors) => {
+  if (Object.keys(errors).length === 0) return
+  await nextTick()
+  editorErrorPanel.value?.focus({ preventScroll: true })
+  editorErrorPanel.value?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+})
 
 /** 参数是否应写入 Provider 请求；关闭时统一保存为 null，即完全不传。 */
 const sendTemperature = computed({
@@ -329,6 +342,10 @@ const connectionChoices = computed<BrandSelectOption[]>(() =>
     brand: resolveProviderBrand(connection.brand, connection.apiBase),
   })),
 )
+const editorConnectionChoices = computed<BrandSelectOption[]>(() => [
+  { label: __t('ui.settings', '独立配置'), value: '' },
+  ...connectionChoices.value,
+])
 const modelChoices = computed<BrandSelectOption[]>(() =>
   models.value.map((model) => ({
     label: model.name,
@@ -506,7 +523,11 @@ function connectionName(model: LlmModel) {
         <div class="model-connection-picker">
           <label class="text-[11px] text-slate-400">
             {{ __t('ui.settings', '服务商连接')
-            }}{{ model.connectionOverride ? __t('ui.settings', '（已自定义）') : '' }}
+            }}{{
+              model.providerConnectionId && model.connectionOverride
+                ? __t('ui.settings', '（已自定义）')
+                : ''
+            }}
           </label>
           <BrandSelect
             size="sm"
@@ -515,7 +536,11 @@ function connectionName(model: LlmModel) {
             fallback="provider"
             teleport
             :disabled="switchingConnections[model.id] || modelTests[model.id]?.loading"
-            :placeholder="__t('ui.settings', '选择服务商连接')"
+            :placeholder="
+              model.providerConnectionId
+                ? __t('ui.settings', '选择服务商连接')
+                : __t('ui.settings', '独立配置')
+            "
             @change="(value: string | number) => setModelConnection(model, String(value))"
           />
         </div>
@@ -879,358 +904,406 @@ function connectionName(model: LlmModel) {
       v-model="isEditorOpen"
       :title="editingModel ? __t('ui.settings', '编辑模型') : __t('ui.settings', '添加模型')"
       width="560px"
+      :loading="isSavingModel || isReadingConnection"
     >
       <div class="model-dialog-body flex flex-col gap-4">
-        <div class="flex flex-col gap-1.5">
-          <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
-            {{ __t('ui.settings', '模型名称') }}
-          </label>
-          <PInput v-model="editorForm.name" :placeholder="__t('ui.settings', '给模型起个名字')" />
+        <div
+          v-if="Object.keys(editorErrors).length"
+          ref="editorErrorPanel"
+          class="model-editor-errors"
+          role="alert"
+          tabindex="-1"
+        >
+          <strong>
+            <PixelIcon name="alert" size="sm" />
+            {{ __t('ui.settings', '请检查以下配置') }}
+          </strong>
+          <ul>
+            <li v-for="(message, field) in editorErrors" :key="field">
+              {{
+                field === '_root'
+                  ? message
+                  : __t('ui.settings', '{0}：{1}', [modelEditorFieldLabel(String(field)), message])
+              }}
+            </li>
+          </ul>
         </div>
-        <div class="flex flex-col gap-1.5">
-          <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
-            {{ __t('ui.settings', '服务商连接') }}
-          </label>
-          <BrandSelect
-            :model-value="editorForm.providerConnectionId || ''"
-            :options="connectionChoices"
-            fallback="provider"
-            :placeholder="__t('ui.settings', '选择服务商连接')"
-            @change="(v: string | number) => handleConnectionChange(String(v))"
-          />
-          <div class="flex items-center justify-between gap-2">
-            <PButton size="sm" variant="ghost" @click="isGlobalOpen = true">
-              {{ __t('ui.settings', '管理服务商连接') }}
-            </PButton>
-          </div>
-        </div>
-        <div v-if="selectedConnection" class="connection-summary">
-          <div class="connection-summary__header">
-            <span class="connection-summary__brand">
-              <BrandIcon :brand="connectionSummaryBrand" size="md" fallback="provider" />
-            </span>
-            <div class="connection-summary__identity">
-              <strong :title="selectedConnection.name">{{ selectedConnection.name }}</strong>
-              <span>{{ connectionProtocolLabel }}</span>
-            </div>
-            <span
-              class="connection-summary__auth"
-              :class="{
-                'is-ready': connectionAuthStatus.ready,
-                'is-missing': connectionAuthStatus.missing,
-              }"
-            >
-              <PixelIcon :name="connectionAuthStatus.icon" size="xs" aria-hidden="true" />
-              {{ connectionAuthStatus.label }}
-            </span>
-          </div>
-          <div class="connection-summary__endpoint">
-            <PixelIcon name="link" size="xs" aria-hidden="true" />
-            <code>{{ connectionApiBase || '未设置地址' }}</code>
-          </div>
-          <div class="connection-summary__override">
-            <span>{{ __t('ui.settings', '自定义此模型的连接') }}</span>
-            <PSwitch
-              size="sm"
-              :aria-label="__t('ui.settings', '自定义此模型的连接')"
-              :model-value="editorForm.connectionOverride"
-              @update:model-value="setConnectionOverride"
+        <fieldset class="model-editor-fields" :disabled="isSavingModel || isReadingConnection">
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
+              {{ __t('ui.settings', '模型名称') }}
+            </label>
+            <PInput
+              v-model="editorForm.name"
+              :placeholder="__t('ui.settings', '留空使用模型 ID')"
+              :aria-invalid="!!editorErrors.name"
             />
           </div>
-        </div>
-        <div
-          v-if="editorForm.connectionOverride || !editorForm.providerConnectionId"
-          class="flex flex-col gap-1.5"
-        >
-          <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
-            {{ __t('ui.settings', '协议格式') }}
-          </label>
-          <PSelect v-model="editorForm.connectionProtocol" :options="customProviderTypeOptions" />
-          <p class="text-[10px] text-slate-400">{{ __t('ui.settings', '按服务商文档选择。') }}</p>
-        </div>
-        <div
-          v-if="editorForm.connectionOverride || !editorForm.providerConnectionId"
-          class="flex flex-col gap-1.5"
-        >
-          <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
-            {{ __t('ui.settings', '独立 API 地址') }}
-          </label>
-          <PInput v-model="editorForm.apiBase" placeholder="https://api.example.com/v1" />
-        </div>
-        <div
-          v-if="editorForm.connectionOverride || !editorForm.providerConnectionId"
-          class="flex flex-col gap-1.5"
-        >
-          <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
-            {{ __t('ui.settings', '认证方式') }}
-          </label>
-          <PSelect
-            v-model="editorForm.connectionAuthMode"
-            :options="[
-              { value: 'api_key', label: 'API Key' },
-              { value: 'none', label: __t('ui.settings', '无需认证') },
-            ]"
-          />
-        </div>
-        <div
-          v-if="
-            (editorForm.connectionOverride || !editorForm.providerConnectionId) &&
-            editorForm.connectionAuthMode !== 'none'
-          "
-          class="flex flex-col gap-1.5"
-        >
-          <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
-            {{ __t('ui.settings', '独立 API Key') }}
-          </label>
-          <PInput
-            v-model="editorForm.apiKey"
-            type="password"
-            :placeholder="__t('ui.settings', 'API Key（留空清除）')"
-          />
-        </div>
-        <!-- 模型 ID + 获取列表 -->
-        <div class="flex flex-col gap-1.5">
-          <label
-            class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel flex items-center justify-between"
+          <div class="flex flex-col gap-1.5">
+            <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
+              {{ __t('ui.settings', '服务商连接') }}
+            </label>
+            <BrandSelect
+              :model-value="editorForm.providerConnectionId || ''"
+              :options="editorConnectionChoices"
+              fallback="provider"
+              :placeholder="__t('ui.settings', '选择服务商连接')"
+              @change="(v: string | number) => handleConnectionChange(String(v))"
+            />
+            <div class="flex items-center justify-between gap-2">
+              <PButton size="sm" variant="ghost" @click="isGlobalOpen = true">
+                {{ __t('ui.settings', '管理服务商连接') }}
+              </PButton>
+            </div>
+          </div>
+          <div v-if="!editorForm.providerConnectionId" class="flex flex-col gap-1.5">
+            <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
+              {{ __t('ui.settings', '品牌模板') }}
+            </label>
+            <PSelect
+              :model-value="editorForm.provider"
+              :options="providerOptions"
+              @change="(value: string | number) => handleProviderChange(String(value))"
+            />
+          </div>
+          <div v-if="selectedConnection" class="connection-summary">
+            <div class="connection-summary__header">
+              <span class="connection-summary__brand">
+                <BrandIcon :brand="connectionSummaryBrand" size="md" fallback="provider" />
+              </span>
+              <div class="connection-summary__identity">
+                <strong :title="selectedConnection.name">{{ selectedConnection.name }}</strong>
+                <span>{{ connectionProtocolLabel }}</span>
+              </div>
+              <span
+                class="connection-summary__auth"
+                :class="{
+                  'is-ready': connectionAuthStatus.ready,
+                  'is-missing': connectionAuthStatus.missing,
+                }"
+              >
+                <PixelIcon :name="connectionAuthStatus.icon" size="xs" aria-hidden="true" />
+                {{ connectionAuthStatus.label }}
+              </span>
+            </div>
+            <div class="connection-summary__endpoint">
+              <PixelIcon name="link" size="xs" aria-hidden="true" />
+              <code>{{ connectionApiBase || __t('ui.settings', '未设置地址') }}</code>
+            </div>
+            <div class="connection-summary__override">
+              <span>{{ __t('ui.settings', '自定义此模型的连接') }}</span>
+              <PSwitch
+                size="sm"
+                :aria-label="__t('ui.settings', '自定义此模型的连接')"
+                :model-value="editorForm.connectionOverride"
+                @update:model-value="setConnectionOverride"
+              />
+            </div>
+          </div>
+          <div
+            v-if="editorForm.connectionOverride || !editorForm.providerConnectionId"
+            class="flex flex-col gap-1.5"
           >
-            <span class="model-id-label">
-              <BrandIcon :brand="resolveModelBrand(editorForm.modelId)" size="xs" />
-              {{ __t('ui.settings', '模型 ID') }}
-            </span>
-            <PButton
-              variant="ghost"
-              size="sm"
-              :loading="isFetchingRemote"
-              @click="fetchRemoteModels"
+            <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
+              {{ __t('ui.settings', '协议格式') }}
+            </label>
+            <PSelect v-model="editorForm.connectionProtocol" :options="customProviderTypeOptions" />
+            <p class="text-[10px] text-slate-400">{{ __t('ui.settings', '按服务商文档选择。') }}</p>
+          </div>
+          <div
+            v-if="editorForm.connectionOverride || !editorForm.providerConnectionId"
+            class="flex flex-col gap-1.5"
+          >
+            <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
+              {{ __t('ui.settings', '独立 API 地址') }}
+            </label>
+            <PInput v-model="editorForm.apiBase" placeholder="https://api.example.com/v1" />
+          </div>
+          <div
+            v-if="editorForm.connectionOverride || !editorForm.providerConnectionId"
+            class="flex flex-col gap-1.5"
+          >
+            <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
+              {{ __t('ui.settings', '认证方式') }}
+            </label>
+            <PSelect
+              v-model="editorForm.connectionAuthMode"
+              :options="[
+                { value: 'api_key', label: 'API Key' },
+                { value: 'none', label: __t('ui.settings', '无需认证') },
+              ]"
+            />
+          </div>
+          <div
+            v-if="
+              (editorForm.connectionOverride || !editorForm.providerConnectionId) &&
+              editorForm.connectionAuthMode !== 'none'
+            "
+            class="flex flex-col gap-1.5"
+          >
+            <label class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel">
+              {{ __t('ui.settings', '独立 API Key') }}
+            </label>
+            <PInput
+              v-model="editorForm.apiKey"
+              type="password"
+              :placeholder="__t('ui.settings', 'API Key（留空清除）')"
+            />
+          </div>
+          <!-- 模型 ID + 获取列表 -->
+          <div class="flex flex-col gap-1.5">
+            <label
+              class="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-pixel flex items-center justify-between"
             >
-              <PixelIcon name="refresh" size="xs" />
-              {{ __t('ui.settings', '获取模型列表') }}
-            </PButton>
-          </label>
-          <BrandSelect
-            v-if="remoteModels.length > 0"
-            v-model="editorForm.modelId"
-            :options="remoteModelChoices"
-            :placeholder="__t('ui.settings', '从列表中选择...')"
-          />
-          <PInput
-            v-model="editorForm.modelId"
-            :placeholder="__t('ui.settings', '模型 ID，如 gpt-4o')"
-          />
-        </div>
-        <!-- 请求参数：每项先决定是否传参，再显示匹配的编辑控件。 -->
-        <div class="model-params flex flex-col gap-3 rounded border-2 p-3">
-          <div class="flex items-center justify-between border-b border-slate-200 pb-2">
-            <div>
-              <h4 class="text-[11px] font-bold text-slate-700 font-pixel">
-                {{ __t('ui.settings', '请求参数') }}
-              </h4>
-              <p class="mt-0.5 text-[10px] text-slate-400">
-                {{ __t('ui.settings', '关闭的参数使用服务商默认值。') }}
+              <span class="model-id-label">
+                <BrandIcon :brand="resolveModelBrand(editorForm.modelId)" size="xs" />
+                {{ __t('ui.settings', '模型 ID') }}
+              </span>
+              <PButton
+                variant="ghost"
+                size="sm"
+                :loading="isFetchingRemote"
+                @click="fetchRemoteModels"
+              >
+                <PixelIcon name="refresh" size="xs" />
+                {{ __t('ui.settings', '获取模型列表') }}
+              </PButton>
+            </label>
+            <BrandSelect
+              v-if="remoteModels.length > 0"
+              v-model="editorForm.modelId"
+              :options="remoteModelChoices"
+              :placeholder="__t('ui.settings', '从列表中选择...')"
+            />
+            <PInput
+              v-model="editorForm.modelId"
+              :placeholder="__t('ui.settings', '模型 ID，如 gpt-4o')"
+              :aria-invalid="!!editorErrors.modelId"
+            />
+          </div>
+          <!-- 请求参数：每项先决定是否传参，再显示匹配的编辑控件。 -->
+          <div class="model-params flex flex-col gap-3 rounded border-2 p-3">
+            <div class="flex items-center justify-between border-b border-slate-200 pb-2">
+              <div>
+                <h4 class="text-[11px] font-bold text-slate-700 font-pixel">
+                  {{ __t('ui.settings', '请求参数') }}
+                </h4>
+                <p class="mt-0.5 text-[10px] text-slate-400">
+                  {{ __t('ui.settings', '关闭的参数使用服务商默认值。') }}
+                </p>
+              </div>
+              <span class="text-[9px] text-slate-400 font-mono">OPTIONAL</span>
+            </div>
+
+            <div class="model-param-row">
+              <div class="model-param-heading">
+                <span class="text-xs font-bold text-slate-700">
+                  {{ __t('ui.settings', '流式输出') }}
+                </span>
+                <span class="text-[10px] text-slate-400">
+                  {{ __t('ui.settings', '逐字显示回复') }}
+                </span>
+              </div>
+              <span class="text-[9px] text-slate-400 font-mono">STREAM</span>
+              <div class="model-param-control flex justify-end">
+                <PSwitch v-model="editorForm.stream" />
+              </div>
+            </div>
+
+            <div v-if="editorProtocol === 'openai'" class="model-param-row">
+              <div class="model-param-heading">
+                <span class="text-xs font-bold text-slate-700">Wire API</span>
+                <span class="text-[10px] text-slate-400">
+                  {{ __t('ui.settings', '按服务商支持的接口选择') }}
+                </span>
+              </div>
+              <span class="text-[9px] text-slate-400 font-mono">ENDPOINT</span>
+              <div class="model-param-control">
+                <PSelect v-model="editorForm.wireApi" :options="wireApiOptions" />
+              </div>
+            </div>
+
+            <div
+              v-if="editorProtocol === 'openai' && editorForm.wireApi === 'chat_completions'"
+              class="model-param-row"
+            >
+              <div class="model-param-heading">
+                <span class="text-xs font-bold text-slate-700">
+                  {{ __t('ui.settings', '思考兼容模式') }}
+                </span>
+                <span class="text-[10px] text-slate-400">
+                  {{ __t('ui.settings', '通常选择自动') }}
+                </span>
+              </div>
+              <span class="text-[9px] text-slate-400 font-mono">DIALECT</span>
+              <div class="model-param-control">
+                <PSelect v-model="editorForm.reasoningDialect" :options="reasoningDialectOptions" />
+              </div>
+            </div>
+
+            <div class="model-param-row">
+              <div class="model-param-heading">
+                <span class="text-xs font-bold text-slate-700">
+                  {{ __t('ui.settings', '显示原生思考') }}
+                </span>
+                <span class="text-[10px] text-slate-400">
+                  {{ __t('ui.settings', '显示模型提供的思考摘要') }}
+                </span>
+              </div>
+              <span class="text-[9px] text-slate-400 font-mono">NATIVE</span>
+              <div class="model-param-control flex justify-end">
+                <PSwitch v-model="editorForm.returnNativeReasoning" />
+              </div>
+            </div>
+
+            <div class="model-param-row">
+              <div class="model-param-heading">
+                <span class="text-xs font-bold text-slate-700">
+                  {{ __t('ui.settings', '思考等级') }}
+                </span>
+                <span class="text-[10px] text-slate-400">
+                  {{
+                    legacyGeminiEffort
+                      ? __t('ui.settings', '旧档位 {0} 按 {1} 发送', [
+                          legacyGeminiEffort,
+                          reasoningEffortValue,
+                        ])
+                      : geminiThinkingLevels
+                        ? __t('ui.settings', '此模型不支持关闭思考')
+                        : __t('ui.settings', '模型的思考强度')
+                  }}
+                </span>
+              </div>
+              <span class="text-[9px] text-slate-400 font-mono">REASONING</span>
+              <div class="model-param-control">
+                <PSelect v-model="reasoningEffortValue" :options="reasoningEffortOptions" />
+              </div>
+            </div>
+
+            <div class="model-param-row">
+              <div class="model-param-heading">
+                <span class="text-xs font-bold text-slate-700">
+                  {{ __t('ui.settings', '温度 Temperature') }}
+                </span>
+                <span class="text-[10px] text-slate-400">
+                  {{ __t('ui.settings', '控制回复随机性，范围 0–2') }}
+                </span>
+              </div>
+              <PSwitch v-model="sendTemperature" />
+              <div v-if="sendTemperature" class="model-param-control">
+                <PSlider v-model="temperatureValue" :min="0" :max="2" :step="0.1" show-input />
+              </div>
+              <span v-else class="model-param-off">{{ __t('ui.settings', '不传') }}</span>
+            </div>
+
+            <div class="model-param-row">
+              <div class="model-param-heading">
+                <span class="text-xs font-bold text-slate-700">Top P</span>
+                <span class="text-[10px] text-slate-400">
+                  {{ __t('ui.settings', '核采样概率阈值，范围 0–1') }}
+                </span>
+              </div>
+              <PSwitch v-model="sendTopP" />
+              <div v-if="sendTopP" class="model-param-control">
+                <PSlider v-model="topPValue" :min="0" :max="1" :step="0.05" show-input />
+              </div>
+              <span v-else class="model-param-off">{{ __t('ui.settings', '不传') }}</span>
+            </div>
+
+            <div class="model-param-row">
+              <div class="model-param-heading">
+                <span class="text-xs font-bold text-slate-700">
+                  {{ __t('ui.settings', '上下文窗口 Token') }}
+                </span>
+                <span class="text-[10px] text-slate-400">
+                  {{ __t('ui.settings', '填写模型支持的上下文长度') }}
+                </span>
+              </div>
+              <span class="text-[9px] text-slate-400 font-mono">CONTEXT</span>
+              <div class="model-param-control">
+                <PInputNumber
+                  v-model="editorForm.contextWindowTokens"
+                  :min="1"
+                  :max="2000000"
+                  :step="1024"
+                />
+              </div>
+            </div>
+
+            <div class="model-param-row">
+              <div class="model-param-heading">
+                <span class="text-xs font-bold text-slate-700">
+                  {{ __t('ui.settings', '最大轮次') }}
+                </span>
+                <span class="text-[10px] text-slate-400">
+                  {{ __t('ui.settings', '桌面对话，留空使用默认值') }}
+                </span>
+              </div>
+              <span class="text-[9px] text-slate-400 font-mono">ReAct</span>
+              <div class="model-param-control">
+                <PInputNumber
+                  v-model="editorForm.maxReActTurns"
+                  :min="1"
+                  :max="Number.MAX_SAFE_INTEGER"
+                  :step="1"
+                  :placeholder="String(DEFAULT_DESKTOP_REACT_MAX_TURNS)"
+                />
+              </div>
+            </div>
+
+            <div class="model-param-row">
+              <div class="model-param-heading">
+                <span class="text-xs font-bold text-slate-700">
+                  {{ __t('ui.settings', '最大输出 Token') }}
+                </span>
+                <span class="text-[10px] text-slate-400">
+                  {{ __t('ui.settings', '单次回复的长度上限') }}
+                </span>
+              </div>
+              <PSwitch v-model="sendMaxTokens" />
+              <div v-if="sendMaxTokens" class="model-param-control">
+                <PInputNumber v-model="editorForm.maxTokens" :min="1" :max="2000000" :step="256" />
+              </div>
+              <span v-else class="model-param-off">{{ __t('ui.settings', '不传') }}</span>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3 pt-1">
+            <div class="capability-editor rounded border p-3">
+              <PCheckbox
+                v-model="editorForm.enableVision"
+                :label="__t('ui.settings', '图片视觉 (Vision)')"
+              />
+              <p class="mt-1 text-[10px] leading-relaxed text-slate-400">
+                {{ __t('ui.settings', '支持识图') }}
               </p>
             </div>
-            <span class="text-[9px] text-slate-400 font-mono">OPTIONAL</span>
-          </div>
-
-          <div class="model-param-row">
-            <div class="model-param-heading">
-              <span class="text-xs font-bold text-slate-700">
-                {{ __t('ui.settings', '流式输出') }}
-              </span>
-              <span class="text-[10px] text-slate-400">
-                {{ __t('ui.settings', '逐字显示回复') }}
-              </span>
-            </div>
-            <span class="text-[9px] text-slate-400 font-mono">STREAM</span>
-            <div class="model-param-control flex justify-end">
-              <PSwitch v-model="editorForm.stream" />
-            </div>
-          </div>
-
-          <div v-if="editorProtocol === 'openai'" class="model-param-row">
-            <div class="model-param-heading">
-              <span class="text-xs font-bold text-slate-700">Wire API</span>
-              <span class="text-[10px] text-slate-400">
-                {{ __t('ui.settings', '按服务商支持的接口选择') }}
-              </span>
-            </div>
-            <span class="text-[9px] text-slate-400 font-mono">ENDPOINT</span>
-            <div class="model-param-control">
-              <PSelect v-model="editorForm.wireApi" :options="wireApiOptions" />
-            </div>
-          </div>
-
-          <div
-            v-if="editorProtocol === 'openai' && editorForm.wireApi === 'chat_completions'"
-            class="model-param-row"
-          >
-            <div class="model-param-heading">
-              <span class="text-xs font-bold text-slate-700">
-                {{ __t('ui.settings', '思考兼容模式') }}
-              </span>
-              <span class="text-[10px] text-slate-400">
-                {{ __t('ui.settings', '通常选择自动') }}
-              </span>
-            </div>
-            <span class="text-[9px] text-slate-400 font-mono">DIALECT</span>
-            <div class="model-param-control">
-              <PSelect v-model="editorForm.reasoningDialect" :options="reasoningDialectOptions" />
-            </div>
-          </div>
-
-          <div class="model-param-row">
-            <div class="model-param-heading">
-              <span class="text-xs font-bold text-slate-700">
-                {{ __t('ui.settings', '显示原生思考') }}
-              </span>
-              <span class="text-[10px] text-slate-400">
-                {{ __t('ui.settings', '显示模型提供的思考摘要') }}
-              </span>
-            </div>
-            <span class="text-[9px] text-slate-400 font-mono">NATIVE</span>
-            <div class="model-param-control flex justify-end">
-              <PSwitch v-model="editorForm.returnNativeReasoning" />
-            </div>
-          </div>
-
-          <div class="model-param-row">
-            <div class="model-param-heading">
-              <span class="text-xs font-bold text-slate-700">
-                {{ __t('ui.settings', '思考等级') }}
-              </span>
-              <span class="text-[10px] text-slate-400">
-                {{
-                  legacyGeminiEffort
-                    ? __t('ui.settings', '旧档位 {0} 按 {1} 发送', [
-                        legacyGeminiEffort,
-                        reasoningEffortValue,
-                      ])
-                    : geminiThinkingLevels
-                      ? __t('ui.settings', '此模型不支持关闭思考')
-                      : __t('ui.settings', '模型的思考强度')
-                }}
-              </span>
-            </div>
-            <span class="text-[9px] text-slate-400 font-mono">REASONING</span>
-            <div class="model-param-control">
-              <PSelect v-model="reasoningEffortValue" :options="reasoningEffortOptions" />
-            </div>
-          </div>
-
-          <div class="model-param-row">
-            <div class="model-param-heading">
-              <span class="text-xs font-bold text-slate-700">
-                {{ __t('ui.settings', '温度 Temperature') }}
-              </span>
-              <span class="text-[10px] text-slate-400">
-                {{ __t('ui.settings', '控制回复随机性，范围 0–2') }}
-              </span>
-            </div>
-            <PSwitch v-model="sendTemperature" />
-            <div v-if="sendTemperature" class="model-param-control">
-              <PSlider v-model="temperatureValue" :min="0" :max="2" :step="0.1" show-input />
-            </div>
-            <span v-else class="model-param-off">{{ __t('ui.settings', '不传') }}</span>
-          </div>
-
-          <div class="model-param-row">
-            <div class="model-param-heading">
-              <span class="text-xs font-bold text-slate-700">Top P</span>
-              <span class="text-[10px] text-slate-400">
-                {{ __t('ui.settings', '核采样概率阈值，范围 0–1') }}
-              </span>
-            </div>
-            <PSwitch v-model="sendTopP" />
-            <div v-if="sendTopP" class="model-param-control">
-              <PSlider v-model="topPValue" :min="0" :max="1" :step="0.05" show-input />
-            </div>
-            <span v-else class="model-param-off">{{ __t('ui.settings', '不传') }}</span>
-          </div>
-
-          <div class="model-param-row">
-            <div class="model-param-heading">
-              <span class="text-xs font-bold text-slate-700">
-                {{ __t('ui.settings', '上下文窗口 Token') }}
-              </span>
-              <span class="text-[10px] text-slate-400">
-                {{ __t('ui.settings', '填写模型支持的上下文长度') }}
-              </span>
-            </div>
-            <span class="text-[9px] text-slate-400 font-mono">CONTEXT</span>
-            <div class="model-param-control">
-              <PInputNumber
-                v-model="editorForm.contextWindowTokens"
-                :min="1"
-                :max="2000000"
-                :step="1024"
+            <div class="capability-editor rounded border p-3">
+              <PCheckbox
+                v-model="editorForm.enableAudioInput"
+                :label="__t('ui.settings', '音频输入 (Audio)')"
               />
+              <p class="mt-1 text-[10px] leading-relaxed text-slate-400">
+                {{ __t('ui.settings', '支持音频') }}
+              </p>
             </div>
           </div>
-
-          <div class="model-param-row">
-            <div class="model-param-heading">
-              <span class="text-xs font-bold text-slate-700">
-                {{ __t('ui.settings', '最大轮次') }}
-              </span>
-              <span class="text-[10px] text-slate-400">
-                {{ __t('ui.settings', '桌面对话，留空使用默认值') }}
-              </span>
-            </div>
-            <span class="text-[9px] text-slate-400 font-mono">ReAct</span>
-            <div class="model-param-control">
-              <PInputNumber
-                v-model="editorForm.maxReActTurns"
-                :min="1"
-                :max="Number.MAX_SAFE_INTEGER"
-                :step="1"
-                :placeholder="String(DEFAULT_DESKTOP_REACT_MAX_TURNS)"
-              />
-            </div>
-          </div>
-
-          <div class="model-param-row">
-            <div class="model-param-heading">
-              <span class="text-xs font-bold text-slate-700">
-                {{ __t('ui.settings', '最大输出 Token') }}
-              </span>
-              <span class="text-[10px] text-slate-400">
-                {{ __t('ui.settings', '单次回复的长度上限') }}
-              </span>
-            </div>
-            <PSwitch v-model="sendMaxTokens" />
-            <div v-if="sendMaxTokens" class="model-param-control">
-              <PInputNumber v-model="editorForm.maxTokens" :min="1" :max="2000000" :step="256" />
-            </div>
-            <span v-else class="model-param-off">{{ __t('ui.settings', '不传') }}</span>
-          </div>
-        </div>
-
-        <div class="grid grid-cols-2 gap-3 pt-1">
-          <div class="capability-editor rounded border p-3">
-            <PCheckbox
-              v-model="editorForm.enableVision"
-              :label="__t('ui.settings', '图片视觉 (Vision)')"
-            />
-            <p class="mt-1 text-[10px] leading-relaxed text-slate-400">
-              {{ __t('ui.settings', '支持识图') }}
-            </p>
-          </div>
-          <div class="capability-editor rounded border p-3">
-            <PCheckbox
-              v-model="editorForm.enableAudioInput"
-              :label="__t('ui.settings', '音频输入 (Audio)')"
-            />
-            <p class="mt-1 text-[10px] leading-relaxed text-slate-400">
-              {{ __t('ui.settings', '支持音频') }}
-            </p>
-          </div>
-        </div>
+        </fieldset>
       </div>
       <template #footer>
-        <PButton variant="ghost" @click="isEditorOpen = false">
+        <PButton
+          variant="ghost"
+          :disabled="isSavingModel || isReadingConnection"
+          @click="isEditorOpen = false"
+        >
           {{ __t('ui.settings', '取消') }}
         </PButton>
-        <PButton variant="primary" @click="saveModel">
+        <PButton
+          variant="primary"
+          :loading="isSavingModel"
+          :disabled="isReadingConnection"
+          @click="saveModel"
+        >
           {{ editingModel ? __t('ui.settings', '保存') : __t('ui.settings', '添加') }}
         </PButton>
       </template>
@@ -1421,6 +1494,42 @@ function connectionName(model: LlmModel) {
 </template>
 
 <style scoped>
+.model-editor-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.model-editor-fields[disabled] {
+  pointer-events: none;
+  opacity: 0.75;
+}
+.model-editor-fields :deep(input[aria-invalid='true']) {
+  border-color: var(--ui-danger);
+}
+.model-editor-errors {
+  padding: 12px;
+  border: 1px solid var(--ui-danger);
+  border-radius: 6px;
+  color: var(--ui-danger);
+  background: var(--ui-danger-soft);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.model-editor-errors strong {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.model-editor-errors ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  list-style: disc;
+}
 .model-connection-picker {
   display: flex;
   flex-direction: column;

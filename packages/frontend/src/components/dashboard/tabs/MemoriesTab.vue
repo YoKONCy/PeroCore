@@ -23,6 +23,8 @@ import MemoryInspector from '../memories/MemoryInspector.vue'
 import MemoryGraphView from '../memories/MemoryGraphView.vue'
 import PrivacyCleanupPanel from '../PrivacyCleanupPanel.vue'
 import RagConfigPage from '../memories/RagConfigPage.vue'
+import ArchiveEntryEditor from '../memories/ArchiveEntryEditor.vue'
+import type { ArchiveEditSaved, ArchiveEditTarget } from '../../../lib/archiveEntryEdit'
 
 const ctx = useDashboardContext()
 const {
@@ -56,6 +58,23 @@ const deleting = ref(false)
 const checkedIds = ref<string[]>([])
 const batchAction = ref<'archive' | 'restore' | 'delete' | null>(null)
 const batchSaving = ref(false)
+const editTarget = ref<ArchiveEditTarget | null>(null)
+
+async function onEntryEdited(result: ArchiveEditSaved): Promise<void> {
+  const old = editTarget.value
+  const selectedBeforeSave = old?.kind === 'memory' && archive.selectedId.value === old.note.id
+  editTarget.value = null
+  notif.toast(__t('ui.archive-edit', '修改已保存，旧版本已保留。'), 'success')
+  await loadArchive()
+  if (view.value === 'graph') await loadGraph()
+  else archive.graph.value = { nodes: [], edges: [], truncated: false }
+  if (
+    result.kind === 'memory' &&
+    selectedBeforeSave &&
+    archive.selectedId.value === (old?.kind === 'memory' ? old.note.id : null)
+  )
+    await archive.selectNote(result.note)
+}
 
 const archive = useMemoryArchive(
   () => ctx.activeAgentId.value || 'pero',
@@ -491,11 +510,18 @@ const statBadges = computed(() => [
             @archive="archiveTarget = $event"
             @restore="restoreNote"
             @delete="openDelete"
+            @edit="editTarget = { kind: 'memory', note: $event }"
             @select="onSelectNote"
           />
         </aside>
       </div>
 
+      <ArchiveEntryEditor
+        v-if="editTarget"
+        :target="editTarget"
+        @close="editTarget = null"
+        @saved="onEntryEdited"
+      />
       <PDialog
         :model-value="Boolean(archiveTarget)"
         :title="__t('ui.settings', '归档这条记忆？')"

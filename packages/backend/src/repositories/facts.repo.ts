@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import { eq, inArray, sql } from 'drizzle-orm'
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 import type { TransactionOperation } from 'triviumdb'
 import type { FactObjectCandidate, FactQueryPath, FactQueryResult, FactRecord } from '@infos/shared'
+import type { FactManualEditInput } from '@infos/shared'
 import type { DrizzleDb } from '../database'
 import { factMemoryOperations, factObjects, factRecords } from '../database/schema'
 import type { MemoryStoreRegistry } from './storeRegistry'
@@ -34,6 +35,7 @@ interface FactSupersedeOperationPayload {
   oldTdbId: number
   replacement: FactRecord
   replacementTdbId: number
+  manualEdit?: { actor: 'user'; previousId: string; editedAt: string }
 }
 
 interface FactDeleteOperationPayload {
@@ -54,6 +56,7 @@ type FactOperationPayload =
 type FactOperationKind = 'write' | 'supersede' | 'delete' | 'retract' | 'alias'
 
 export class FactsRepository {
+  private manualEdits = new Map<string, Promise<FactRecord>>()
   private privacy?: PrivacyPolicy
   private purge?: (id: string) => Promise<void>
   setPrivacyPolicy(policy: PrivacyPolicy, purge: (id: string) => Promise<void>): void {
@@ -293,10 +296,50 @@ export class FactsRepository {
     return record
   }
 
+  /** 人工纠错保留原始记录者和观察时间，修改者单独写入事务审计。 */
+  editFact(id: string, input: FactManualEditInput): Promise<FactRecord> {
+    const key = `${id}:${input.operationId}`
+    const running = this.manualEdits.get(key)
+    if (running) return running
+    const pending = this.editFactOnce(id, input).finally(() => this.manualEdits.delete(key))
+    this.manualEdits.set(key, pending)
+    return pending
+  }
+
+  private async editFactOnce(id: string, input: FactManualEditInput): Promise<FactRecord> {
+    const existing = await this.findOperation(input.operationId)
+    if (existing) {
+      const payload = existing.payload as FactSupersedeOperationPayload
+      if (existing.operation !== 'supersede' || !payload.manualEdit || payload.oldRecord.id !== id)
+        throw new Error('ARCHIVE_EDIT_CONFLICT')
+      const latest = await this.factRow(payload.replacement.id)
+      if (!latest || latest.status !== 'active') throw new Error('ARCHIVE_EDIT_CONFLICT')
+      if (existing.status !== 'committed')
+        await this.applyOperation(input.operationId, existing.operation, payload)
+      return payload.replacement
+    }
+    const row = await this.factRow(id)
+    if (!row || row.status !== 'active') throw new Error('ARCHIVE_EDIT_CONFLICT')
+    return this.supersede(row.objectId, id, {
+      statement: input.statement,
+      source: input.source?.trim() || undefined,
+      confidence: input.confidence,
+      observedAt: row.observedAt,
+      createdByAgentId: row.createdByAgentId,
+      operationId: input.operationId,
+      manualEdit: { actor: 'user', previousId: id, editedAt: new Date().toISOString() },
+    })
+  }
+
   async supersede(
     objectId: string,
     oldFactId: string,
-    input: Omit<Parameters<FactsRepository['write']>[0], 'objectId' | 'standardName' | 'aliases'>,
+    input: Omit<
+      Parameters<FactsRepository['write']>[0],
+      'objectId' | 'standardName' | 'aliases'
+    > & {
+      manualEdit?: FactSupersedeOperationPayload['manualEdit']
+    },
   ): Promise<FactRecord> {
     const generation = this.privacy?.generation
     const operationId = input.operationId ?? randomUUID()
@@ -310,7 +353,7 @@ export class FactsRepository {
     const object = await this.findObject(objectId)
     const oldRow = await this.factRow(oldFactId)
     if (!object || !oldRow || oldRow.objectId !== objectId || oldRow.status !== 'active') {
-      throw new Error('旧事实不存在、对象不匹配或已被取代')
+      throw new Error('ARCHIVE_EDIT_CONFLICT')
     }
     const replacement: FactRecord = {
       id: randomUUID(),
@@ -334,6 +377,7 @@ export class FactsRepository {
       oldTdbId: oldRow.tdbId,
       replacement,
       replacementTdbId,
+      manualEdit: input.manualEdit,
     }
     this.privacy?.assertPayload('fact', payload)
     if (generation !== this.privacy?.generation) throw new Error('事实数据已变化，已阻止旧任务写入')
@@ -351,10 +395,18 @@ export class FactsRepository {
       tx.insert(factRecords)
         .values({ ...replacement, tdbId: replacementTdbId })
         .run()
-      tx.update(factRecords)
+      const changed = tx
+        .update(factRecords)
         .set({ status: 'superseded', supersededBy: replacement.id })
-        .where(eq(factRecords.id, oldFactId))
+        .where(
+          and(
+            eq(factRecords.id, oldFactId),
+            eq(factRecords.status, 'active'),
+            isNull(factRecords.supersededBy),
+          ),
+        )
         .run()
+      if (changed.changes !== 1) throw new Error('ARCHIVE_EDIT_CONFLICT')
     })
     await this.applyOperation(operationId, 'supersede', payload)
     return replacement
@@ -574,7 +626,26 @@ export class FactsRepository {
       const store = this.stores.getSharedStore('facts')
       if (operation === 'write') this.applyWrite(store, payload as FactWriteOperationPayload)
       else if (operation === 'supersede') {
-        this.applySupersede(store, payload as FactSupersedeOperationPayload)
+        const revision = payload as FactSupersedeOperationPayload
+        // 当前状态读取和图写入之间不让出执行权，防止并发取代插入旧状态。
+        const latest = this.db
+          .select()
+          .from(factRecords)
+          .where(eq(factRecords.id, revision.replacement.id))
+          .get()
+        const old = this.db
+          .select()
+          .from(factRecords)
+          .where(eq(factRecords.id, revision.oldRecord.id))
+          .get()
+        this.privacy?.assertPayload('fact', payload)
+        // 用数据库的当前状态补齐历史边，不能因重放复活已经取代或撤回的版本。
+        if (latest && old)
+          this.applySupersede(store, {
+            ...revision,
+            oldRecord: this.toFact(old, revision.object.standardName),
+            replacement: this.toFact(latest, revision.object.standardName),
+          })
       } else if (operation === 'delete') {
         const deletion = payload as FactDeleteOperationPayload
         if (store.contains(deletion.factTdbId)) store.delete(deletion.factTdbId)
@@ -700,19 +771,21 @@ export class FactsRepository {
           weight: 1,
         },
       ])
-      store.indexText(payload.replacementTdbId, payload.replacement.statement)
     }
+    store.indexText(payload.replacementTdbId, payload.replacement.statement)
+    store.updatePayload(payload.replacementTdbId, {
+      ...payload.replacement,
+      kind: 'fact',
+    } satisfies FactPayload)
     if (store.contains(payload.oldTdbId)) {
       store.updatePayload(payload.oldTdbId, {
         ...payload.oldRecord,
         kind: 'fact',
-        status: 'superseded',
       } satisfies FactPayload)
     } else {
       store.insertWithId(payload.oldTdbId, this.zeroVector(), {
         ...payload.oldRecord,
         kind: 'fact',
-        status: 'superseded',
       } satisfies FactPayload)
     }
     store.upsertEdge(payload.oldTdbId, payload.replacementTdbId, 'superseded_by', 1)
@@ -795,6 +868,7 @@ export class FactsRepository {
   private async findOperation(operationId: string): Promise<
     | {
         operation: FactOperationKind
+        status: string
         payload: FactOperationPayload
       }
     | undefined
@@ -807,6 +881,7 @@ export class FactsRepository {
     return row
       ? {
           operation: row.operation as FactOperationKind,
+          status: row.status,
           payload: JSON.parse(row.payloadJson) as FactOperationPayload,
         }
       : undefined

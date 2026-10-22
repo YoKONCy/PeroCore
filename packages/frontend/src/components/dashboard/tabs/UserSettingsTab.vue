@@ -27,6 +27,7 @@ import { logger } from '../../../lib/logger'
 import { useNotificationStore } from '../../../stores'
 import { appLocale, applyLanguage } from '../../../i18n'
 import { LANGUAGE_OPTIONS, normalizeLocale } from '@infos/shared/i18n'
+import { resolveSavedMotionLevel } from '../../../lib/sensorySettings'
 
 const ctx = useDashboardContext()
 const notif = useNotificationStore()
@@ -171,13 +172,8 @@ async function loadSettings() {
     if (d['owner.persona']) ownerPersona.value = d['owner.persona'] as string
     if (d['user.language']) language.value = normalizeLocale(d['user.language'])
     if (d['ui.fontSize']) fontSize.value = Number(d['ui.fontSize'])
-    const savedMotion = d['ui.motionLevel']
-    if (savedMotion === 'full' || savedMotion === 'reduced' || savedMotion === 'off') {
-      sensory.motionLevel.value = savedMotion
-    } else if (d['ui.animations'] !== undefined) {
-      sensory.motionLevel.value = d['ui.animations'] === 'true' ? 'full' : 'off'
-    }
-    if (d['ui.soundEffects'] !== undefined)
+    sensory.motionLevel.value = resolveSavedMotionLevel(d['ui.motionLevel'], d['ui.animations'])
+    if (d['ui.soundEffects'] === 'true' || d['ui.soundEffects'] === 'false')
       sensory.soundEffects.value = d['ui.soundEffects'] === 'true'
     if (d['system.dataDir']) dataDir.value = d['system.dataDir'] as string
     if (d['system.logLevel']) logLevel.value = d['system.logLevel'] as string
