@@ -9,12 +9,12 @@
   "dependencies": {
     "@infos/backend": "workspace:*",
     "@infos/shared": "workspace:*",
-    "drizzle-orm": "^0.44.0",
-    "hono": "^4.7.0",
+    "drizzle-orm": "^0.45.4",
+    "hono": "^4.13.13",
     "omggif": "1.0.10",
     "pngjs": "7.0.0",
     "triviumdb": "0.8.9",
-    "uuid": "^14.0.0"
+    "uuid": "^14.0.3"
   },
   "devDependencies": {
     "@types/omggif": "^1.0.5",
